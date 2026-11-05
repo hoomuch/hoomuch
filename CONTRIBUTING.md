@@ -123,7 +123,9 @@ These keep the product what it is. Pull requests that break them will be asked t
   Zero-decimal currencies (JPY, KRW, …) must come out right.
 - **Forms work before hydration, scripts stay same-origin.** Pages are React, rendered on the server and
   hydrated in the browser, but every action is a plain POST form (Post/Redirect/Get). No inline
-  `<script>` (the CSP is `script-src 'self'`; the page payload is a JSON data block). Inline styles are
+  `<script>` (the CSP is `script-src 'self'`; the page payload is a JSON data block). The only
+  third-party script is Cloudflare Turnstile, and only when an instance turns it on: then
+  `/login` and `/signup` alone allow `challenges.cloudflare.com`, and need JavaScript. Inline styles are
   allowed for Base UI, Recharts and Motion; for colours of your own, use Tailwind classes.
 - **Render the same thing on the server and in the browser.** No `Date.now()`, `Math.random()` or
   `window` checks while rendering; use `useNow()` (views/page-root.tsx) for the request's clock, and

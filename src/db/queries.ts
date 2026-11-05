@@ -173,9 +173,26 @@ export async function deleteExpiredSessions(db: D1Database, now: number): Promis
   await db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now).run();
 }
 
-/** Throttle rows whose window has closed carry no information; the cron drops them. */
-export async function deleteStaleLoginAttempts(db: D1Database, windowStartBefore: number): Promise<void> {
-  await db.prepare('DELETE FROM login_attempts WHERE window_start < ?').bind(windowStartBefore).run();
+/**
+ * Throttle rows whose window has closed carry no information; the cron drops them. Keys starting
+ * with `dailyPrefix` count over a day, every other key over the short window.
+ */
+export async function deleteStaleLoginAttempts(
+  db: D1Database,
+  now: number,
+  windows: { shortMs: number; dailyMs: number; dailyPrefix: string },
+): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM login_attempts
+        WHERE (substr(key, 1, ?) = ? AND window_start < ?)
+           OR (substr(key, 1, ?) != ? AND window_start < ?)`,
+    )
+    .bind(
+      windows.dailyPrefix.length, windows.dailyPrefix, now - windows.dailyMs,
+      windows.dailyPrefix.length, windows.dailyPrefix, now - windows.shortMs,
+    )
+    .run();
 }
 
 // ---------- connections ----------

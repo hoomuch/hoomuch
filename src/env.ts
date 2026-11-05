@@ -14,6 +14,16 @@ export interface Bindings {
   ALLOW_SIGNUP: string;
   /** Minimum minutes between automatic syncs of one connection. */
   SYNC_INTERVAL_MINUTES: string;
+  /**
+   * Rate Limiting bindings (`ratelimits` in wrangler.jsonc): every request, and log-in / sign-up
+   * submissions, per network. Optional: without them only the D1 throttles apply.
+   */
+  RL_REQUESTS?: RateLimit;
+  RL_AUTH?: RateLimit;
+  /** Public Turnstile site key. With TURNSTILE_SECRET_KEY set too, log in and sign up require it. */
+  TURNSTILE_SITE_KEY?: string;
+  /** Secret. Turnstile secret key for Siteverify. */
+  TURNSTILE_SECRET_KEY?: string;
 }
 
 export interface SessionUser {

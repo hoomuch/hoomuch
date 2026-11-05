@@ -10,7 +10,8 @@ hoomuch only ever reads, and asks for read-only keys wherever the provider offer
 - UI: [coss ui](https://coss.com/ui) on Base UI, shadcn Charts on Recharts, Lucide icons, Geist Sans and
   Geist Mono, Tailwind CSS 4, Motion where it helps.
 - Forms are plain POST forms (Post/Redirect/Get), so every action works before the page hydrates.
-  Scripts are same-origin only (CSP `script-src 'self'`).
+  Scripts are same-origin only (CSP `script-src 'self'`). The one exception is opt-in: with Turnstile
+  on, the log-in and sign-up pages also load Cloudflare's challenge script.
 - Provider keys are encrypted at rest (AES-256-GCM). No end-customer personal data is stored.
 - Open source under [AGPL-3.0](LICENSE). Run it on your own Cloudflare account, so your keys never leave it.
 
@@ -71,6 +72,34 @@ npm run deploy                          # applies D1 migrations, then deploys
 - **Plan:** password hashing (PBKDF2, 100k iterations) and syncs can exceed the Free plan's 10 ms CPU
   limit. Workers Paid is recommended for production.
 
+### Protecting a public instance
+
+If you keep sign-ups open, hoomuch defends itself in layers. Each one is cheap, and each catches what
+the one before lets through:
+
+- **Request limits** (`RL_REQUESTS`, `RL_AUTH` under `ratelimits` in `wrangler.jsonc`): Cloudflare's
+  Rate Limiting binding turns a flood away per network (IPv6 by /64) before the Worker touches D1.
+  Every request counts against 300 a minute; log-in and sign-up submissions against 10 a minute.
+  `namespace_id` only has to be unique within your Cloudflare account.
+- **Exact limits in D1**, each counted before the password hash: log-in attempts per email and
+  network, per account, and per network across all emails (30 every 15 minutes, which stops
+  credential stuffing), plus 5 new accounts per network a day.
+- **No throwaway inboxes.** Sign-ups from the
+  [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains)
+  list (CC0) are refused, subdomains included. The list is vendored, so there's no lookup at runtime;
+  `npm run domains:update` refreshes it.
+- **A honeypot field** on both forms that people never see, so bots that fill every input give
+  themselves away. It needs no JavaScript.
+- **Turnstile**, if you set both keys. Create a widget in the Cloudflare dashboard (Managed mode,
+  your hostname), put its site key in `TURNSTILE_SITE_KEY` under `vars` in `wrangler.jsonc`, and run
+  `wrangler secret put TURNSTILE_SECRET_KEY`. Log in and sign up then need JavaScript, and only those
+  two pages allow `challenges.cloudflare.com` in their CSP. For local testing, Cloudflare's test pair
+  (`1x00000000000000000000AA` / `1x0000000000000000000000000000000AA`) passes on any host.
+
+Cloudflare blocks network-level DDoS on its own. Its WAF and Bot Fight Mode only see traffic on your
+own domain, though, not on `*.workers.dev`. For a public instance, add a custom domain and set
+`"workers_dev": false` in `wrangler.jsonc`, so nobody can go around them.
+
 ## Connecting providers
 
 | Provider | Key | Permissions |
@@ -103,13 +132,14 @@ backfills 90 days of revenue.
 | `npm run deploy` | Applies remote D1 migrations, then `wrangler deploy` |
 | `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
 | `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
+| `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
 
 ## Layout
 
 ```
 src/
   index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
-  lib/               crypto, auth, money, time, flash
+  lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
   providers/         adapter contract, registry, one adapter per provider, Demo
   sync/              sync engine, aggregation, FX (frankfurter.dev), repository
