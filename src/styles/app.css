@@ -215,8 +215,14 @@
   --text-lead: 1.125rem;
   --text-lead--line-height: 1.75rem;
 
-  /* Motion tokens (design/system.md §3.6): colour changes are fast, appearing things are base. */
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* Motion (design/system.md §3.6). Tailwind's own ease-out and ease-in-out are too soft to feel
+     intentional, so these replace them: `ease-out` / `ease-in-out` everywhere, coss included, get
+     the stronger curves. ease-out for anything entering, leaving or answering a press;
+     ease-in-out for something moving across the screen; plain `ease` (the default) for colour.
+     Never ease-in: it starts slow, exactly when the eye is on it. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --default-transition-timing-function: ease;
 }
 
 /* ---------- base ---------- */
@@ -224,10 +230,6 @@
 @layer base {
   * {
     @apply border-border;
-  }
-  :root {
-    --dur-fast: 150ms;
-    --dur-base: 200ms;
   }
   html {
     -webkit-text-size-adjust: 100%;
@@ -281,14 +283,55 @@
 /* ---------- helpers ---------- */
 
 @layer components {
-  /* Something new appeared because of what you just did (a flash): fade it in once. Opacity only,
-     so nothing moves; reduced motion makes it instant. Works before the page hydrates. */
+  /* Something new appeared because of what you just did (a flash, the first-numbers strip): it
+     drops in once from 4px above, never from nothing. CSS only, so it plays before hydration.
+     `backwards`, not `both`: once it ends the element is back on its own styles, so a later
+     transition (Dismiss) starts from them. Reduced motion keeps the fade and drops the drop. */
   .fade-in {
-    animation: fade-in var(--dur-base) var(--ease-standard) both;
+    animation: fade-in 200ms var(--ease-out) backwards;
+  }
+  /* Landing hero only (first visit, marketing): lines rise 8px into place one after another.
+     Stagger with [animation-delay:…] in 60ms steps; keep the total under half a second. */
+  .rise-in {
+    animation: rise-in 360ms var(--ease-out) backwards;
+  }
+  /* The first-numbers owl, once per account: up past its spot, then settles. Seen once, so it
+     may have some life; 600ms, starting with the strip's fade-in. */
+  .owl-hop {
+    animation: owl-hop 600ms backwards;
   }
 }
 
 @keyframes fade-in {
+  from {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+
+@keyframes owl-hop {
+  0% {
+    translate: 0 8px;
+    rotate: -6deg;
+    scale: 0.9;
+    animation-timing-function: var(--ease-out);
+  }
+  45% {
+    translate: 0 -6px;
+    rotate: 3deg;
+    scale: 1.04;
+    animation-timing-function: var(--ease-in-out);
+  }
+}
+
+@keyframes fade {
   from {
     opacity: 0;
   }
@@ -313,13 +356,25 @@
   }
 }
 
+/* Reduced motion means less motion, not none: anything that moves (a press scale, a slide, a
+   rotating chevron, a panel growing) is instant, while fades and colour changes stay, because they
+   say what changed without moving anything. Components drop their own movement with motion-safe: /
+   motion-reduce:; this block covers what they can't. */
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
   ::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  .fade-in,
+  .rise-in {
+    animation-name: fade;
+  }
+  .owl-hop {
+    animation: none;
+  }
+  /* Recharts slides its tooltip between data points with an inline transition. */
+  .recharts-tooltip-wrapper {
+    transition: none !important;
   }
 }

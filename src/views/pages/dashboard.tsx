@@ -8,8 +8,8 @@
  */
 
 import { Info, TriangleAlert, X } from 'lucide-react';
-import { AnimatePresence, motion, MotionConfig, useAnimate, useReducedMotion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
@@ -399,20 +399,17 @@ export function RevenueCard(props: { data: DashboardData; className?: string }) 
 }
 
 /**
- * Reward moment after the first real sync. Live numbers only, never a sample figure. It fades in
- * once with CSS (the page loads once, and it shows before hydration); once the page is
- * interactive Motion gives the owl a small hop, and Dismiss animates the strip away and drops the
- * trigger from the URL instead of reloading. Under reduced motion it simply appears and goes.
+ * Reward moment after the first real sync. Live numbers only, never a sample figure. It drops in
+ * once with CSS and the owl hops with it (`owl-hop`, CSS too: it plays from the first paint, so
+ * nothing jumps when hydration lands, and stays smooth while the page is still busy). Once the
+ * page is interactive, Dismiss folds the strip away, faster than it came, and drops the trigger
+ * from the URL instead of reloading. Under reduced motion it simply fades in and out.
  */
 function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref: string; note?: string }) {
   const { data } = props;
   const [open, setOpen] = useState(true);
-  const [owl, animate] = useAnimate<HTMLDivElement>();
+  // Only read in the exit, after hydration, so the server and browser render the same.
   const reduce = useReducedMotion();
-  useEffect(() => {
-    if (reduce || !owl.current) return;
-    void animate(owl.current, { y: [8, -6, 0], rotate: [-6, 3, 0], scale: [0.9, 1.04, 1] }, { duration: 0.7, ease: [0.2, 0, 0, 1] });
-  }, [animate, owl, reduce]);
 
   const rows = data.breakdown;
   const from = rows.length === 1 ? `from ${rows[0]!.name}` : `across ${formatNumber(rows.length)} connections`;
@@ -421,19 +418,20 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
       ? `There it is: ${formatMoney(data.kpis.mrr.value, data.currency, { whole: true })} MRR ${from}.`
       : `There it is: your first numbers, ${from}.`;
   return (
-    // Motion follows the OS setting: under reduced motion it skips transforms and only fades.
+    // Motion follows the OS setting for transforms and height, but not margin, so the reduced
+    // exit is spelled out: fade only, nothing slides.
     <MotionConfig reducedMotion="user">
       <AnimatePresence initial={false} onExitComplete={() => window.history.replaceState(window.history.state, '', props.dismissHref)}>
         {open ? (
           <motion.section
             key="first-numbers"
             aria-labelledby="first-numbers"
-            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0, marginBottom: 0 }}
+            transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }}
             className="fade-in mb-6 overflow-hidden rounded-2xl border border-brand/24 bg-[radial-gradient(40rem_12rem_at_0%_0%,--alpha(var(--color-brand)/12%),transparent_70%)]"
           >
             <div className="flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-              <div ref={owl}>
+              <div className="owl-hop">
                 <Owl pose="cheer" eager />
               </div>
               <div className="min-w-0 flex-1">
@@ -470,11 +468,12 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
 
 /**
  * While the first sync runs: coss skeleton blocks the size of what's coming, in the same cards,
- * so nothing reads as $0. animate-none: no shimmer (no idle loops, design/system.md §3.6).
+ * so nothing reads as $0. animate-none! (important: tailwind-merge doesn't know coss's
+ * animate-skeleton, so both classes survive and the shimmer would win): no idle loops, §3.6.
  * Hidden from screen readers, which hear one sentence instead.
  */
 function DashboardSkeleton() {
-  const block = 'animate-none';
+  const block = 'animate-none!';
   return (
     <div aria-busy="true">
       <p className="sr-only">Your first numbers are on their way.</p>

@@ -98,12 +98,12 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
           <li key={p.id}>
             <CossCard
               render={<a href={`/connections/new?provider=${p.id}`} />}
-              className="group h-full p-5 transition-[border-color,box-shadow] hover:border-input hover:shadow-sm/5"
+              className="group h-full p-5 transition-[border-color,box-shadow,scale] duration-150 ease-out hover:border-input hover:shadow-sm/5 motion-safe:active:scale-[0.99]"
             >
               <span className="flex items-center gap-2 font-semibold">
                 <ProviderDot dotClass={p.dotClass} size="md" />
                 {p.name}
-                <ArrowRight className="ml-auto size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5" />
+                <ArrowRight className="ml-auto size-4 shrink-0 text-faint transition-transform duration-150 ease-out motion-safe:group-hover:translate-x-0.5" />
               </span>
               <span className="mt-1.5 text-muted-foreground">{p.tagline}</span>
             </CossCard>
@@ -112,7 +112,7 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
       </ul>
       <a
         href="/connections/new?provider=demo"
-        className="mt-4 flex items-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
+        className="mt-4 flex items-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-muted-foreground transition-[border-color,color,scale] duration-150 ease-out hover:border-input hover:text-foreground motion-safe:active:scale-[0.99]"
       >
         <ProviderDot dotClass={demo.dotClass} />
         <span>

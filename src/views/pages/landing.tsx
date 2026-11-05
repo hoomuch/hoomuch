@@ -68,22 +68,23 @@ export function LandingPage(props: LandingPageProps) {
       marketing
       footerNote={`Syncs ${props.cadence}, so you can check less often.`}
     >
-      {/* 1. Hero */}
+      {/* 1. Hero. Seen once, on a first visit, so its lines rise in one after another (60ms
+          apart, done in about half a second). The demo below stays put: it's the product. */}
       <section className="mx-auto max-w-[40rem] pt-6 text-center sm:pt-14">
-        <h1 className="font-heading text-hero-sm sm:text-hero">
+        <h1 className="rise-in font-heading text-hero-sm sm:text-hero">
           Stripe + Lemon{NB}Squeezy + RevenueCat ={NB}one{NB}MRR.
         </h1>
-        <p className="mx-auto mt-5 max-w-[36rem] text-lead text-pretty text-muted-foreground">
+        <p className="rise-in mx-auto mt-5 max-w-[36rem] text-lead text-pretty text-muted-foreground [animation-delay:60ms]">
           A revenue dashboard for founders who sell in more than one place. It only ever reads. You can close the other
           three tabs.
         </p>
-        <div className="mt-8">
+        <div className="rise-in mt-8 [animation-delay:120ms]">
           <LinkButton href={cta.href} large>
             {cta.label}
           </LinkButton>
         </div>
         {props.signupOpen ? (
-          <p className="mt-3 text-body text-muted-foreground">No key handy? Start with demo data after you sign up.</p>
+          <p className="rise-in mt-3 text-body text-muted-foreground [animation-delay:180ms]">No key handy? Start with demo data after you sign up.</p>
         ) : null}
       </section>
 

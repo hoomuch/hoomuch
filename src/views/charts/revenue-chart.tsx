@@ -31,6 +31,7 @@ import {
   Swatch,
   TableRow,
   TICK_MARGIN,
+  TOOLTIP_MS,
   TooltipRow,
   X_AXIS_HEIGHT,
   xTick,
@@ -341,7 +342,7 @@ export function RevenueChart(props: RevenueChartProps) {
             tick={{ fill: AXIS_TEXT_FILL }}
             tickFormatter={(v: number) => labelOf.get(v) ?? money(v, currency, { compact: true })}
           />
-          {allZero ? null : <ChartTooltip cursor={{ fill: 'var(--muted)' }} content={revenueTooltip(series, currency)} />}
+          {allZero ? null : <ChartTooltip cursor={{ fill: 'var(--muted)' }} animationDuration={TOOLTIP_MS} animationEasing="ease-out" content={revenueTooltip(series, currency)} />}
           {/* Always drawn (all-zero days draw nothing): Recharts needs a series to lay out the y axis. */}
           {series.length > 0 ? (
             series.map((s) => (

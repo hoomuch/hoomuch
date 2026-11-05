@@ -29,6 +29,7 @@ import {
   Swatch,
   TableRow,
   TICK_MARGIN,
+  TOOLTIP_MS,
   TooltipRow,
   X_AXIS_HEIGHT,
   xTick,
@@ -205,6 +206,8 @@ export function MrrChart(props: MrrChartProps) {
           {empty ? null : (
             <ChartTooltip
               cursor={{ stroke: 'var(--border)' }}
+              animationDuration={TOOLTIP_MS}
+              animationEasing="ease-out"
               content={
                 <ChartTooltipContent
                   labelFormatter={(_label, payload) => {

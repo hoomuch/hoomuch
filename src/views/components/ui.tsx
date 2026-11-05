@@ -327,7 +327,7 @@ export function Button(props: {
       variant={COSS_VARIANT[props.variant ?? 'primary']}
       size={sizeOf(props.small, props.large)}
       aria-busy={busy || undefined}
-      className={cn(props.block && 'w-full', props.className)}
+      className={cn(props.block && 'w-full motion-safe:active:scale-[0.985]', props.className)}
     >
       {busy ? <Spinner aria-hidden="true" role={undefined} aria-label={undefined} className="size-4" /> : null}
       {busy && props.busyLabel ? props.busyLabel : props.children}
@@ -349,7 +349,7 @@ export function LinkButton(props: {
       render={<a href={props.href} />}
       variant={COSS_VARIANT[props.variant ?? 'primary']}
       size={sizeOf(props.small, props.large)}
-      className={cn(props.block && 'w-full', props.className)}
+      className={cn(props.block && 'w-full motion-safe:active:scale-[0.985]', props.className)}
     >
       {props.children}
     </CossButton>
@@ -548,9 +548,9 @@ export function Disclosure(props: {
 }) {
   return (
     <Collapsible defaultOpen={props.defaultOpen} className={props.className}>
-      <CollapsibleTrigger className="group inline-flex cursor-pointer items-center gap-1 rounded-md text-body text-muted-foreground transition-colors hover:text-foreground">
+      <CollapsibleTrigger className="group inline-flex cursor-pointer items-center gap-1 rounded-md text-body text-muted-foreground transition-[color,scale] duration-150 ease-out hover:text-foreground motion-safe:active:scale-[0.97]">
         {props.summary}
-        <ChevronDown className="size-4 shrink-0 transition-transform duration-200 group-data-panel-open:rotate-180" />
+        <ChevronDown className="size-4 shrink-0 transition-transform duration-200 ease-out group-data-panel-open:rotate-180 motion-reduce:transition-none" />
       </CollapsibleTrigger>
       <CollapsiblePanel keepMounted hiddenUntilFound className={props.panelClassName}>
         {props.children}

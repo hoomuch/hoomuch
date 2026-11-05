@@ -133,6 +133,13 @@ export function ChartNote(props: { children?: ReactNode }) {
   return <p className="mt-2 text-caption text-muted-foreground">{props.children}</p>;
 }
 
+/**
+ * How long the tooltip takes to slide from one data point to the next. Recharts' default is 400ms,
+ * which trails the pointer when you scrub across 30–90 days; 100ms keeps it glued to the cursor
+ * and still smooth. Reduced motion turns the slide off (styles/app.css).
+ */
+export const TOOLTIP_MS = 100;
+
 // ---------- axes ----------
 
 export const AXIS_TEXT_FILL = 'var(--muted-foreground)';

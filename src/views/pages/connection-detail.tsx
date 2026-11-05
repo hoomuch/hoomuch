@@ -248,7 +248,7 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
                 </h2>
                 <span className="text-muted-foreground"> · Rename, replace the key or delete</span>
               </span>
-              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-180" />
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out group-data-panel-open:rotate-180 motion-reduce:transition-none" />
             </CollapsibleTrigger>
             <CollapsiblePanel keepMounted hiddenUntilFound>
               <div className="grid gap-8 border-t p-5 sm:p-6">
