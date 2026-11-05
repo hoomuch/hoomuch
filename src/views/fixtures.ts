@@ -10,6 +10,7 @@ import type {
   ConnectionSummary,
   DashboardData,
   MrrDay,
+  ProductBreakdown,
   RangeDays,
   RevenueDay,
   TransactionPage,
@@ -114,6 +115,65 @@ function revenueOn(profileIdx: number, day: string): number {
 
 export type FixtureState = 'full' | 'empty' | 'sparse' | 'warnings' | 'single';
 
+/** Pagekit's plans (Lemon Squeezy names them "Product — Variant"): share of its revenue, price in cents. */
+const PAGEKIT_PLANS = [
+  { name: 'Pagekit Pro — Monthly', weight: 0.52, price: 1_900 },
+  { name: 'Pagekit Pro — Yearly', weight: 0.31, price: 19_000 },
+  { name: 'Pagekit Team — Monthly', weight: 0.17, price: 4_900 },
+] as const;
+
+/**
+ * The product split of a fixture breakdown: Lemon Squeezy rows by plan, the rest (Stripe and
+ * RevenueCat don't report product names) under "No product name".
+ */
+function fixtureProducts(breakdown: BreakdownRow[]): ProductBreakdown {
+  const rows: ProductBreakdown['rows'] = [];
+  let unnamed = 0;
+  const unnamedBy: Array<{ name: string; revenue: number }> = [];
+  const PROVIDER_NAMES: Partial<Record<BreakdownRow['provider'], string>> = { stripe: 'Stripe', revenuecat: 'RevenueCat' };
+  for (const b of breakdown) {
+    if (b.revenue === null) continue;
+    if (b.provider !== 'lemonsqueezy') {
+      unnamed += b.revenue;
+      if (b.revenue !== 0) unnamedBy.push({ name: PROVIDER_NAMES[b.provider] ?? b.provider, revenue: b.revenue });
+      continue;
+    }
+    let left = b.revenue;
+    PAGEKIT_PLANS.forEach((plan, i) => {
+      const revenue = i === PAGEKIT_PLANS.length - 1 ? left : Math.round(b.revenue! * plan.weight);
+      left -= revenue;
+      rows.push({
+        name: plan.name,
+        connectionId: b.id,
+        connectionName: b.name,
+        dotClass: b.dotClass,
+        revenue,
+        charges: Math.max(1, Math.round(revenue / plan.price)),
+        sharePct: 0,
+      });
+    });
+  }
+  rows.sort((a, b) => b.revenue - a.revenue);
+  const earned = rows.reduce((s, r) => s + Math.max(0, r.revenue), 0) + Math.max(0, unnamed);
+  const share = (v: number) => (v > 0 && earned > 0 ? Math.round((v / earned) * 1000) / 10 : 0);
+  for (const r of rows) r.sharePct = share(r.revenue);
+  return {
+    rows,
+    more: null,
+    unnamed: { revenue: unnamed, sharePct: share(unnamed) },
+    unnamedProviders: unnamedBy.sort((a, b) => b.revenue - a.revenue).map((u) => u.name),
+    named: breakdown.some((b) => b.provider === 'lemonsqueezy'),
+  };
+}
+
+const NO_PRODUCTS: ProductBreakdown = {
+  rows: [],
+  more: null,
+  unnamed: { revenue: 0, sharePct: 0 },
+  unnamedProviders: [],
+  named: false,
+};
+
 /** A complete DashboardData, in USD, for the given window. */
 export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState = 'full', now = FIXTURE_NOW): DashboardData {
   const days = windowDays(rangeDays, now);
@@ -128,6 +188,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       hasConnections: false,
       kpis: { mrr: zeroKpi, arr: zeroKpi, activeSubscriptions: zeroKpi, activeTrials: zeroKpi, revenue: zeroKpi },
       breakdown: [],
+      products: NO_PRODUCTS,
       revenueSeries: days.map((day) => ({ day, total: 0, byConnection: {} })),
       mrrSeries: [],
       fx: { asOf: null, missing: [] },
@@ -205,6 +266,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       revenue: kpiFrom(revenueNow, revenuePrev),
     },
     breakdown,
+    products: fixtureProducts(breakdown),
     revenueSeries,
     mrrSeries,
     fx: { asOf: '2026-11-04', missing: state === 'warnings' ? ['ARS'] : [] },

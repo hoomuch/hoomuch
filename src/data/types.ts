@@ -55,6 +55,45 @@ export interface BreakdownRow extends ConnectionSummary {
   sharePct: number;
 }
 
+/** One product (or plan) sold through one connection, over the selected window. */
+export interface ProductRow {
+  /** As the provider names it, e.g. "Pro (yearly)". The same name in two connections is two rows. */
+  name: string;
+  connectionId: string;
+  connectionName: string;
+  /** Literal Tailwind class for the connection's dot. */
+  dotClass: string;
+  /** Net revenue (charges − refunds) in the window. */
+  revenue: number;
+  /** Charges in the window; refunds aren't counted. */
+  charges: number;
+  /**
+   * Share of the window's revenue, 0–100, out of the rows that made money (so a refund-heavy row
+   * can't push the others past 100). 0 for a row that lost money.
+   */
+  sharePct: number;
+}
+
+/** Revenue in the window by product (SPEC F-18). Adds up to the revenue KPI. */
+export interface ProductBreakdown {
+  /** Highest revenue first, at most PRODUCT_ROWS (one more rather than a "1 more product" row). */
+  rows: ProductRow[];
+  /** The products after `rows`, added up; null when there are none. */
+  more: { count: number; revenue: number; charges: number; sharePct: number } | null;
+  /**
+   * Revenue that came without a product name: everything from providers that don't report one
+   * (Stripe, Chargebee, daily totals), plus single charges or refunds that lack one. 0 when none.
+   */
+  unnamed: { revenue: number; sharePct: number };
+  /**
+   * Names of the providers that don't report product names and put revenue into `unnamed`
+   * ("Stripe"), biggest first. Charges without a name from a provider that has them aren't listed.
+   */
+  unnamedProviders: string[];
+  /** A connection's provider reports product names, so there is something to split. */
+  named: boolean;
+}
+
 export interface RevenueDay {
   day: string;
   /** Net (gross − refunds) across connections. */
@@ -83,6 +122,7 @@ export interface DashboardData {
   };
   /** Sorted by MRR, descending. */
   breakdown: BreakdownRow[];
+  products: ProductBreakdown;
   /** Exactly `rangeDays` entries, oldest → newest, zero-filled. */
   revenueSeries: RevenueDay[];
   /** Days in the window that have snapshots, oldest → newest (may be sparse early on). */

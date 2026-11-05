@@ -7,6 +7,7 @@ import { createElement, type ComponentType, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, describe, expect, it } from 'vitest';
 import { BreakdownTable } from '../../src/views/components/breakdown-table';
+import { ProductTable } from '../../src/views/components/product-table';
 import { ConnectionForm } from '../../src/views/components/connection-form';
 import { DangerZone } from '../../src/views/components/danger-zone';
 import { EmptyState } from '../../src/views/components/empty-state';
@@ -39,6 +40,7 @@ import {
   completenessNotes,
   DashboardPage,
   freshness,
+  ProductCard,
   milestoneAtOrBelow,
   mrrOwl,
   recentMilestone,
@@ -248,6 +250,76 @@ describe('BreakdownTable', () => {
     const out = await render('breakdown-test', h(BreakdownTable, { rows: [row], currency: 'USD', rangeDays: 7 }));
     expect(out).toContain('Test mode');
     expect(out).toContain('0%');
+  });
+});
+
+describe('ProductTable', () => {
+  const row = (name: string, connectionId: string, revenue: number) => ({
+    name,
+    connectionId,
+    connectionName: connectionId === 'a' ? 'Pagekit' : 'Habit',
+    dotClass: 'bg-[#AD7D00]',
+    revenue,
+    charges: 3,
+    sharePct: 40,
+  });
+
+  it('lists products, then the rest folded and what came without a name', async () => {
+    const data = fixtureDashboard(30);
+    const out = await render('products', h(ProductTable, { products: data.products, currency: data.currency, rangeDays: 30 }));
+    for (const r of data.products.rows) expect(out).toContain(r.name);
+    expect(out).toContain('No product name');
+    expect(out).toContain('Revenue by product, highest first');
+    expect(out).toMatch(/<rect width="\d+(\.\d)?%"/);
+    expect(out).toContain('—'); // no charge count for the unnamed row
+    expect(out).not.toMatch(/\$[\d,]+\.\d\d/); // whole units
+    // One connection: its name is for screen readers only, the dot says the rest.
+    expect(out).toContain('<span class="sr-only">, Pagekit</span>');
+  });
+
+  it('names the connection when products come from several, and folds the tail', async () => {
+    const out = await render(
+      'products-many',
+      h(ProductTable, {
+        products: {
+          rows: [row('Pro', 'a', 50_00), row('Pro', 'b', 40_00)],
+          more: { count: 4, revenue: 10_00, charges: 6, sharePct: 10 },
+          unnamed: { revenue: 0, sharePct: 0 },
+          unnamedProviders: [],
+          named: true,
+        },
+        currency: 'USD',
+        rangeDays: 7,
+      }),
+    );
+    expect(out).toContain('>Pagekit</span>');
+    expect(out).toContain('>Habit</span>');
+    expect(out).toContain('4 more products');
+    expect(out).not.toContain('No product name'); // nothing came without one
+  });
+});
+
+describe('ProductCard', () => {
+  it('splits what it can and says where the rest went', async () => {
+    const out = await render('product-card', h(ProductCard, { data: fixtureDashboard(30, 'full', FIXTURE_NOW) }));
+    expect(out).toContain('>By product<');
+    expect(out).toContain('<table');
+    expect(out).toContain('Revenue from Stripe and RevenueCat comes without product names, so it’s under “No product name”.');
+  });
+
+  it('says why there’s no table when no provider names products', async () => {
+    const data = fixtureDashboard(30, 'single', FIXTURE_NOW); // Stripe only
+    const out = await render('product-card-unnamed', h(ProductCard, { data }));
+    expect(out).toContain('Revenue from Stripe comes without product names, so it can’t be split by product.');
+    expect(out).not.toContain('<table');
+  });
+
+  it('says so when nothing sold in the window', async () => {
+    const data = fixtureDashboard(7, 'full', FIXTURE_NOW);
+    data.products = { rows: [], more: null, unnamed: { revenue: 0, sharePct: 0 }, unnamedProviders: [], named: true };
+    const out = await render('product-card-empty', h(ProductCard, { data }));
+    expect(out).toContain('No sales in the last 7 days.');
+    expect(out).not.toContain('<table');
   });
 });
 
@@ -700,7 +772,7 @@ describe('personality: owl, landing, first sync, 404', () => {
       expect(i, needle).toBeGreaterThan(-1);
       return i;
     };
-    // Order: freshness, MRR card (figure, ARR, trend, notes), secondary row, By connection, Revenue.
+    // Order: freshness, MRR card (figure, ARR, trend, notes), secondary row, By connection, By product, Revenue.
     expect(at('Updated <time')).toBeLessThan(at('aria-label="MRR"'));
     expect(at('aria-label="MRR"')).toBeLessThan(at('ARR</p>'));
     expect(at('ARR</p>')).toBeLessThan(at('MRR, last 30 days'));
@@ -708,8 +780,10 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(at('Pagekit is showing numbers from')).toBeLessThan(at('ARS amounts aren’t included.'));
     expect(at('ARS amounts aren’t included.')).toBeLessThan(at('aria-label="Subscriptions, trials and revenue"'));
     expect(at('aria-label="Subscriptions, trials and revenue"')).toBeLessThan(at('>By connection<'));
-    expect(at('>By connection<')).toBeLessThan(at('>Revenue per day<'));
-    expect(at('>Revenue per day<')).toBeLessThan(at('Habit — iOS reports a 28-day total only ($2,214)'));
+    expect(at('>By connection<')).toBeLessThan(at('>By product<'));
+    expect(at('>By product<')).toBeLessThan(at('Habit — iOS reports a 28-day total only ($2,214), so it isn’t split by product here.'));
+    expect(at('so it isn’t split by product here.')).toBeLessThan(at('>Revenue per day<'));
+    expect(at('>Revenue per day<')).toBeLessThan(at('Habit — iOS reports a 28-day total only ($2,214), so it isn’t in these bars'));
     // The comparison is said once; each delta still speaks it.
     expect(out).toContain('Changes compare with 30 days ago. Revenue compares with the 30 days before.');
     expect(out.match(/>vs\. 30 days ago</g) ?? []).toHaveLength(1); // only the MRR delta shows it
