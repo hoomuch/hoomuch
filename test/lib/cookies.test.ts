@@ -46,6 +46,11 @@ describe('cookies', () => {
     expect(session).toMatch(/; Path=\/;.*Secure/);
     expect(session).not.toMatch(/Domain=/i);
     expect(flash).toMatch(/Secure/);
+    // Not readable by scripts, and not sent on cross-site subrequests or form posts.
+    for (const c of [session, flash]) {
+      expect(c).toMatch(/HttpOnly/i);
+      expect(c).toMatch(/SameSite=Lax/i);
+    }
 
     const cookie = set.map((h) => h.split(';')[0]).join('; ');
     const me = await app().request('https://hoomuch.example.com/me', { headers: { cookie } }, env, fakeCtx);
@@ -60,7 +65,9 @@ describe('cookies', () => {
   it('are Secure even on plain HTTP for non-local hosts', async () => {
     const env = await setup();
     const res = await app().request('http://hoomuch.example.com/in', { method: 'POST' }, env, fakeCtx);
-    expect(res.headers.getSetCookie().every((h) => h.startsWith('__Host-') && /Secure/.test(h))).toBe(true);
+    const set = res.headers.getSetCookie();
+    expect(set).toHaveLength(2); // session + flash; `every` alone would pass on none
+    expect(set.every((h) => h.startsWith('__Host-') && /Secure/.test(h))).toBe(true);
   });
 
   it('keep bare names without Secure on http://localhost (local dev)', async () => {
@@ -68,5 +75,10 @@ describe('cookies', () => {
     const res = await app().request('http://localhost:8787/in', { method: 'POST' }, env, fakeCtx);
     const set = res.headers.getSetCookie();
     expect(set.some((h) => h.startsWith('hm_session=') && !/Secure/.test(h))).toBe(true);
+    // Local dev drops only Secure and the prefix; the other flags stay.
+    for (const c of set) {
+      expect(c).toMatch(/HttpOnly/i);
+      expect(c).toMatch(/SameSite=Lax/i);
+    }
   });
 });

@@ -82,13 +82,20 @@ describe('demo adapter', () => {
       makeCtx(noNetwork, { now: NOW + 6 * 3600_000 }),
     );
     const laterById = new Map(later.events.map((e) => [e.externalId, e]));
+    expect(early.events.length).toBeGreaterThan(0); // otherwise the loop below proves nothing
     for (const e of early.events) expect(laterById.get(e.externalId)).toEqual(e);
     expect(later.events.length).toBeGreaterThanOrEqual(early.events.length);
   });
 
   it('clips `since` to the 90-day history window', async () => {
     const r = await demoAdapter.fetchRevenue(input, { since: 0, cursor: null }, makeCtx(noNetwork));
+    expect(r.events.length).toBeGreaterThan(0); // Math.min of nothing is Infinity, which would pass
     const oldest = Math.min(...r.events.map((e) => e.occurredAt));
-    expect(oldest).toBeGreaterThanOrEqual(Date.parse(`${addDays(dayKey(NOW), -90)}T00:00:00Z`));
+    const windowStart = Date.parse(`${addDays(dayKey(NOW), -90)}T00:00:00Z`);
+    expect(oldest).toBeGreaterThanOrEqual(windowStart);
+    expect(oldest).toBeLessThan(windowStart + DAY); // clipped to the window's first day, not later
+    // Clipping is the whole effect of since=0: the result equals asking for the window start.
+    const clipped = await demoAdapter.fetchRevenue(input, { since: windowStart, cursor: null }, makeCtx(noNetwork));
+    expect(r.events).toEqual(clipped.events);
   });
 });

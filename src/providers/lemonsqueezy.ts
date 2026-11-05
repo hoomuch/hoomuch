@@ -761,7 +761,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
 
   let active = 0;
   let trials = 0;
-  const stats = { listed: 0, otherMode: 0, usageBased: 0, unpriced: 0, cancelledTrials: 0, discounted: 0 };
+  const stats = { listed: 0, otherMode: 0, usageBased: 0, unpriced: 0, cancelledTrials: 0, discounted: 0, zeroMrr: 0 };
   const seen = new Set<string>();
   const priced: PricedSubscription[] = [];
 
@@ -810,15 +810,18 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
           stats.cancelledTrials += 1;
           continue;
         }
-        active += 1;
-
+        // Active means MRR above 0 (SPEC §6, Stripe's definition). Usage-based and unpriceable
+        // subscriptions count here, since their MRR is unknown rather than zero; priced ones are
+        // counted below, once discounts are applied, so $0 plans and 100%-off codes don't.
         if (usageItem || price?.usageBased) {
+          active += 1;
           stats.usageBased += 1;
           continue;
         }
         const amount = price ? priceAmountMinor(price, num(item?.['quantity']) ?? 1) : null;
         const currency = storeId ? await currencies.get(storeId) : null;
         if (!price || amount === null || !price.interval || !currency) {
+          active += 1;
           stats.unpriced += 1;
           ctx.log('ls_subscription_unpriced', {
             subscriptionId: sub.id,
@@ -843,6 +846,11 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     const redeemed = (p.orderId ? discounts?.get(p.orderId) : undefined) ?? [];
     for (const r of redeemed) amount = applyDiscount(amount, r);
     if (redeemed.length > 0) stats.discounted += 1;
+    if (amount <= 0) {
+      stats.zeroMrr += 1; // a $0 price, or discounted 100% for good: not a paying subscription
+      continue;
+    }
+    active += 1;
     addToMoney(mrr, p.currency, normalizeToMonthly(amount, p.interval, p.intervalCount));
   }
 

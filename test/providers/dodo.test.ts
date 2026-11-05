@@ -307,7 +307,18 @@ describe('dodo fetchSnapshot', () => {
     ];
     const { fetch } = fakeFetch(subscriptionRoutes(subs));
     const snap = await dodoAdapter.fetchSnapshot(input(), makeCtx(fetch));
-    expect(snap).toMatchObject({ mrr: { USD: 5800 }, activeSubscriptions: 2, activeTrials: 3 });
+    expect(snap.mrr).toEqual({ USD: 5800 });
+    expect(snap).toMatchObject({ activeSubscriptions: 2, activeTrials: 3 });
+  });
+
+  it('allows one hour of slack after the trial end, and not a second more', () => {
+    const created = NOW - 3 * DAY;
+    const trialEnd = created + 14 * DAY;
+    const withNext = (next: number) => sub({ trial_period_days: 14, created_at: iso(created), next_billing_date: iso(next) });
+    expect(classifySubscription(withNext(trialEnd + 60 * 60_000), NOW)).toEqual({ kind: 'trial' });
+    expect(classifySubscription(withNext(trialEnd + 60 * 60_000 + 1000), NOW)).toMatchObject({ kind: 'paying', monthly: 2900 });
+    // trial_period_days = 0 is "no trial", whatever next_billing_date says.
+    expect(classifySubscription(sub({ trial_period_days: 0, created_at: iso(created), next_billing_date: iso(created) }), NOW)).toMatchObject({ kind: 'paying' });
   });
 
   it('counts past_due and cancel-at-period-end; leaves $0, on-demand and unreadable subscriptions out of MRR and the count', async () => {
@@ -325,7 +336,8 @@ describe('dodo fetchSnapshot', () => {
     const { fetch } = fakeFetch(subscriptionRoutes(subs, pastDue));
     const ctx = makeCtx(fetch);
     const snap = await dodoAdapter.fetchSnapshot(input(), ctx);
-    expect(snap).toMatchObject({ mrr: { USD: 2900 + 1210 + 1000 }, activeSubscriptions: 3, activeTrials: 0 });
+    expect(snap.mrr).toEqual({ USD: 2900 + 1210 + 1000 });
+    expect(snap).toMatchObject({ activeSubscriptions: 3, activeTrials: 0 });
     expect(ctx.logs.find((l) => l.event === 'dodo_snapshot')?.data).toMatchObject({
       listed: 9,
       zero: 1,
@@ -343,8 +355,30 @@ describe('dodo fetchSnapshot', () => {
     const pastDue = [{ ...moved, status: 'past_due' }, sub({ status: 'past_due', recurring_pre_tax_amount: 100 })];
     const { fetch, calls } = fakeFetch(subscriptionRoutes(active, pastDue));
     const snap = await dodoAdapter.fetchSnapshot(input(), makeCtx(fetch));
-    expect(snap).toMatchObject({ mrr: { USD: 104 * 100 }, activeSubscriptions: 104 });
+    expect(snap.mrr).toEqual({ USD: 104 * 100 });
+    expect(snap.activeSubscriptions).toBe(104);
     expect(calls.map((c) => new URL(c.url).searchParams.get('page_number'))).toEqual(['0', '1', '0']);
+  });
+
+  it('asks for one more page after an exactly full one, and stops on the empty page', async () => {
+    const active = Array.from({ length: 100 }, () => sub({ recurring_pre_tax_amount: 100 }));
+    const { fetch, calls } = fakeFetch(subscriptionRoutes(active));
+    const snap = await dodoAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.mrr).toEqual({ USD: 100 * 100 });
+    expect(calls.map((c) => `${new URL(c.url).searchParams.get('status')}#${new URL(c.url).searchParams.get('page_number')}`)).toEqual([
+      'active#0',
+      'active#1',
+      'past_due#0',
+    ]);
+  });
+
+  it('throws a revoked key (401) as auth on apiKey, and an unreadable 200 as upstream', async () => {
+    const revoked = fakeFetch([route('/subscriptions', { status: 401, json: error401Fx })]);
+    expect(await catchErr(dodoAdapter.fetchSnapshot(input(), makeCtx(revoked.fetch)))).toMatchObject({ kind: 'auth', field: 'apiKey' });
+
+    const odd = fakeFetch([route('/subscriptions', { json: { data: [sub()] } })]);
+    const err = await catchErr(dodoAdapter.fetchSnapshot(input(), makeCtx(odd.fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
   });
 
   it('uses the mode stored by verify for an unprefixed key; a prefix always wins', async () => {
@@ -589,6 +623,28 @@ describe('dodo fetchRevenue', () => {
     const r = await dodoAdapter.fetchRevenue(input(), { since: Date.parse('2026-11-05T01:00:00Z'), cursor: null }, ctx);
     expect(r.daily).toEqual([{ day: '2026-11-05', currency: 'USD', gross: 800, refunds: 0, count: 1 }]);
     expect(ctx.logs.find((l) => l.event === 'dodo_revenue')?.data).toMatchObject({ directionMismatch: 1 });
+  });
+
+  it('reads one more (empty) page after an exactly full one, without counting anything twice', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => entry('payment', 10, NOW - (i + 1) * 60_000));
+    const seen: string[] = [];
+    const { fetch } = fakeFetch([ledgerRoute({ '2026-11-05T00:00:00.000Z': full }, seen)]);
+    const page = await dodoAdapter.fetchRevenue(input(), { since: Date.parse('2026-11-05T00:00:00Z'), cursor: null }, makeCtx(fetch));
+    expect(page).toEqual({ events: [], daily: [{ day: '2026-11-05', currency: 'USD', gross: 1000, refunds: 0, count: 100 }], nextCursor: null, done: true });
+    expect(seen.map((s) => s.split('#')[1])).toEqual(['0', '1']);
+  });
+
+  it('throws a persistent 5xx (after retries) instead of returning a cursor or a finished page', async () => {
+    const { fetch, calls } = fakeFetch([route('/balances/ledger', { status: 500, json: error500Fx })]);
+    const err = await catchErr(dodoAdapter.fetchRevenue(input(), { since: NOW - DAY, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', status: 500 });
+    expect(calls).toHaveLength(3);
+  });
+
+  it('refuses a 200 ledger page without `items` instead of writing 0 USD days', async () => {
+    const { fetch } = fakeFetch([route('/balances/ledger', { json: { entries: [] } })]);
+    const err = await catchErr(dodoAdapter.fetchRevenue(input(), { since: NOW - DAY, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
   });
 
   it('reads a test mode key’s ledger on the test host', async () => {

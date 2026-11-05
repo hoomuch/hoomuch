@@ -335,10 +335,31 @@ describe('polar fetchSnapshot', () => {
   });
 
   it('stops on a short last page even when every subscription is $0', async () => {
-    const { fetch, calls } = fakeFetch(snapshotRoutes({ paying: [sub({ amount: 0 }), sub({ amount: 0 })], trials: 0 }));
+    // A consistent server: the only two active subscriptions are both $0, so none of them is paying.
+    const { fetch, calls } = fakeFetch(snapshotRoutes({ paying: () => list([sub({ amount: 0 }), sub({ amount: 0 })]), trials: 0 }));
     const snap = await polarAdapter.fetchSnapshot(input(), makeCtx(fetch));
-    expect(snap).toMatchObject({ activeSubscriptions: 38, activeTrials: 0 }); // list() reports total 40
+    expect(snap).toMatchObject({ activeSubscriptions: 0, activeTrials: 0 });
     expect(calls).toHaveLength(3);
+  });
+
+  it('leaves a subscription with an unreadable amount in the count (never undercounts on a shape change)', async () => {
+    const odd = sub();
+    delete odd.amount;
+    const { fetch } = fakeFetch(snapshotRoutes({ paying: () => list([sub({ amount: 0 }), odd, sub({ amount: 900 })]) }));
+    const snap = await polarAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeSubscriptions).toBe(2); // 3 − the $0 one
+  });
+
+  it.each([
+    ['paying list', { status: ['active', 'past_due'] }],
+    ['trialing list', { status: 'trialing', limit: '1' }],
+  ])('refuses to guess a count when the %s has no total_count', async (_label, query) => {
+    const { fetch } = fakeFetch([
+      route('/v1/subscriptions/', { json: { items: [sub()], pagination: {} } }, { query }),
+      ...snapshotRoutes(),
+    ]);
+    const err = await catchErr(polarAdapter.fetchSnapshot(input(), makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
   });
 
   it('an empty organization has no MRR and no subscriptions', async () => {
@@ -350,7 +371,15 @@ describe('polar fetchSnapshot', () => {
       route('/v1/subscriptions/', { json: list([]) }),
     ]);
     const snap = await polarAdapter.fetchSnapshot(input(), makeCtx(fetch));
-    expect(snap).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 0 });
+    // toEqual, not toMatchObject: `mrr: {}` in toMatchObject matches any map, including { USD: 0 }.
+    expect(snap).toEqual({
+      mrr: {},
+      activeSubscriptions: 0,
+      activeTrials: 0,
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+    });
   });
 
   it('refuses to write a zero MRR when the metric is missing from the response', async () => {
@@ -629,6 +658,25 @@ describe('polar fetchRevenue', () => {
     const { fetch } = fakeFetch([route('/v1/orders/', { status: 403, json: error403Fx })]);
     const err = await catchErr(polarAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch)));
     expect(err).toMatchObject({ kind: 'permission', message: 'The Polar key is missing the “orders:read” permission.' });
+  });
+
+  it('throws a revoked token (401) mid-backfill instead of returning a cursor or a finished page', async () => {
+    const { fetch } = fakeFetch([
+      route('/v1/orders/', { json: list([order({ id: 'o-1' })]) }),
+      route('/v1/refunds/', { status: 401, json: error401Fx }),
+    ]);
+    const err = await catchErr(polarAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'auth', field: 'apiKey' });
+  });
+
+  it.each([
+    ['orders', '/v1/orders/'],
+    ['refunds', '/v1/refunds/'],
+  ])('refuses a 200 %s page without `items` (never reports done on an unreadable page)', async (_label, path) => {
+    const routes = [route(path, { json: { detail: 'unexpected' } }), route('/v1/orders/', { json: list([]) }), route('/v1/refunds/', { json: list([]) })];
+    const { fetch } = fakeFetch(routes);
+    const err = await catchErr(polarAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
   });
 });
 

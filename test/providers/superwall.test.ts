@@ -158,6 +158,17 @@ describe('superwall SQL', () => {
     expect(REVENUE_SQL.match(/\{[a-z_]+:[A-Za-z0-9]+\}/g)).toEqual(['{scan_from:Date}', '{day_after:Date}', '{day_from:Date}']);
     expect(TRIALS_SQL).not.toMatch(/\{/);
   });
+
+  // ClickHouse's toInt64 truncates a Float64 toward zero, so a $19.99 day would become 1998
+  // (19.99 * 100 = 1998.9999999999998). Static check: the statement only runs in ClickHouse.
+  it('rounds dollar sums to cents before the Int64 cast instead of truncating them', () => {
+    expect(19.99 * 100).toBeLessThan(1999); // the float behaviour this guards against
+    const casts = REVENUE_SQL.match(/toInt64\(\s*\w*/g) ?? [];
+    expect(casts).toHaveLength(2); // gross and refunds
+    expect(casts.filter((c) => !/^toInt64\(\s*round/i.test(c))).toEqual([]);
+    expect(REVENUE_SQL).toContain('toInt64(round(sumIf(amount, isCharge) * 100)) AS gross_minor');
+    expect(REVENUE_SQL).toContain('toInt64(round(sumIf(amount, NOT isCharge) * -100)) AS refunds_minor');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -457,6 +468,30 @@ describe('superwall fetchSnapshot', () => {
     expect(bodyOf(calls[1]!)).toMatchObject({ y_axis: 'm_2026_mrr', x_axis: 'stateDay', date_filter: { dimension: 'tsDate' } });
   });
 
+  it('fails when the Active Subscriptions chart answers in a currency (wrong metric), not as a count', async () => {
+    const subs = clone(subsChart);
+    subs.y_axis.value_type = 'currency';
+    const { fetch, calls } = fakeFetch([route(DEFS, { json: definitionsFixture }), route(DATA, chartData({ subs }), { method: 'POST' })]);
+    const e = await catchErr(superwallAdapter.fetchSnapshot(input(), makeCtx(fetch)));
+    expect(e.kind).toBe('upstream');
+    expect(e.message).toMatch(/Active Subscriptions chart in an unexpected unit/);
+    expect(calls).toHaveLength(3); // no trials query after a failed required chart
+  });
+
+  it('leaves trials unknown (no query) when the budget is spent on the required charts', async () => {
+    const { fetch, calls } = fakeFetch(okRoutes());
+    const snap = await superwallAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 3 }));
+    expect(snap).toEqual({
+      mrr: { USD: 407189 },
+      activeSubscriptions: 409,
+      activeTrials: null,
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+    });
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual([DEFS, DATA, DATA]);
+  });
+
   it('maps 404 on any call to not_found on organizationId', async () => {
     const { fetch } = fakeFetch([route(DEFS, { status: 404, json: err404 })]);
     const e = await catchErr(superwallAdapter.fetchSnapshot(input(), makeCtx(fetch)));
@@ -522,6 +557,46 @@ describe('superwall fetchRevenue', () => {
     expect(calls).toHaveLength(2); // 'yield': no retries on 429
     expect(ctx.pageBudget).toBe(0);
     expect(logEvents(ctx)).toContain('superwall_revenue_paused');
+  });
+
+  it('on a rate limit before anything was read, hands back `since` as the cursor (nothing is lost)', async () => {
+    const { fetch, calls } = fakeFetch([route(QUERY, { status: 429, json: err429 })]);
+    const ctx = makeCtx(fetch);
+    const page = await superwallAdapter.fetchRevenue(input(), { since: Date.parse('2026-11-01T09:30:00Z'), cursor: null }, ctx);
+    expect(page).toEqual({ events: [], daily: [], nextCursor: '2026-11-01', done: false });
+    expect(calls).toHaveLength(1);
+    expect(ctx.logs.find((l) => l.event === 'superwall_revenue_paused')?.data).toEqual({ reason: 'rate_limit', resumeFrom: '2026-11-01', days: 0 });
+  });
+
+  it('returns its cursor without a request when there is no budget, and nothing for a future `since`', async () => {
+    const { fetch, calls } = fakeFetch([route(QUERY, { json: emptyRevenue })]);
+    const broke = await superwallAdapter.fetchRevenue(input(), { since: Date.parse('2026-11-01T09:30:00Z'), cursor: null }, makeCtx(fetch, { pageBudget: 0 }));
+    expect(broke).toEqual({ events: [], daily: [], nextCursor: '2026-11-01', done: false });
+
+    const future = await superwallAdapter.fetchRevenue(input(), { since: NOW + 2 * 86_400_000, cursor: null }, makeCtx(fetch));
+    expect(future).toEqual({ events: [], daily: [], nextCursor: null, done: true });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('starts at the UTC day of `since`, whatever offset it was written with', async () => {
+    const { fetch, calls } = fakeFetch([route(QUERY, { json: emptyRevenue })]);
+    const since = Date.parse('2026-11-04T23:30:00-02:00'); // 2026-11-05T01:30Z
+    const page = await superwallAdapter.fetchRevenue(input(), { since, cursor: null }, makeCtx(fetch));
+    expect(paramsOf(calls[0]!).get('param_day_from')).toBe(TODAY);
+    expect(page.daily.map((d) => d.day)).toEqual([TODAY]);
+  });
+
+  it('throws on a persistent 5xx (after one retry) instead of pausing or reporting zero revenue', async () => {
+    const { fetch, calls } = fakeFetch([route(QUERY, { status: 503, body: 'Service Unavailable' })]);
+    const e = await catchErr(superwallAdapter.fetchRevenue(input(), { since: NOW, cursor: null }, makeCtx(fetch)));
+    expect(e).toMatchObject({ kind: 'upstream', status: 503 });
+    expect(calls).toHaveLength(2); // QUERY_MAX_ATTEMPTS
+  });
+
+  it('throws auth on a revoked key mid-backfill', async () => {
+    const { fetch } = fakeFetch([route(QUERY, [{ json: emptyRevenue }, { status: 401, json: err401 }])]);
+    const e = await catchErr(superwallAdapter.fetchRevenue(input(), { since: Date.parse('2026-08-07T00:00:00Z'), cursor: null }, makeCtx(fetch)));
+    expect(e.kind).toBe('auth');
   });
 
   it('without data:read, finishes with no history instead of failing the sync', async () => {

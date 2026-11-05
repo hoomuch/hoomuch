@@ -84,8 +84,10 @@ describe('Sync now', () => {
     t.exec('UPDATE connections SET last_sync_started_at = ? WHERE id = ?', NOW - 10_000, REAL);
     const res = await send('POST', `/connections/${REAL}/sync`, {});
     expect(res.headers.get('location')).toBe(`/connections/${REAL}`);
-    expect(flash(res)).not.toBeNull();
     expect(pending).toHaveLength(0);
+    // The flash says why (any flash would have passed before).
+    const page = await htmlOf(await send('GET', `/connections/${REAL}`, undefined, [flash(res)!]));
+    expect(page).toContain('Synced moments ago. Try again in a minute.');
   });
 
   it('shows the run in progress, then its result', async () => {
@@ -114,10 +116,15 @@ describe('removing a connection', () => {
     expect(page).toMatch(/<form\b(?=[^>]*action="\/connections\/demo")(?=[^>]*method="post")[^>]*><button type="submit"[^>]*>Add it back<\/button><\/form>/);
   });
 
-  it('only sends demo removals back to the dashboard or the connections list', async () => {
-    const res = await send('POST', `/connections/${DEMO}/delete`, { back: '//evil.example' });
-    expect(res.headers.get('location')).toBe('/connections');
-  });
+  it.each(['//evil.example', 'https://evil.example', '/\\evil.example', '/\t/evil.example', '/dashboard/../evil'])(
+    'only sends demo removals back to the dashboard or the connections list (back=%j)',
+    async (back) => {
+      // Each case needs demo data to remove.
+      if (!(await listConnections(t.db, 'u1')).some((c) => c.id === DEMO)) throw new Error('setup: demo missing');
+      const res = await send('POST', `/connections/${DEMO}/delete`, { back });
+      expect(res.headers.get('location')).toBe('/connections');
+    },
+  );
 
   it('keeps the confirmation for a real connection and reopens Manage when it’s missing', async () => {
     const res = await send('POST', `/connections/${REAL}/delete`, {});

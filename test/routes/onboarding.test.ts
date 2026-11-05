@@ -87,6 +87,7 @@ describe('connecting', () => {
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toBe('/dashboard');
     expect(flashCookie(res)).not.toBeNull();
+    expect(res.headers.getSetCookie().some((c) => c.startsWith('__Host-hm_celebrate='))).toBe(false);
   });
 });
 

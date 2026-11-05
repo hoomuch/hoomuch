@@ -301,6 +301,15 @@ function oneProduct(subs: Array<{ sub?: SubOpts; sale?: SaleOpts | null }>, p: J
   return { products: [p], subs: { [p.id]: list }, productSales: { [p.id]: sales } };
 }
 
+const EMPTY_SNAPSHOT = {
+  mrr: {},
+  activeSubscriptions: 0,
+  activeTrials: 0,
+  revenuePeriod: null,
+  revenuePeriodDays: null,
+  newCustomers: null,
+};
+
 describe('gumroad fetchSnapshot', () => {
   it('prices the docs subscriber at its newest charge from the docs sales (USD, monthly)', async () => {
     const p = clone(productsFx.products[0]);
@@ -356,15 +365,23 @@ describe('gumroad fetchSnapshot', () => {
     expect(classifySubscriber({ ...base, status: null }, NOW)).toBe('unknown');
   });
 
+  // Expected values worked out by hand: price ÷ months per period, rounded half-up to a cent.
   it.each([
-    ['quarterly', 3000],
-    ['biannually', 6000],
-    ['yearly', 12000],
-    ['every_two_years', 24000],
-  ])('normalizes a %s charge to a month', async (recurrence, price) => {
+    ['monthly', 999, 999],
+    ['quarterly', 3000, 1000],
+    ['quarterly', 1000, 333], // 333.33
+    ['biannually', 6000, 1000],
+    ['biannually', 2500, 417], // 416.67
+    ['yearly', 12000, 1000],
+    ['yearly', 9900, 825],
+    ['yearly', 4999, 417], // 416.58
+    ['every_two_years', 24000, 1000],
+    ['every_two_years', 10000, 417], // 416.67
+  ])('normalizes a %s charge of %i cents to %i a month', async (recurrence, price, monthly) => {
     const p = product({ tiers: [{ name: 'First Tier', prices: { [recurrence]: price } }] });
     const { snap } = await snapshot(oneProduct([{ sub: { recurrence }, sale: { price, recurrence } }], p));
-    expect(snap.mrr).toEqual({ USD: 1000 });
+    expect(snap.mrr).toEqual({ USD: monthly });
+    expect(snap.activeSubscriptions).toBe(1);
   });
 
   it('keeps Gumroad’s merchant-of-record tax out (never in price) and backs inclusive seller tax out', async () => {
@@ -519,8 +536,25 @@ describe('gumroad fetchSnapshot', () => {
 
   it('leaves free tiers out of MRR and the active count', async () => {
     const p = product({ tiers: [{ name: 'Free', prices: { monthly: 0 } }] });
-    const { snap } = await snapshot(oneProduct([{ sale: { price: 0, tier: 'Free' } }], p));
-    expect(snap).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 0 });
+    const { snap, ctx } = await snapshot(oneProduct([{ sale: { price: 0, tier: 'Free' } }], p));
+    // toEqual, not toMatchObject: `mrr: {}` inside toMatchObject matches any MoneyMap.
+    expect(snap).toEqual(EMPTY_SNAPSHOT);
+    expect(ctx.logs.find((l) => l.event === 'gumroad_snapshot')?.data?.['priced']).toMatchObject({ zero: 1 });
+  });
+
+  it('returns an empty snapshot after one request when the seller has no products', async () => {
+    const { snap, calls } = await snapshot({ products: [], subs: {} });
+    expect(snap).toEqual(EMPTY_SNAPSHOT);
+    expect(pathsOf(calls)).toEqual(['/v2/products']);
+  });
+
+  it('keeps charge-priced (USD) and list-priced (product currency) subscribers in separate currencies', async () => {
+    const p = product({ currency: 'eur', tiers: [{ name: 'Only', prices: { monthly: 800 } }] });
+    // One subscriber renewed recently (USD charge); the other has no purchase to look up (EUR list price).
+    const setup = oneProduct([{ sale: { price: 1000 } }, { sub: { purchaseIds: [] }, sale: null }], p);
+    const { snap } = await snapshot(setup);
+    expect(snap.mrr).toEqual({ USD: 1000, EUR: 800 });
+    expect(snap.activeSubscriptions).toBe(2);
   });
 
   it('skips products that aren’t memberships and prices legacy subscriptions from their base price', async () => {
@@ -575,7 +609,7 @@ describe('gumroad fetchSnapshot', () => {
     const { fetch } = fakeFetch([route('/v2/products', { json: page('products', [p]) }), route(subsPath(p.id), { json: notFoundFx })]);
     const ctx = makeCtx(fetch);
     const snap = await gumroadAdapter.fetchSnapshot(input(), ctx);
-    expect(snap).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 0 });
+    expect(snap).toEqual(EMPTY_SNAPSHOT);
     expect(ctx.logs.find((l) => l.event === 'gumroad_snapshot')?.data).toMatchObject({ vanished: 1 });
   });
 
@@ -586,9 +620,14 @@ describe('gumroad fetchSnapshot', () => {
   });
 
   it('refuses a repeated next_page_key instead of looping', async () => {
-    const { fetch } = fakeFetch([route('/v2/products', { json: page('products', [], 'same-key') })]);
+    const { fetch, calls } = fakeFetch([route('/v2/products', { json: page('products', [], 'same-key') })]);
     const err = await catchErr(gumroadAdapter.fetchSnapshot(input(), makeCtx(fetch)));
+    // Without the repeated-key guard the loop would run until the budget is gone and throw
+    // BudgetExhaustedError, which is also kind 'upstream': pin the request count and the error type.
+    expect(err).not.toBeInstanceOf(BudgetExhaustedError);
     expect(err.kind).toBe('upstream');
+    expect(err.message).toMatch(/couldn’t read/);
+    expect(calls).toHaveLength(2);
   });
 
   it('maps a revoked token and a missing scope', async () => {
@@ -687,6 +726,54 @@ describe('gumroad fetchRevenue', () => {
       },
     ]);
     expect(ctx.logs.find((l) => l.event === 'gumroad_revenue')?.data).toMatchObject({ charges: 1, refunds: 1, lateRefunds: 1, done: true });
+  });
+
+  it('treats `since` and the refund floor as inclusive, to the millisecond', async () => {
+    const floor = INCREMENTAL_SINCE - REFUND_LOOKBACK_MS;
+    const atSince = sale({ at: INCREMENTAL_SINCE });
+    const justBefore = sale({ at: INCREMENTAL_SINCE - 1, refunded: true });
+    const atFloor = sale({ at: floor, refunded: true, price: 700 });
+    const belowFloor = sale({ at: floor - 1, refunded: true });
+    const { res, calls } = await revenue([salesRoute([atSince, justBefore, atFloor, belowFloor], 'pk-never-read')], INCREMENTAL_SINCE);
+    expect(res.events.map((e) => [e.externalId, e.type, e.amount, e.occurredAt])).toEqual([
+      [atSince.id, 'charge', 1000, INCREMENTAL_SINCE],
+      [`${justBefore.id}:refund`, 'refund', -1000, INCREMENTAL_SINCE - 1], // stored by an earlier sync: refund only
+      [`${atFloor.id}:refund`, 'refund', -700, floor],
+    ]);
+    expect(res.done).toBe(true);
+    expect(calls).toHaveLength(1); // the sale below the floor ends the traversal
+  });
+
+  it('finishes with no events on an empty sales page', async () => {
+    const { res, calls } = await revenue([salesRoute([])], INCREMENTAL_SINCE);
+    expect(res).toEqual({ events: [], daily: [], nextCursor: null, done: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('fails on an in-band failure or a sales page without a `sales` array (never reports it as no revenue)', async () => {
+    const failed = await catchErr(revenue([route('/v2/sales', { json: { success: false, message: 'Something went wrong.' } })], INCREMENTAL_SINCE));
+    expect(failed.kind).toBe('upstream');
+    expect(failed.message).toMatch(/Something went wrong/);
+
+    const shapeless = await catchErr(revenue([route('/v2/sales', { json: { success: true } })], INCREMENTAL_SINCE));
+    expect(shapeless.kind).toBe('upstream');
+    expect(shapeless.message).toMatch(/couldn’t read/);
+  });
+
+  it('throws on a persistent 5xx (only a 429 yields a cursor)', async () => {
+    const { fetch, calls } = fakeFetch([route('/v2/sales', { status: 502, body: '' })]);
+    const err = await catchErr(gumroadAdapter.fetchRevenue(input(), { since: INCREMENTAL_SINCE, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', status: 502 });
+    expect(calls).toHaveLength(3); // fetchJson's retries
+  });
+
+  it('refuses a sales page that repeats the key it was read with, instead of re-reading it until the budget runs out', async () => {
+    const a = sale({ at: NOW - DAY });
+    const b = sale({ at: NOW - 2 * DAY });
+    const { fetch, calls } = fakeFetch([salesRoute([a], 'pk-1'), salesRoute([b], 'pk-1', { pageKey: 'pk-1' })]);
+    const err = await catchErr(gumroadAdapter.fetchRevenue(input(), { since: INCREMENTAL_SINCE, cursor: null }, makeCtx(fetch, { pageBudget: 20 })));
+    expect(err.kind).toBe('upstream');
+    expect(calls).toHaveLength(2);
   });
 
   it('prices the docs partial refund from amount_refundable_in_currency ($10, $8 refundable → −$2)', async () => {

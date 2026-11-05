@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   BACKFILL_DAYS,
   MAX_DESCRIPTION_LENGTH,
+  MAX_FUTURE_SKEW_MS,
+  MIN_PLAUSIBLE_TIME,
   REVENUE_OVERLAP_MS,
   advanceRevenue,
   affectedDayRange,
@@ -93,6 +95,21 @@ describe('cleanEvents', () => {
     );
     expect(events.map((e) => e.externalId)).toEqual(['ok']);
     expect(skipped).toEqual({ shape: 2, external_id: 3, occurred_at: 4, type: 1, amount: 6, currency: 2 });
+  });
+
+  it('accepts timestamps up to the plausibility bounds inclusive, and nothing past them', () => {
+    const at = (occurredAt: number, externalId: string) => ev({ occurredAt, externalId });
+    const { events, skipped } = cleanEvents(
+      [
+        at(MIN_PLAUSIBLE_TIME, 'oldest-ok'),
+        at(MIN_PLAUSIBLE_TIME - 1, 'too-old'),
+        at(NOW + MAX_FUTURE_SKEW_MS, 'skew-ok'),
+        at(NOW + MAX_FUTURE_SKEW_MS + 1, 'too-new'),
+      ],
+      NOW,
+    );
+    expect(events.map((e) => e.externalId)).toEqual(['oldest-ok', 'skew-ok']);
+    expect(skipped).toEqual({ occurred_at: 2 });
   });
 
   it('dedupes by externalId, last one wins', () => {

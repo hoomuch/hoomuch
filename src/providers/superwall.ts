@@ -426,14 +426,16 @@ function sql(text: string): string {
 
 /**
  * Daily gross / refunds / charge count in USD minor units, for UTC days [{day_from}, {day_after}).
+ * Dollars become cents with round() before the Int64 cast: toInt64 truncates a float toward zero, and
+ * 19.99 * 100 is 1998.9999…, so a bare cast would lose a cent (round is exact for a Decimal too).
  * The scan starts a day early ({scan_from}) so a transaction reported by two sources either side of midnight is
  * dated by its first report, the same in every window, and then dropped if that day is before {day_from}.
  */
 export const REVENUE_SQL = sql(`
   SELECT
     day,
-    toInt64(sumIf(amount, isCharge) * 100) AS gross_minor,
-    toInt64(sumIf(amount, NOT isCharge) * -100) AS refunds_minor,
+    toInt64(round(sumIf(amount, isCharge) * 100)) AS gross_minor,
+    toInt64(round(sumIf(amount, NOT isCharge) * -100)) AS refunds_minor,
     countIf(isCharge) AS charges
   FROM
   (

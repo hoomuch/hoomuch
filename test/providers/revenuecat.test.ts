@@ -251,6 +251,22 @@ describe('revenuecat verify', () => {
     expect(calls).toHaveLength(3); // retried by fetchJson
   });
 
+  it('shows RevenueCat’s reason (no field) when it refuses the overview request itself (400)', async () => {
+    const { fetch } = fakeFetch([route(OVERVIEW, { status: 400, json: { ...err400, param: 'project_id', message: 'Invalid project id' } })]);
+    const res = await revenueCatAdapter.verify(input(), makeCtx(fetch));
+    expect(res).toEqual({ ok: false, error: 'RevenueCat returned HTTP 400: Invalid project id' });
+  });
+
+  it('connects with an "unknown" Charts warning when only the overview fits the budget', async () => {
+    const { fetch, calls } = fakeFetch([route(OVERVIEW, { json: overviewFixture })]);
+    const res = await revenueCatAdapter.verify(input(), makeCtx(fetch, { pageBudget: 1 }));
+    expect(res).toMatchObject({ ok: true, config: { projectId: PROJECT, reportingCurrency: 'USD' } });
+    if (!res.ok) return;
+    expect(res.config).not.toHaveProperty('revenueHistory'); // decided on the first sync, not guessed
+    expect(res.warnings).toEqual([expect.stringMatching(/couldn’t check RevenueCat Charts access/)]);
+    expect(calls).toHaveLength(1);
+  });
+
   it('never reports test mode: API v2 secret keys are project-wide, with no sandbox variant', async () => {
     const { fetch } = fakeFetch([route(OVERVIEW, { json: overviewFixture }), route(REVENUE, emptyChart('Revenue'))]);
     const res = await revenueCatAdapter.verify(input(), makeCtx(fetch));
@@ -297,6 +313,13 @@ describe('revenuecat fetchSnapshot', () => {
   it('fails the snapshot (instead of writing a false zero) when the overview lacks MRR or subscriptions', async () => {
     const { fetch } = fakeFetch([route(OVERVIEW, { json: { object: 'overview_metrics', metrics: [], currency: 'USD' } })]);
     await expect(revenueCatAdapter.fetchSnapshot(input(), makeCtx(fetch))).rejects.toMatchObject({ kind: 'upstream' });
+
+    // Either one missing is enough: a 0 subscription count next to a real MRR is just as false.
+    for (const keep of ['mrr', 'active_subscriptions']) {
+      const body = { ...clone(overviewFixture), metrics: overviewFixture.metrics.filter((m) => m.id === keep) };
+      const one = fakeFetch([route(OVERVIEW, { json: body })]);
+      await expect(revenueCatAdapter.fetchSnapshot(input(), makeCtx(one.fetch))).rejects.toMatchObject({ kind: 'upstream' });
+    }
   });
 
   it('respects zero-decimal currencies and the payload period', async () => {
@@ -436,16 +459,36 @@ describe('revenuecat fetchRevenue', () => {
 
   it('retries a 429 using RevenueCat backoff and spends one budget unit per logical request', async () => {
     const sleeps = recordSleeps();
+    // No Retry-After header and a distinctive backoff_ms, so the sleep can only have come from the body.
     const { fetch, calls } = fakeFetch([
-      route(REVENUE, [{ status: 429, headers: { 'retry-after': '1' }, json: err429 }, { json: revenueChart }]),
+      route(REVENUE, [{ status: 429, json: { ...err429, backoff_ms: 2500 } }, { json: revenueChart }]),
       route(REFUNDS, { json: refundsChart }),
     ]);
     const ctx = makeCtx(fetch, { pageBudget: 5 });
     const page = await revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
     expect(page.daily).toEqual(expectedWithRefunds);
-    expect(sleeps).toEqual([1000]);
+    expect(sleeps).toEqual([2500]);
     expect(calls).toHaveLength(3);
     expect(ctx.pageBudget).toBe(3);
+  });
+
+  it('throws a revoked key (401) on Charts instead of finishing the backfill with no history', async () => {
+    const { fetch, calls } = fakeFetch([route(REVENUE, { status: 401, json: err401 })]);
+    const err = await catchErr(revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: '2026-10-30' }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'auth', status: 401 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('labels points with the chart’s reported currency, and ignores a Refunds chart in another currency', async () => {
+    const eurRevenue = { ...clone(revenueChart), yaxis_currency: 'EUR' };
+    const { fetch } = fakeFetch([route(REVENUE, { json: eurRevenue }), route(REFUNDS, { json: refundsChart })]); // refunds: USD
+    const ctx = makeCtx(fetch);
+    const page = await revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
+    expect(page.daily.map((p) => p.currency)).toEqual(Array(7).fill('EUR'));
+    // USD refunds must not be mixed into EUR revenue: net stays exact, refunds only where the net is negative.
+    expect(page.daily.find((p) => p.day === '2026-11-01')).toEqual({ day: '2026-11-01', currency: 'EUR', gross: 4550, refunds: 0, count: 3 });
+    expect(page.daily.find((p) => p.day === '2026-11-03')).toEqual({ day: '2026-11-03', currency: 'EUR', gross: 0, refunds: 499, count: 1 });
+    expect(ctx.logs.find((l) => l.event === 'revenuecat_refunds_unavailable')?.data).toEqual({ reason: 'currency_mismatch', status: null });
   });
 
   it('throws rate_limit (not a silent fallback) when the 429s persist', async () => {
@@ -467,8 +510,16 @@ describe('revenuecat fetchRevenue', () => {
     const ctx = makeCtx(fetch, { pageBudget: 1 });
     const page = await revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
     expect(page.done).toBe(true);
-    expect(page.daily).toHaveLength(7);
-    expect(page.daily.every((p) => p.gross - p.refunds >= -499)).toBe(true);
+    // Without Refunds, each day is RevenueCat's net revenue; only the net-negative day shows a refund.
+    expect(page.daily).toEqual([
+      { day: '2026-10-30', currency: 'USD', gross: 12999, refunds: 0, count: 7 },
+      { day: '2026-10-31', currency: 'USD', gross: 0, refunds: 0, count: 0 },
+      { day: '2026-11-01', currency: 'USD', gross: 4550, refunds: 0, count: 3 },
+      { day: '2026-11-02', currency: 'USD', gross: 0, refunds: 0, count: 0 },
+      { day: '2026-11-03', currency: 'USD', gross: 0, refunds: 499, count: 1 },
+      { day: '2026-11-04', currency: 'USD', gross: 1999, refunds: 0, count: 1 },
+      { day: '2026-11-05', currency: 'USD', gross: 1234, refunds: 0, count: 2 },
+    ]);
     expect(calls).toHaveLength(1);
     expect(logEvents(ctx)).toContain('revenuecat_refunds_skipped');
   });
@@ -522,6 +573,18 @@ describe('revenuecat fetchRevenue', () => {
     );
     expect(future).toEqual({ events: [], daily: [], nextCursor: null, done: true });
     expect(calls).toHaveLength(2);
+  });
+
+  it('finds the money and count measures by unit/name, not by position', async () => {
+    const body = clone(revenueChart);
+    body.measures = [revenueChart.measures[1]!, revenueChart.measures[0]!]; // Transactions (#) first, Revenue ($) second
+    body.values = [
+      { cohort: 1793836800, incomplete: true, measure: 0, value: 2 },
+      { cohort: 1793836800, incomplete: true, measure: 1, value: 12.34 },
+    ];
+    const { fetch } = fakeFetch([route(REVENUE, { json: body }), route(REFUNDS, emptyChart('Refunds'))]);
+    const page = await revenueCatAdapter.fetchRevenue(input(), { since: NOW, cursor: null }, makeCtx(fetch));
+    expect(page.daily).toEqual([{ day: TODAY, currency: 'USD', gross: 1234, refunds: 0, count: 2 }]);
   });
 
   it('accepts millisecond cohorts and drops points outside the requested window', async () => {

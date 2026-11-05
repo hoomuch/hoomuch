@@ -93,9 +93,14 @@ const queryOf = (c: RecordedCall, k: string) => new URL(c.url).searchParams.get(
 // ---------- verify ----------
 
 describe('paddle verify', () => {
-  it('accepts the documented example keys as well-formed', () => {
-    expect(LIVE_KEY).toHaveLength(69);
-    expect(SANDBOX_KEY).toHaveLength(69);
+  it.each([
+    [LIVE_KEY, 'https://api.paddle.com/'],
+    [SANDBOX_KEY, 'https://sandbox-api.paddle.com/'],
+  ])('accepts the documented example key %s as well-formed (69 chars, one request to its own host)', async (key, url) => {
+    expect(key).toHaveLength(69);
+    const { fetch, calls } = fakeFetch([route('/', { json: root(ALL_READ) })]);
+    await paddleAdapter.verify(input(key), makeCtx(fetch));
+    expect(calls.map((c) => c.url)).toEqual([url]); // the format check let it through
   });
 
   it.each([
@@ -241,14 +246,20 @@ const countRoutes = (active: number, trials: number): Route[] => [
 
 describe('paddle fetchSnapshot (metrics)', () => {
   it('reads the newest refreshed MRR point and counts subscriptions from estimated_total in 3 requests', async () => {
+    // The docs example (2025-09-01 … 09-04), moved into the requested window: Paddle only returns points in [from, to).
+    const docs = clone(metricsMrrFx);
+    const shift = Date.parse('2026-11-01T00:00:00Z') - Date.parse('2025-09-01T00:00:00Z');
+    const moved = (t: string) => iso(Date.parse(t) + shift).replace('.000Z', 'Z');
+    for (const p of docs.data.timeseries) p.timestamp = moved(p.timestamp);
+    for (const k of ['starts_at', 'ends_at', 'updated_at']) docs.data[k] = moved(docs.data[k]);
     const { fetch, calls } = fakeFetch([
-      route('/metrics/monthly-recurring-revenue', { json: clone(metricsMrrFx) }, { query: { from: '2026-10-29', to: '2026-11-06' } }),
+      route('/metrics/monthly-recurring-revenue', { json: docs }, { query: { from: '2026-10-29', to: '2026-11-06' } }),
       ...countRoutes(1234, 56),
     ]);
     const ctx = makeCtx(fetch, { pageBudget: 10 });
     const snap = await paddleAdapter.fetchSnapshot(input(), ctx);
     expect(snap).toEqual({
-      mrr: { USD: 1420987654 }, // the docs example's last point (2025-09-04)
+      mrr: { USD: 1420987654 }, // the docs example's last point
       activeSubscriptions: 1234,
       activeTrials: 56,
       revenuePeriod: null,
@@ -257,7 +268,7 @@ describe('paddle fetchSnapshot (metrics)', () => {
     });
     expect(calls).toHaveLength(3);
     expectPaddleHeaders(calls);
-    expect(ctx.logs.find((l) => l.event === 'paddle_snapshot')?.data).toMatchObject({ source: 'metrics', day: '2025-09-04' });
+    expect(ctx.logs.find((l) => l.event === 'paddle_snapshot')?.data).toMatchObject({ source: 'metrics', day: '2026-11-04' });
   });
 
   it('ignores points Paddle has not refreshed yet instead of reading them as 0', async () => {
@@ -657,6 +668,55 @@ describe('paddle fetchSnapshot (estimate from subscriptions)', () => {
     expect(err.field).toBe('apiKey');
     expect(calls).toHaveLength(0);
   });
+
+  it('keeps a subscription with a scheduled cancellation in MRR until it takes effect (SPEC §6)', async () => {
+    const leaving = simple(4000);
+    leaving['scheduled_change'] = { action: 'cancel', effective_at: iso(NOW + 10 * DAY), resume_at: null };
+    const { snap } = await estimate({ subs: [leaving, simple(1000)] });
+    expect(snap).toMatchObject({ mrr: { USD: 5000 }, activeSubscriptions: 2 });
+  });
+
+  it('fails the snapshot when the discount lookup hits a 5xx, instead of estimating before discounts', async () => {
+    const d = pid('dsc');
+    const { fetch } = fakeFetch(
+      estimateRoutes({
+        extra: [route('/discounts', { status: 500, json: { error: { type: 'api_error', code: 'internal_error', detail: 'oops' } } })],
+        subs: [simple(4000, { discount: subDiscount(d) })],
+      }),
+    );
+    const err = await catchErr(paddleAdapter.fetchSnapshot(input(SANDBOX_KEY), makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(err.status).toBe(500);
+  });
+
+  it.each([
+    ['a list without data', { json: { meta: clone(subscriptionsFx.meta) } }],
+    ['a non-JSON body', { body: '<html>Bad Gateway</html>' }],
+  ])('refuses %s as unreadable instead of estimating an MRR of 0', async (_label, responder) => {
+    const { fetch } = fakeFetch([route('/subscriptions', responder)]);
+    const err = await catchErr(paddleAdapter.fetchSnapshot(input(SANDBOX_KEY), makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(err.message).toMatch(/couldn’t read/);
+  });
+
+  it('stops on an empty page that claims has_more, and refuses a malformed `after` id instead of re-reading page 1', async () => {
+    const empty = await estimate({
+      extra: [route('/subscriptions', { json: list([], { hasMore: true, perPage: 200 }) }, { query: { status: 'active,past_due' } })],
+    });
+    expect(empty.snap).toMatchObject({ mrr: {}, activeSubscriptions: 0 });
+    expect(empty.calls.map((c) => queryOf(c, 'status'))).toEqual(['active,past_due', 'trialing']);
+
+    const bad = simple(1000);
+    bad['id'] = 'not-a-paddle-id';
+    const { fetch, calls } = fakeFetch([
+      route('/subscriptions', { json: list([bad], { hasMore: true, perPage: 200 }) }, { query: { status: 'active,past_due' } }),
+    ]);
+    const ctx = makeCtx(fetch);
+    const err = await catchErr(paddleAdapter.fetchSnapshot(input(SANDBOX_KEY), ctx));
+    expect(err.kind).toBe('upstream');
+    expect(calls).toHaveLength(1);
+    expect(ctx.logs.some((l) => l.event === 'paddle_bad_payload')).toBe(true);
+  });
 });
 
 // ---------- revenue ----------
@@ -884,7 +944,7 @@ describe('paddle fetchRevenue', () => {
   it('returns its cursor untouched without calling Paddle when no budget is left', async () => {
     const { fetch, calls } = fakeFetch([]);
     const r = await paddleAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch, { pageBudget: 0 }));
-    expect(r).toMatchObject({ events: [], daily: [], done: false });
+    expect(r).toMatchObject({ events: [], daily: [], done: false, nextCursor: expect.any(String) });
     expect(calls).toHaveLength(0);
 
     const next = fakeFetch([txnRoute([]), adjRoute([])]);
@@ -906,6 +966,25 @@ describe('paddle fetchRevenue', () => {
     }
     expect(calls).toHaveLength(8);
     expect(ctx.logs.filter((l) => l.event === 'paddle_cursor_invalid')).toHaveLength(4);
+  });
+
+  it('moves on (and then finishes) when a page claims has_more but is empty', async () => {
+    const { fetch, calls } = fakeFetch([
+      route('/transactions', { json: list([], { hasMore: true, perPage: 30, total: -1, path: '/transactions' }) }),
+      route('/adjustments', { json: list([], { hasMore: true, perPage: 50, total: -1, path: '/adjustments' }) }),
+    ]);
+    const page = await paddleAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch));
+    expect(page).toEqual({ events: [], daily: [], nextCursor: null, done: true });
+    expect(calls.map(pathOf)).toEqual(['/transactions', '/adjustments']);
+  });
+
+  it('fails on a 5xx (after retries) instead of returning a partial page as if Paddle had rate-limited', async () => {
+    const { fetch, calls } = fakeFetch([
+      route('/transactions', { status: 502, json: { error: { type: 'api_error', code: 'bad_gateway', detail: 'Bad gateway' } } }),
+    ]);
+    const err = await catchErr(paddleAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(calls).toHaveLength(3); // DEFAULT_MAX_ATTEMPTS
   });
 
   it('names the missing permission when a list is forbidden', async () => {

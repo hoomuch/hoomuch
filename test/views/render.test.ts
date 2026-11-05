@@ -6,7 +6,8 @@
 import { describe, expect, it } from 'vitest';
 import { serializePayload } from '../../src/views/page-root';
 import { renderDocument } from '../../src/views/render';
-import { FIXTURE_NOW } from '../../src/views/fixtures';
+import { FIXTURE_CONNECTIONS, FIXTURE_NOW } from '../../src/views/fixtures';
+import { HOUR } from '../../src/lib/time';
 
 const chrome = { user: null, flash: null };
 
@@ -38,8 +39,15 @@ describe('renderDocument', () => {
   });
 
   it('dates relative times with the request clock, so the browser hydrates the same text', () => {
-    const html = renderDocument('notFound', { chrome }, FIXTURE_NOW);
+    // A page that shows a relative time and leaves `now` to the request clock (no `now` prop).
+    // The old version of this test rendered the 404 page, which has no relative time at all.
+    const connections = [FIXTURE_CONNECTIONS[0]!]; // last synced FIXTURE_NOW − 4 min
+    const at = (now: number) => renderDocument('connections', { chrome, connections }, now);
+    const html = at(FIXTURE_NOW);
     expect(payloadOf(html).now).toBe(FIXTURE_NOW);
+    expect(html).toMatch(/<time [^>]*>4 min ago<\/time>/);
+    // Same props, later request: the label follows the clock handed in, not the process clock.
+    expect(at(FIXTURE_NOW + 2 * HOUR)).toMatch(/<time [^>]*>2 h ago<\/time>/);
   });
 });
 

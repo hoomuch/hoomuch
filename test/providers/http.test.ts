@@ -4,11 +4,12 @@ import {
   buildUrl,
   fetchJson,
   hasBudget,
+  MAX_RETRY_WAIT_MS,
   RateLimitedError,
   sanitizeErrorText,
 } from '../../src/providers/http';
 import { ProviderError } from '../../src/providers/types';
-import { expectNoSecretsInLogs, fakeFetch, makeCtx, recordSleeps, route } from '../fixtures/harness';
+import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, recordSleeps, route } from '../fixtures/harness';
 
 const URL_ = 'https://api.example.com/v1/things?limit=1';
 const spec = (extra: Partial<Parameters<typeof fetchJson>[1]> = {}) => ({
@@ -55,8 +56,34 @@ describe('fetchJson', () => {
     await expect(fetchJson(ctx, spec())).resolves.toEqual({ ok: true });
     expect(calls).toHaveLength(3);
     expect(sleeps).toHaveLength(2);
-    expect(sleeps[1]!).toBeGreaterThan(sleeps[0]! - 200); // exponential, with jitter
+    // Exponential from 400 ms, plus up to 200 ms of jitter: attempt 1 waits [400, 600), attempt 2 [800, 1000).
+    // (The old `sleeps[1] > sleeps[0] - 200` also passed for a constant backoff.)
+    expect(sleeps[0]!).toBeGreaterThanOrEqual(400);
+    expect(sleeps[0]!).toBeLessThan(600);
+    expect(sleeps[1]!).toBeGreaterThanOrEqual(800);
+    expect(sleeps[1]!).toBeLessThan(1000);
     expect(ctx.pageBudget).toBe(4);
+  });
+
+  it('honours Retry-After as an HTTP date, measured against the injected clock', async () => {
+    const sleeps = recordSleeps();
+    const at = new Date(NOW + 3_000).toUTCString(); // whole seconds, so exactly 3 s after NOW
+    const { fetch } = fakeFetch([route('/v1/things', [{ status: 503, headers: { 'retry-after': at }, json: {} }, { json: { ok: 1 } }])]);
+    await expect(fetchJson(makeCtx(fetch, { now: NOW }), spec())).resolves.toEqual({ ok: 1 });
+    expect(sleeps).toEqual([3_000]);
+  });
+
+  it('sleeps through a Retry-After of exactly the 10 s cap, but not one second more', async () => {
+    const sleeps = recordSleeps();
+    const ok = fakeFetch([route('/v1/things', [{ status: 429, headers: { 'retry-after': '10' }, json: {} }, { json: { ok: 1 } }])]);
+    await expect(fetchJson(makeCtx(ok.fetch), spec())).resolves.toEqual({ ok: 1 });
+    expect(sleeps).toEqual([MAX_RETRY_WAIT_MS]);
+
+    const over = fakeFetch([route('/v1/things', { status: 429, headers: { 'retry-after': '11' }, json: {} })]);
+    const err = await catchErr(fetchJson(makeCtx(over.fetch), spec()));
+    expect(err.kind).toBe('rate_limit');
+    expect(over.calls).toHaveLength(1);
+    expect(sleeps).toEqual([MAX_RETRY_WAIT_MS]); // no second sleep
   });
 
   it('honours Retry-After seconds on 429', async () => {
@@ -77,12 +104,16 @@ describe('fetchJson', () => {
     expect(sleeps).toEqual([750]);
   });
 
-  it('gives up with rate_limit after 3 attempts', async () => {
-    recordSleeps();
+  it('gives up with rate_limit after 3 attempts, spending one unit of budget', async () => {
+    const sleeps = recordSleeps();
     const { fetch, calls } = fakeFetch([route('/v1/things', { status: 429, json: {} })]);
-    const err = await catchErr(fetchJson(makeCtx(fetch), spec()));
+    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    const err = await catchErr(fetchJson(ctx, spec()));
     expect(err.kind).toBe('rate_limit');
+    expect(err.status).toBe(429);
     expect(calls).toHaveLength(3);
+    expect(sleeps).toHaveLength(2); // no sleep after the last attempt
+    expect(ctx.pageBudget).toBe(4);
   });
 
   it('does not sleep through an excessive Retry-After', async () => {
@@ -133,6 +164,14 @@ describe('fetchJson', () => {
     expect(err.kind).toBe('not_found');
     expect(err.message).toBe('Project not found.');
     expect(err.field).toBe('projectId');
+  });
+
+  it('maps 404 without a caller message to the path only, never the query string', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/things', { status: 404, json: { message: 'nope' } })]);
+    const err = await catchErr(fetchJson(makeCtx(fetch), spec({ url: 'https://api.example.com/v1/things?api_key=sk_live_x1y2z3' })));
+    expect(err.kind).toBe('not_found');
+    expect(err.message).toBe('Example couldn’t find /v1/things.');
+    expect(calls).toHaveLength(1); // 4xx are never retried
   });
 
   it('maps exhausted 5xx, network errors, timeouts and bad JSON to upstream', async () => {

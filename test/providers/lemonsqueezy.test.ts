@@ -423,11 +423,112 @@ describe('lemonsqueezy fetchSnapshot', () => {
     expectClean(ctx, s);
   });
 
-  it('pages through each status listing', async () => {
+  it('pages through each status listing, and stops at its last page', async () => {
     const { s, calls } = await snap(SUBS, LIVE, 2);
     expect(s.mrr).toEqual({ EUR: 9550, USD: 3000 });
-    expect(pagesOf(calls, '/v1/subscriptions').filter((p) => p > 1).length).toBeGreaterThan(0);
+    // Pages of 2: active has 9 subscriptions (5 pages), past_due 1, cancelled 5 (3 pages), on_trial 2.
+    const listings = callsTo(calls, '/v1/subscriptions').map((c) => {
+      const q = new URL(c.url).searchParams;
+      return `${q.get('filter[status]')}:${q.get('page[number]')}`;
+    });
+    expect(listings).toEqual([
+      'active:1', 'active:2', 'active:3', 'active:4', 'active:5',
+      'past_due:1',
+      'cancelled:1', 'cancelled:2', 'cancelled:3',
+      'on_trial:1',
+    ]);
     expect(pagesOf(calls, '/v1/discounts')).toEqual([1, 2, 3]);
+  });
+
+  it('without meta.page, a full page means “read on” and a short (or empty) one ends the listing', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => {
+      const s = clone(subsById(1)[0]!);
+      s.id = String(1000 + i);
+      s.attributes['order_id'] = 90_000 + i;
+      return s;
+    });
+    const listing = jsonApiList(() => many);
+    const server = lsServer({ subscriptions: many });
+    server.routes.unshift(
+      route('/v1/subscriptions', (url) => {
+        const r = listing(url);
+        delete (r.json as Record<string, unknown>)['meta'];
+        return r;
+      }),
+    );
+    const s = await ls.fetchSnapshot(input(), makeCtx(server.fetch, { pageBudget: 30 }));
+    expect(s).toMatchObject({ mrr: { EUR: 150 * 900 }, activeSubscriptions: 150 });
+    expect(pagesOf(server.calls, '/v1/subscriptions')).toEqual([1, 2, 1, 1, 1]); // active 100 + 50, then three empty statuses
+  });
+
+  it.each([
+    ['a list without data', { json: { jsonapi: { version: '1.0' }, data: 'nope' } }],
+    ['a non-JSON body', { body: '<html>Bad Gateway</html>' }],
+  ])('refuses %s as unreadable instead of reporting an MRR of 0', async (_label, responder) => {
+    const { fetch } = fakeFetch([route('/v1/subscriptions', responder)]);
+    const ctx = makeCtx(fetch);
+    const err = await catchErr(ls.fetchSnapshot(input(), ctx));
+    expect(err.kind).toBe('upstream');
+    expect(err.message).toMatch(/couldn’t read/);
+  });
+
+  it('surfaces a revoked key (401) during a snapshot as an auth error, without retrying', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/subscriptions', { status: 401, json: error401 })]);
+    const ctx = makeCtx(fetch);
+    const err = await catchErr(ls.fetchSnapshot(input(), ctx));
+    expect(err.kind).toBe('auth');
+    expect(calls).toHaveLength(1);
+    expectNoSecretsInLogs(ctx, [KEY]);
+  });
+
+  it.each([
+    [403, { errors: [{ status: '403', title: 'Forbidden', detail: 'Forbidden' }] }, 'permission'],
+    [404, error404, 'not_found'],
+  ])('discount endpoints answering %i: MRR before discounts, logged, not a failure', async (status, json, reason) => {
+    const server = lsServer({ subscriptions: subsById(17) });
+    server.routes.unshift(route('/v1/discounts', { status, json }));
+    const ctx = makeCtx(server.fetch);
+    const s = await ls.fetchSnapshot(input(), ctx);
+    expect(s).toMatchObject({ mrr: { EUR: 900 }, activeSubscriptions: 1 }); // #17 without its 50% off
+    expect(ctx.logs.find((l) => l.event === 'ls_discounts_skipped')?.data).toMatchObject({ reason });
+  });
+
+  it('a discount endpoint failing with a 5xx fails the snapshot instead of dropping discounts', async () => {
+    const server = lsServer({ subscriptions: subsById(17) });
+    server.routes.unshift(route('/v1/discount-redemptions', { status: 500, json: { errors: [{ status: '500', title: 'Server Error' }] } }));
+    const err = await catchErr(ls.fetchSnapshot(input(), makeCtx(server.fetch)));
+    expect(err.kind).toBe('upstream');
+  });
+
+  // SPEC §6: active means MRR above 0, as in Stripe / Paddle / Polar / Chargebee.
+  it('a subscription discounted 100% forever adds no MRR and is not counted as active', async () => {
+    const server = lsServer({ subscriptions: subsById(17) });
+    Object.assign(server.state.discounts.find((d) => d.id === '31')!.attributes, { amount: 100 });
+    Object.assign(server.state.redemptions.find((r) => r.id === '44')!.attributes, { discount_amount: 100 });
+    const s = await ls.fetchSnapshot(input(), makeCtx(server.fetch));
+    expect(s.mrr['EUR'] ?? 0).toBe(0);
+    expect(s.activeSubscriptions).toBe(0);
+  });
+
+  it('a partly discounted subscription still counts, at its discounted price', async () => {
+    const server = lsServer({ subscriptions: subsById(17) });
+    Object.assign(server.state.discounts.find((d) => d.id === '31')!.attributes, { amount: 50, amount_type: 'percent' });
+    Object.assign(server.state.redemptions.find((r) => r.id === '44')!.attributes, { discount_amount: 50, discount_amount_type: 'percent' });
+    const full = await ls.fetchSnapshot(input(), makeCtx(lsServer({ subscriptions: subsById(17), redemptions: [] }).fetch));
+    const half = await ls.fetchSnapshot(input(), makeCtx(server.fetch));
+    expect(full.activeSubscriptions).toBe(1);
+    expect(half.activeSubscriptions).toBe(1);
+    expect(half.mrr['EUR']).toBe(Math.round(full.mrr['EUR']! / 2));
+  });
+
+  it('a $0 plan is not a paying subscription', async () => {
+    const server = lsServer({ subscriptions: subsById(17), redemptions: [] });
+    const price = clone(PRICES.find((p) => p.id === '11')!) as Row;
+    Object.assign(price.attributes, { unit_price: 0, unit_price_decimal: null });
+    server.routes.unshift(route('/v1/prices/11', { json: { jsonapi: { version: '1.0' }, data: price } }));
+    const s = await ls.fetchSnapshot(input(), makeCtx(server.fetch));
+    expect(s.mrr).toEqual({});
+    expect(s.activeSubscriptions).toBe(0);
   });
 
   it('respects the Store ID filter', async () => {

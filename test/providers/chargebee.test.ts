@@ -187,11 +187,18 @@ describe('chargebee toMinorUnits', () => {
   });
 
   it('rescales where Chargebee (cents) and hoomuch (Intl digits) disagree', () => {
-    // HUF / IDR / COP are "in cents" in Chargebee; hoomuch uses currencyExponent for them.
-    for (const cur of ['HUF', 'IDR', 'COP', 'CLF']) {
-      expect(toMinorUnits(150000, cur)).toBe(Math.round(150000 * 10 ** (currencyExponent(cur) - 2)));
-    }
-    expect(toMinorUnits(100, 'ISK')).toBe(100 * 10 ** currencyExponent('ISK')); // Chargebee zero-decimal
+    // Literal expectations, derived by hand (not by re-running the formula under test). They assume the
+    // Intl/ICU digits pinned below: if Node's ICU changes them, the guard fails first and says why.
+    expect(['HUF', 'IDR', 'COP', 'CLF', 'ISK'].map(currencyExponent)).toEqual([0, 0, 0, 4, 0]);
+    // HUF / IDR / COP are "in cents" in Chargebee (150000 = 1,500.00) but whole units in hoomuch.
+    expect(toMinorUnits(150000, 'HUF')).toBe(1500);
+    expect(toMinorUnits(150000, 'IDR')).toBe(1500);
+    expect(toMinorUnits(150000, 'COP')).toBe(1500);
+    expect(toMinorUnits(150050, 'HUF')).toBe(1501); // 1,500.50 Ft → nearest forint
+    // CLF has 4 digits in hoomuch: 1,500.00 CLF = 15,000,000 ten-thousandths.
+    expect(toMinorUnits(150000, 'CLF')).toBe(15_000_000);
+    // ISK is zero-decimal in both: Chargebee's 100 is 100 kr.
+    expect(toMinorUnits(100, 'ISK')).toBe(100);
   });
 });
 
@@ -268,6 +275,13 @@ describe('chargebee verify', () => {
     });
   });
 
+  it('names subscriptions when the first probe is forbidden, without reading transactions', async () => {
+    const { fetch, calls } = fakeFetch([route('/api/v2/subscriptions', { status: 403, json: errorAuthorizationFx }), ...okRoutes()]);
+    const res = await chargebeeAdapter.verify(input(), makeCtx(fetch));
+    expect(res).toEqual({ ok: false, field: 'apiKey', error: expect.stringMatching(/^The Chargebee key can’t read subscriptions\./) });
+    expect(calls.map(pathOf)).toEqual(['/api/v2/subscriptions']);
+  });
+
   it.each([
     ['site_not_found (404)', { status: 404, json: errorSiteNotFoundFx }],
     ['a bare 404', { status: 404, body: '<html>Not found</html>', headers: { 'content-type': 'text/html' } }],
@@ -332,7 +346,7 @@ describe('chargebee fetchSnapshot', () => {
       trials: [sub({ status: 'in_trial', mrr: 0 }), sub({ status: 'in_trial', mrr: 0 })],
     });
     expect(snap).toEqual({
-      mrr: { USD: 5900, EUR: 2500, JPY: 1500, HUF: toMinorUnits(1250000, 'HUF') },
+      mrr: { USD: 5900, EUR: 2500, JPY: 1500, HUF: 12500 }, // HUF: 12,500.00 Ft → 12500 whole forints
       activeSubscriptions: 5,
       activeTrials: 2,
       revenuePeriod: null,
@@ -360,7 +374,8 @@ describe('chargebee fetchSnapshot', () => {
     dunning['due_invoices_count'] = 2;
     dunning['total_dues'] = 6000;
     const { snap } = await snapshot({ active: [dunning] });
-    expect(snap).toMatchObject({ mrr: { USD: 3000 }, activeSubscriptions: 1 });
+    expect(snap.mrr).toEqual({ USD: 3000 });
+    expect(snap.activeSubscriptions).toBe(1);
   });
 
   it('computes MRR from items only when a subscription has no mrr attribute', async () => {
@@ -401,7 +416,9 @@ describe('chargebee fetchSnapshot', () => {
         sub({ mrr: null, items: [item('plan', null, { unit_price: undefined })] }),
       ],
     });
-    expect(snap).toMatchObject({ mrr: {}, activeSubscriptions: 0 });
+    // toEqual: `mrr: {}` inside toMatchObject would accept any map, e.g. { USD: 5000 } from the item price.
+    expect(snap.mrr).toEqual({});
+    expect(snap.activeSubscriptions).toBe(0);
     expect(ctx.logs.find((l) => l.event === 'chargebee_items_unpriced')?.data).toEqual({ items: 2 });
   });
 
@@ -410,7 +427,8 @@ describe('chargebee fetchSnapshot', () => {
       active: [sub({ mrr: 1000 }), sub({ mrr: 9000, status: 'cancelled' }), sub({ mrr: 9000, status: 'in_trial' }), sub({ mrr: 9000, deleted: true }), sub({ mrr: 9000, currency: '' })],
       trials: [sub({ status: 'in_trial' }), sub({ status: 'active' })],
     });
-    expect(snap).toMatchObject({ mrr: { USD: 1000 }, activeSubscriptions: 1, activeTrials: 1 });
+    expect(snap.mrr).toEqual({ USD: 1000 });
+    expect(snap).toMatchObject({ activeSubscriptions: 1, activeTrials: 1 });
     expect(ctx.logs.find((l) => l.event === 'chargebee_snapshot')?.data).toMatchObject({ skipped: 4 });
   });
 
@@ -422,7 +440,8 @@ describe('chargebee fetchSnapshot', () => {
         route('/api/v2/subscriptions', { json: subList([sub({ mrr: 3000 })]) }, { query: { ...ACTIVE, offset } }),
       ],
     });
-    expect(snap).toMatchObject({ mrr: { USD: 6000 }, activeSubscriptions: 3 });
+    expect(snap.mrr).toEqual({ USD: 6000 });
+    expect(snap.activeSubscriptions).toBe(3);
     expect(calls).toHaveLength(3);
     expect(params(calls[1]!).get('offset')).toBe(offset);
     expect(params(calls[2]!).get('status[is]')).toBe('in_trial');
@@ -439,12 +458,23 @@ describe('chargebee fetchSnapshot', () => {
   });
 
   it('refuses a next_offset that doesn’t move', async () => {
-    const { fetch } = fakeFetch([
+    const { fetch, calls } = fakeFetch([
       route('/api/v2/subscriptions', { json: subList([sub()], '["1","2"]') }, { query: ACTIVE }),
       ...snapshotRoutes({}),
     ]);
     const err = await catchErr(chargebeeAdapter.fetchSnapshot(input(), makeCtx(fetch)));
-    expect(err.kind).toBe('upstream');
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
+    expect(calls).toHaveLength(2); // the second page repeats the offset: stop there, not at the budget
+  });
+
+  it.each([
+    ['a body without `list`', { api_version: 'v2' }],
+    ['a numeric next_offset', { list: [], next_offset: 12 }],
+    ['an empty next_offset', { list: [], next_offset: '' }],
+  ])('refuses %s instead of reporting a partial or zero MRR', async (_label, body) => {
+    const { fetch } = fakeFetch(snapshotRoutes({ extra: [route('/api/v2/subscriptions', { json: body }, { query: ACTIVE })] }));
+    const err = await catchErr(chargebeeAdapter.fetchSnapshot(input(), makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
   });
 
   it('retries a 429 after Retry-After (snapshots aren’t resumable)', async () => {
@@ -529,7 +559,7 @@ describe('chargebee fetchRevenue', () => {
         ev('txn_FakeLate:late_failure', t - 3, 'refund', -3000),
         ev('txn_FakeSlowDD', SINCE_S - 5 * DAY_S, 'charge', 1500),
         ev('txn_FakeYen', t - 5, 'charge', 1500, 'JPY'),
-        ev('txn_FakeForint', t - 6, 'charge', toMinorUnits(1250000, 'HUF'), 'HUF'),
+        ev('txn_FakeForint', t - 6, 'charge', 12500, 'HUF'), // 1250000 Chargebee cents = 12,500 Ft
       ],
       daily: [],
       nextCursor: null,
@@ -632,6 +662,39 @@ describe('chargebee fetchRevenue', () => {
     const err = await catchErr(chargebeeAdapter.fetchRevenue(input(), { since: SINCE, cursor }, makeCtx(fetch)));
     expect(err).toMatchObject({ kind: 'upstream', status: 400 });
     expect(isStaleCursorError(err)).toBe(true);
+  });
+
+  it('books a late failure without updated_at at the payment’s own date (still nets to zero)', async () => {
+    const t = NOW_S - 3600;
+    const late = txn('txn_FakeLateNoUpdate', 'payment', 'late_failure', 2500, { date: t });
+    delete late.updated_at;
+    const backwards = txn('txn_FakeLateBackwards', 'payment', 'late_failure', 700, { date: t, updated_at: t - 10 });
+    const { fetch } = fakeFetch([route('/api/v2/transactions', { json: txnList([late, backwards]) }, { query: WINDOW })]);
+    const page = await chargebeeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch));
+    expect(page.events.map((e) => [e.externalId, e.occurredAt / 1000, e.amount])).toEqual([
+      ['txn_FakeLateNoUpdate', t, 2500],
+      ['txn_FakeLateNoUpdate:late_failure', t, -2500],
+      ['txn_FakeLateBackwards', t, 700],
+      ['txn_FakeLateBackwards:late_failure', t, -700], // an updated_at before the date is not trusted
+    ]);
+    expect(page.events.reduce((s, e) => s + e.amount, 0)).toBe(0);
+  });
+
+  it('refuses a transactions next_offset that doesn’t move (no infinite loop until the budget)', async () => {
+    const o1 = '["1762340000000","100"]';
+    const { fetch, calls } = fakeFetch([
+      route('/api/v2/transactions', { json: txnList([txn('txn_Fake1', 'payment', 'success', 100)], o1) }, { query: WINDOW, absent: ['offset'] }),
+      route('/api/v2/transactions', { json: txnList([txn('txn_Fake2', 'payment', 'success', 200)], o1) }, { query: { ...WINDOW, offset: o1 } }),
+    ]);
+    const err = await catchErr(chargebeeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch, { pageBudget: 20 })));
+    expect(err).toMatchObject({ kind: 'upstream', message: expect.stringMatching(/couldn’t read/) });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('throws a key revoked after connecting (401) on the apiKey field instead of pausing', async () => {
+    const { fetch } = fakeFetch([route('/api/v2/transactions', { status: 401, json: errorAuthenticationFx })]);
+    const err = await catchErr(chargebeeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch)));
+    expect(err).toMatchObject({ kind: 'auth', status: 401, field: 'apiKey' });
   });
 
   it('refuses a malformed key without a network call', async () => {

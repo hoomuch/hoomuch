@@ -4,7 +4,7 @@
  * buckets, signup throttle, session lifetime, connection cap).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { authenticate, confirmPassword, ipBucket, registerUser, safeNext } from '../../src/lib/auth';
 import { relativeTime } from '../../src/lib/time';
 import { createTestD1, testEnv, type TestD1 } from '../fixtures/d1';
@@ -60,7 +60,9 @@ describe('registerUser', () => {
     const { env } = setup();
     for (let i = 0; i < 10; i++) {
       // Mix of new and already-taken emails: both count (bounds account creation AND probing).
-      await registerUser(env, i % 2 ? `probe${i}@example.com` : 'taken@example.com', PW, '2001:db8:1:2::10');
+      const r = await registerUser(env, i % 2 ? `probe${i}@example.com` : 'taken@example.com', PW, '2001:db8:1:2::10');
+      // The limit is exactly 10: none of these is throttled (a lower limit would fail here).
+      expect(r.ok === false && r.throttled).toBeFalsy();
     }
     const r = await registerUser(env, 'fresh@example.com', PW, '2001:db8:1:2:ffff::1'); // same /64
     expect(r).toMatchObject({ ok: false, throttled: true });
@@ -85,10 +87,14 @@ describe('authenticate', () => {
   it('cannot be raced: parallel guesses beyond the limit are rejected before hashing', async () => {
     const { env } = setup();
     await newUser(env, 'race@example.com');
+    // PBKDF2 runs through crypto.subtle.deriveBits: count the hashes the guesses actually cost.
+    const derive = vi.spyOn(crypto.subtle, 'deriveBits');
     const results = await Promise.all(
       Array.from({ length: 25 }, (_, i) => authenticate(env, 'race@example.com', `guess-${i}-xxxx`, '1.2.3.4')),
     );
     expect(results.filter((r) => !r.ok && r.throttled)).toHaveLength(15);
+    expect(derive).toHaveBeenCalledTimes(10);
+    derive.mockRestore();
   });
 
   it('groups IPv6 clients by /64', async () => {
@@ -98,6 +104,8 @@ describe('authenticate', () => {
       await authenticate(env, 'v6@example.com', 'wrong password!', `2001:db8:aa:bb::${(i + 1).toString(16)}`);
     }
     expect(await authenticate(env, 'v6@example.com', PW, '2001:db8:aa:bb:1:2:3:4')).toMatchObject({ throttled: true });
+    // Negative control: the neighbouring /64 is its own bucket (a global bucket would fail here).
+    expect(await authenticate(env, 'v6@example.com', PW, '2001:db8:aa:bc::1')).toMatchObject({ ok: true });
   });
 });
 
@@ -118,10 +126,11 @@ describe('confirmPassword', () => {
   it('clears the attempt count after a correct password', async () => {
     const { env, t } = setup();
     const userId = await newUser(env, 'sam@example.com');
+    const before = t.rows('SELECT * FROM login_attempts').length;
     await confirmPassword(env, userId, 'nope-nope-nope');
+    expect(t.rows('SELECT * FROM login_attempts')).toHaveLength(before + 1); // the password-check bucket
     expect(await confirmPassword(env, userId, PW)).toEqual({ ok: true });
-    // Only the sign-up bucket remains; the password-check bucket was cleared.
-    expect(t.rows('SELECT * FROM login_attempts')).toHaveLength(1);
+    expect(t.rows('SELECT * FROM login_attempts')).toHaveLength(before); // …cleared again
   });
 });
 
@@ -167,6 +176,16 @@ describe('ipBucket', () => {
 });
 
 describe('sessions', () => {
+  it('reject a session past its expiry', async () => {
+    const { env } = setup();
+    const userId = await newUser(env, 'gone@example.com');
+    const now = Date.now();
+    await insertSession(env.DB, 'sess-expired', userId, now - 1);
+    await insertSession(env.DB, 'sess-live', userId, now + 60_000);
+    expect(await getSessionWithUser(env.DB, 'sess-expired', now, now - 90 * 86_400_000)).toBeNull();
+    expect((await getSessionWithUser(env.DB, 'sess-live', now, now - 90 * 86_400_000))?.user_id).toBe(userId);
+  });
+
   it('enforce an absolute lifetime even when the expiry keeps sliding', async () => {
     const { env, t } = setup();
     const userId = await newUser(env, 'old@example.com');
@@ -200,5 +219,17 @@ describe('relativeTime', () => {
     expect(relativeTime(now - 86_400_000, now)).toBe('1 day ago');
     expect(relativeTime(now - 3 * 86_400_000, now)).toBe('3 days ago');
     expect(relativeTime(Date.parse('2026-09-25T08:00:00Z'), now)).toBe('Sep 25, 2026');
+  });
+
+  it('covers the hour branch and both sides of the 30-day cutoff', () => {
+    expect(relativeTime(now - 59 * 60_000, now)).toBe('59 min ago');
+    expect(relativeTime(now - 3 * 3_600_000, now)).toBe('3 h ago');
+    expect(relativeTime(now - 23 * 3_600_000 - 59 * 60_000, now)).toBe('23 h ago');
+    expect(relativeTime(now - 29 * 86_400_000, now)).toBe('29 days ago');
+    expect(relativeTime(now - 30 * 86_400_000, now)).toBe('Oct 6, 2026');
+  });
+
+  it('treats a timestamp in the future (clock skew) as just now', () => {
+    expect(relativeTime(now + 5 * 60_000, now)).toBe('just now');
   });
 });

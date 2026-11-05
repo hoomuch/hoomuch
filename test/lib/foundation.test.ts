@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  base64UrlToBytes,
+  bytesToBase64Url,
   decryptJson,
   encryptJson,
   hashPassword,
@@ -34,9 +36,28 @@ describe('crypto', () => {
   });
 
   it('rejects tampered ciphertext', async () => {
+    // Flip one bit inside a decoded byte. (Rewriting the last base64url characters, as this test
+    // used to, can land on padding bits only — about 1 run in 1,000 decoded to the same bytes and
+    // decrypted fine.)
+    const flip = (part: string, byte: number) => {
+      const bytes = base64UrlToBytes(part);
+      bytes[byte]! ^= 0x01;
+      return bytesToBase64Url(bytes);
+    };
     const blob = await encryptJson(KEY, { x: 1 });
-    const tampered = blob.slice(0, -2) + (blob.endsWith('A') ? 'BB' : 'AA');
-    await expect(decryptJson(KEY, tampered)).rejects.toThrow();
+    const [v, iv, ct] = blob.split('.') as [string, string, string];
+    await expect(decryptJson(KEY, `${v}.${iv}.${flip(ct, 0)}`)).rejects.toThrow(); // ciphertext
+    await expect(decryptJson(KEY, `${v}.${iv}.${flip(ct, base64UrlToBytes(ct).length - 1)}`)).rejects.toThrow(); // tag
+    await expect(decryptJson(KEY, `${v}.${flip(iv, 0)}.${ct}`)).rejects.toThrow(); // IV
+    await expect(decryptJson(KEY, blob)).resolves.toEqual({ x: 1 }); // the untouched blob still opens
+  });
+
+  it('refuses another key and unknown formats', async () => {
+    const blob = await encryptJson(KEY, { apiKey: 'rk_live_secret' });
+    const other = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+    await expect(decryptJson(other, blob)).rejects.toThrow();
+    await expect(decryptJson(KEY, blob.replace(/^v1\./, 'v2.'))).rejects.toThrow(/Unsupported ciphertext format/);
+    await expect(decryptJson(KEY, 'v1.onlyiv')).rejects.toThrow(/Unsupported ciphertext format/);
   });
 
   it('rejects a key of the wrong length', async () => {
@@ -80,11 +101,43 @@ describe('money', () => {
     expect(normalizeToMonthly(100, 'day')).toBe(3042);
   });
 
+  it('divides by interval_count for every unit and rounds to the nearest minor unit', () => {
+    // Expected values worked out by hand: amount × (periods per month) ÷ count.
+    expect(normalizeToMonthly(1000, 'week', 2)).toBe(2167); // fortnightly: 1000 × 52/12 / 2 = 2166.67
+    expect(normalizeToMonthly(6000, 'month', 6)).toBe(1000); // half-yearly
+    expect(normalizeToMonthly(24000, 'year', 2)).toBe(1000); // every two years
+    expect(normalizeToMonthly(999, 'year')).toBe(83); // 83.25
+    expect(normalizeToMonthly(1000, 'month', 3)).toBe(333); // quarterly, 333.33
+    expect(normalizeToMonthly(500, 'month', 3)).toBe(167); // 166.67
+    expect(normalizeToMonthly(0, 'year')).toBe(0);
+  });
+
+  it('treats a missing, zero or negative interval_count as 1 rather than dividing by it', () => {
+    expect(normalizeToMonthly(1200, 'month', 0)).toBe(1200);
+    expect(normalizeToMonthly(1200, 'month', -3)).toBe(1200);
+    expect(normalizeToMonthly(12000, 'year', 0)).toBe(1000);
+  });
+
   it('converts between currencies with different exponents', () => {
     expect(convertMinor(9000, 'EUR', 'USD', fx)).toBe(10000); // €90 → $100
     expect(convertMinor(10000, 'USD', 'JPY', fx)).toBe(15000); // $100 → ¥15,000
     expect(convertMinor(15000, 'JPY', 'EUR', fx)).toBe(9000); // ¥15,000 → €90
     expect(convertMinor(100, 'XYZ', 'USD', fx)).toBeNull();
+    expect(convertMinor(100, 'USD', 'XYZ', fx)).toBeNull();
+  });
+
+  it('converts refunds (negative amounts), three-decimal currencies and same-currency amounts exactly', () => {
+    const kwd: FxTable = { base: 'USD', day: '2026-11-05', rates: { KWD: 0.307, EUR: 0.9 } };
+    expect(convertMinor(-9000, 'EUR', 'USD', kwd)).toBe(-10000); // −€90 → −$100
+    expect(convertMinor(10000, 'USD', 'KWD', kwd)).toBe(30700); // $100 → 30.700 KWD = 30,700 fils
+    expect(convertMinor(30700, 'KWD', 'USD', kwd)).toBe(10000);
+    // Same currency is the identity, whatever the case and even without any table.
+    expect(convertMinor(12345, 'usd', 'USD', kwd)).toBe(12345);
+    expect(sumMoneyIn({ usd: 100 }, 'USD', null)).toEqual({ amount: 100, missing: [] });
+    // A broken rate is "no rate", never a division by zero.
+    const broken: FxTable = { base: 'USD', day: '2026-11-05', rates: { EUR: 0, GBP: -1 } };
+    expect(convertMinor(100, 'EUR', 'USD', broken)).toBeNull();
+    expect(convertMinor(100, 'GBP', 'USD', broken)).toBeNull();
   });
 
   it('sums a MoneyMap and reports unconvertible currencies', () => {

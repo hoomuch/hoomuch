@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getDashboardData } from '../../src/data/dashboard';
+import { getDashboardData, kpi } from '../../src/data/dashboard';
 import { listTransactions } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
@@ -47,6 +47,18 @@ beforeEach(() => {
   seedUser(t, { id: 'u2' });
 });
 afterEach(() => vi.useRealTimers());
+
+describe('kpi', () => {
+  it('has no delta without a usable previous value, and measures a change from a loss against its size', () => {
+    expect(kpi(500, null)).toEqual({ value: 500, previous: null, deltaPct: null });
+    expect(kpi(500, 0)).toEqual({ value: 500, previous: 0, deltaPct: null }); // not Infinity
+    expect(kpi(150, 100).deltaPct).toBeCloseTo(50, 10);
+    expect(kpi(50, 100).deltaPct).toBeCloseTo(-50, 10);
+    // Net revenue can be negative (a refund-heavy period): −100 → +100 is an improvement, not −200 %.
+    expect(kpi(100, -100).deltaPct).toBeCloseTo(200, 10);
+    expect(kpi(-200, -100).deltaPct).toBeCloseTo(-100, 10);
+  });
+});
 
 describe('getDashboardData', () => {
   it('returns a valid empty state in one round trip', async () => {

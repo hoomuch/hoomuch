@@ -174,6 +174,33 @@ describe('syncConnection — demo end to end', () => {
     expectDailyMatchesTransactions(c, 'demo-1');
     expect(conn(c.t, 'demo-1').revenue_synced_until).toBe(NOW + 6 * HOUR);
   });
+
+  it('demo history never overwrites a day that already has a snapshot; today’s row is replaced', async () => {
+    // The demo is deterministic, so the idempotency test above can't tell "insert or ignore" from
+    // "upsert". Distinct values can.
+    const c = ctx();
+    await seedDemo(c);
+    const yesterday = addDays(dayKey(NOW), -1);
+    const insert = `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, captured_at)
+                    VALUES ('demo-1', ?, '{"USD":1}', 1, 0, 0)`;
+    c.t.exec(insert, yesterday);
+    c.t.exec(insert, dayKey(NOW));
+
+    await syncConnection(c.env, 'demo-1', 'initial');
+
+    const row = (day: string) =>
+      c.t.rows<{ mrr: string; active_subscriptions: number; captured_at: number }>(
+        'SELECT mrr, active_subscriptions, captured_at FROM snapshots WHERE connection_id = ? AND day = ?',
+        'demo-1',
+        day,
+      )[0]!;
+    expect(row(yesterday)).toEqual({ mrr: '{"USD":1}', active_subscriptions: 1, captured_at: 0 });
+    const expected = await demoAdapter.fetchSnapshot({ credentials: {}, config: DEMO_CONFIG }, makeCtx(fetch, { now: NOW }));
+    const today = row(dayKey(NOW));
+    expect(JSON.parse(today.mrr)).toEqual(expected.mrr);
+    expect(today).toMatchObject({ active_subscriptions: expected.activeSubscriptions, captured_at: NOW });
+    expect(c.t.rows('SELECT 1 FROM snapshots WHERE connection_id = ?', 'demo-1')).toHaveLength(91);
+  });
 });
 
 describe('syncConnection — revenue cursor', () => {
@@ -431,6 +458,32 @@ describe('syncConnection — failures', () => {
     expect(r).toMatchObject({ ok: false, error: msg });
     expect(rev).not.toHaveBeenCalled();
     expect(conn(c.t, 'st-1')).toMatchObject({ status: 'error', last_error: msg, last_synced_at: null });
+  });
+
+  it('a key revoked between the snapshot and revenue: snapshot kept, cursor and high-water untouched', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1', { status: 'ok', lastSyncedAt: NOW - HOUR });
+    const stored = JSON.stringify({ v: 1, cursor: 'txn_old', since: NOW - 5 * DAY, startedAt: NOW - DAY });
+    setCursorState(c.t, 'st-1', stored, NOW - 3 * DAY);
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockRejectedValue(
+      new ProviderError('auth', 'Stripe rejected the API key.', { status: 401, field: 'apiKey' }),
+    );
+
+    const r = await syncConnection(c.env, 'st-1', 'cron');
+
+    const msg = 'Stripe rejected the key. If it was revoked, replace the key.';
+    expect(r).toMatchObject({ ok: false, snapshot: true, events: 0, done: false, error: msg });
+    expect(c.t.rows('SELECT day FROM snapshots')).toEqual([{ day: dayKey(NOW) }]);
+    // An auth error is not a stale cursor: resuming with a fixed key must continue where it was.
+    expect(conn(c.t, 'st-1')).toEqual({
+      status: 'error',
+      last_error: msg,
+      last_synced_at: NOW - HOUR,
+      last_sync_started_at: NOW,
+      revenue_cursor: stored,
+      revenue_synced_until: NOW - 3 * DAY,
+    });
   });
 
   it('a rate-limited snapshot still lets revenue sync, but the run is an error', async () => {

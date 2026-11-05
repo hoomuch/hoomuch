@@ -11,7 +11,7 @@ import { DAY, HOUR, MINUTE, dayKey } from '../../src/lib/time';
 import { lemonSqueezyAdapter } from '../../src/providers/lemonsqueezy';
 import { rotateCredentials } from '../../src/services/connections';
 import { runScheduledSync, syncConnection } from '../../src/sync/engine';
-import { getLatestFx, refreshFx } from '../../src/sync/fx';
+import { FX_MAX_AGE_MS, getLatestFx, parseFrankfurter, refreshFx, refreshFxIfStale } from '../../src/sync/fx';
 import { TEST_ENCRYPTION_KEY, createTestD1, seedConnection, seedUser } from '../fixtures/d1';
 import { fakeFetch, makeCtx, route, type FakeResponse } from '../fixtures/harness';
 import { FX_BODY, NOW, conn, runs, setCursorState, setup, teardown, txRows } from './helpers';
@@ -145,6 +145,15 @@ describe('probe: snapshot budget', () => {
 
     expect(conn(c.t, 'big').last_error ?? '').not.toContain('the next sync continues');
     expect(first.snapshot || second.snapshot).toBe(true);
+    // A snapshot row alone isn't the point: it must hold every one of the 3,000 $10/month subscriptions,
+    // not just the pages read before some limit.
+    const snap = c.t.rows<{ mrr: string; active_subscriptions: number }>(
+      'SELECT mrr, active_subscriptions FROM snapshots WHERE connection_id = ?',
+      'big',
+    );
+    expect(snap).toHaveLength(1);
+    expect(JSON.parse(snap[0]!.mrr)).toEqual({ USD: TOTAL * 1000 });
+    expect(snap[0]!.active_subscriptions).toBe(TOTAL);
   });
 });
 
@@ -200,7 +209,12 @@ describe('probe: Lemon Squeezy late refunds', () => {
     );
 
     expect(page.done).toBe(true);
-    expect(page.events.map((e) => e.externalId)).toContain('order:9002:refund');
+    // The refund lands on the day it was issued, for the full (tax-free) amount; the 20-day-old
+    // charge itself is outside the window and is not re-emitted.
+    expect(page.events.map((e) => [e.externalId, e.type, e.amount, e.currency, e.occurredAt])).toEqual([
+      ['order:9001', 'charge', 1000, 'EUR', NOW - DAY],
+      ['order:9002:refund', 'refund', -12000, 'EUR', NOW - DAY],
+    ]);
   });
 });
 
@@ -295,8 +309,9 @@ describe('probe: RevenueCat garbage overview', () => {
       'rc',
       dayKey(NOW),
     )[0]!;
-    const flagged = conn(c.t, 'rc').status === 'error';
-    expect(flagged || snap.mrr === '{"USD":500000}').toBe(true);
+    // Both, not either: an error flag next to a zeroed snapshot would still draw a false dip.
+    expect(snap).toEqual({ mrr: '{"USD":500000}', active_subscriptions: 120 });
+    expect(conn(c.t, 'rc').status).toBe('error');
   });
 });
 
@@ -315,5 +330,43 @@ describe('probe: FX table pinning', () => {
 
     const latest = await getLatestFx(t.db);
     expect(latest?.rates['EUR']).toBe(0.92);
+    expect(t.rows('SELECT day FROM fx_rates')).toEqual([{ day: FX_BODY.date }]); // nothing of the bad payload was stored
+  });
+});
+
+describe('FX payload validation and refresh cadence', () => {
+  const body = (over: Record<string, unknown> = {}) => ({ amount: 1, base: 'USD', date: '2026-11-04', rates: { EUR: 0.92 }, ...over });
+
+  it('accepts a table dated tomorrow (UTC) at the latest, never the day after', () => {
+    expect(parseFrankfurter(body({ date: '2026-11-06' }), NOW).day).toBe('2026-11-06');
+    expect(() => parseFrankfurter(body({ date: '2026-11-07' }), NOW)).toThrow(/future-dated/);
+  });
+
+  it('rejects a payload in another base, without a date, or without a single usable rate', () => {
+    expect(() => parseFrankfurter(body({ base: 'EUR' }), NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter(body({ date: '4 Nov 2026' }), NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter(body({ rates: {} }), NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter(body({ rates: { EUR: 0, GBP: -1, JPY: '150' } }), NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter(null, NOW)).toThrow(/unexpected payload/);
+  });
+
+  it('keeps only plausible, ISO-coded rates (a zero or negative rate would divide money by nothing)', () => {
+    const fx = parseFrankfurter(body({ base: 'usd', rates: { eur: 0.92, GBP: 0, TRY: -34, JPY: Number.NaN, XAU: 'x', DOLLARS: 1 } }), NOW);
+    expect(fx).toEqual({ base: 'USD', day: '2026-11-04', rates: { EUR: 0.92 } });
+  });
+
+  it('refreshes only once the newest row is FX_MAX_AGE_MS old, and never throws on an outage', async () => {
+    const t = createTestD1();
+    const { fetch, calls } = fakeFetch([route('/v1/latest', [{ json: FX_BODY }, { status: 503, json: {} }])]);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(await refreshFxIfStale(t.db, fetch, NOW)).toBe('refreshed'); // empty table
+    expect(await refreshFxIfStale(t.db, fetch, NOW + FX_MAX_AGE_MS - 1)).toBe('fresh');
+    expect(calls).toHaveLength(1);
+    // Due exactly at the max age; the 503 is swallowed and the old table stays.
+    expect(await refreshFxIfStale(t.db, fetch, NOW + FX_MAX_AGE_MS)).toBe('failed');
+    expect(calls).toHaveLength(2);
+    expect(t.rows('SELECT day, fetched_at FROM fx_rates')).toEqual([{ day: FX_BODY.date, fetched_at: NOW }]);
+    expect(errors).toHaveBeenCalledTimes(1);
   });
 });

@@ -116,7 +116,8 @@ describe('getCalendarMonth', () => {
     expect(d3).toMatchObject({ day: '2026-11-03', net: 3200, gross: 3500, refunds: 300, byConnection: { s: 3200 }, charges: 2, refundCount: 1 });
     expect(m.days[3]).toMatchObject({ net: 500, charges: 1, refundCount: 0 });
     // A covered day without revenue is a real zero; days after today have nothing yet.
-    expect(m.days[0]).toMatchObject({ net: 0, byConnection: {}, charges: 0 });
+    expect(m.days[0]).toMatchObject({ net: 0, charges: 0 });
+    expect(m.days[0]!.byConnection).toEqual({}); // inside toMatchObject, `{}` would match any object
     expect(m.days[5]).toMatchObject({ day: '2026-11-06', net: null, mrr: null, mrrChange: null });
   });
 

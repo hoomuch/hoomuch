@@ -289,7 +289,14 @@ describe('adapty fetchSnapshot', () => {
     const { fetch, calls } = fakeFetch([snapshotRoutes()]);
     const ctx = makeCtx(fetch, { pageBudget: 2 });
     const snap = await adaptyAdapter.fetchSnapshot(input(), ctx);
-    expect(snap).toMatchObject({ activeSubscriptions: 512, activeTrials: null, revenuePeriod: null, revenuePeriodDays: null });
+    expect(snap).toEqual({
+      mrr: { USD: 454567 },
+      activeSubscriptions: 512,
+      activeTrials: null,
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+    });
     expect(calls).toHaveLength(2);
     expect(logEvents(ctx).filter((e) => e === 'adapty_snapshot_skipped')).toHaveLength(2);
   });
@@ -305,13 +312,52 @@ describe('adapty fetchSnapshot', () => {
     await expect(adaptyAdapter.fetchSnapshot(input(), makeCtx(fetch))).rejects.toMatchObject({ kind: 'upstream', status: 502 });
   });
 
-  it('accepts a lone metric under any gross name, value_to, and a missing unit (USD)', async () => {
+  // (Was titled "a lone metric under any gross name", but `mrr` / `subscriptions_active` are the chart ids,
+  // which pickMetric prefers by name: the lone-metric branch is covered by the next test.)
+  it('accepts a metric keyed by the chart id, value_to, a numeric string, and a missing unit (USD)', async () => {
     const mrr = { data: { mrr: { value: null, value_to: 0.29, data: [] } } };
     const subs = { data: { subscriptions_active: { value: '3', data: [] } } };
     const { fetch } = fakeFetch([snapshotRoutes({ mrr: { json: mrr }, subscriptions_active: { json: subs } })]);
     const snap = await adaptyAdapter.fetchSnapshot(input(), makeCtx(fetch));
     expect(snap.mrr).toEqual({ USD: 29 }); // 0.29 * 100 = 28.999999999999996
     expect(snap.activeSubscriptions).toBe(3);
+  });
+
+  it('accepts a lone metric under an unknown name, but not two unknown metrics (ambiguous)', async () => {
+    const lone = { data: { gross_total: { value: 12.5, unit: 'USD', data: [] } } };
+    const ok = fakeFetch([snapshotRoutes({ mrr: { json: lone } })]);
+    expect((await adaptyAdapter.fetchSnapshot(input(), makeCtx(ok.fetch))).mrr).toEqual({ USD: 1250 });
+
+    const two = { data: { gross_total: { value: 12.5, data: [] }, other_total: { value: 99, data: [] } } };
+    const ambiguous = fakeFetch([snapshotRoutes({ mrr: { json: two } })]);
+    const ctx = makeCtx(ambiguous.fetch);
+    expect(await catchErr(adaptyAdapter.fetchSnapshot(input(), ctx))).toMatchObject({ kind: 'upstream' });
+    expect(ctx.logs.find((l) => l.event === 'adapty_chart_unreadable')?.data).toMatchObject({ chart: 'mrr', metrics: 'gross_total,other_total' });
+  });
+
+  it('reports money in the chart’s currency unit, and falls back to USD (logged) for a unit that isn’t a code', async () => {
+    const eur = clone(mrrChart);
+    eur.data.revenue.unit = 'eur';
+    const a = fakeFetch([snapshotRoutes({ mrr: { json: eur } })]);
+    expect((await adaptyAdapter.fetchSnapshot(input(), makeCtx(a.fetch))).mrr).toEqual({ EUR: 454567 });
+
+    const symbol = clone(mrrChart);
+    symbol.data.revenue.unit = '$';
+    const b = fakeFetch([snapshotRoutes({ mrr: { json: symbol } })]);
+    const ctx = makeCtx(b.fetch);
+    expect((await adaptyAdapter.fetchSnapshot(input(), ctx)).mrr).toEqual({ USD: 454567 });
+    expect(ctx.logs.find((l) => l.event === 'adapty_unexpected_unit')?.data).toEqual({ chart: 'mrr', unit: '$' });
+  });
+
+  it('uses the UTC day of ctx.now() for “today”, right up to midnight', async () => {
+    for (const [now, day] of [
+      [Date.parse('2026-11-05T23:59:59.999Z'), '2026-11-05'],
+      [Date.parse('2026-11-06T00:00:00.000Z'), '2026-11-06'],
+    ] as const) {
+      const { fetch, calls } = fakeFetch([snapshotRoutes()]);
+      await adaptyAdapter.fetchSnapshot(input(), makeCtx(fetch, { now }));
+      expect(queryOf(calls[0]!.body).filters.date).toEqual([day, day]);
+    }
   });
 
   it('never reads an after-commission metric on its own', async () => {
@@ -372,6 +418,43 @@ describe('adapty fetchRevenue', () => {
     expect(page.daily.reduce((s, p) => s + p.gross - p.refunds, 0)).toBe(20283);
     expect(calls).toHaveLength(2);
     expect(ctx.logs.find((l) => l.event === 'adapty_refunds_unavailable')?.data).toEqual({ reason: 'rejected', status: 400 });
+  });
+
+  it('ignores refunds reported in another currency than revenue (never mixes EUR refunds into USD days)', async () => {
+    const eurRefunds = clone(refundChart);
+    eurRefunds.data.common.unit = 'EUR';
+    const { fetch } = fakeFetch([analytics({ revenue: { json: revenueChart }, refund_money: { json: eurRefunds } })]);
+    const ctx = makeCtx(fetch);
+    const page = await adaptyAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
+    expect(page.daily.every((p) => p.currency === 'USD')).toBe(true);
+    expect(page.daily.find((p) => p.day === '2026-11-01')).toEqual({ day: '2026-11-01', currency: 'USD', gross: 4550, refunds: 0, count: 0 });
+    expect(page.daily.find((p) => p.day === '2026-11-03')).toEqual({ day: '2026-11-03', currency: 'USD', gross: 0, refunds: 499, count: 0 });
+    expect(page.daily.reduce((s, p) => s + p.gross - p.refunds, 0)).toBe(20283);
+    expect(ctx.logs.find((l) => l.event === 'adapty_refunds_unavailable')?.data).toEqual({ reason: 'currency_mismatch', status: null });
+  });
+
+  it('stops asking for refunds once they are unavailable, and budgets one request per window from then on', async () => {
+    const { fetch, calls } = fakeFetch([analytics({ revenue: emptyAnswer(), refund_money: { status: 400, json: err400 } })]);
+    const ctx = makeCtx(fetch, { pageBudget: 4 });
+    const page = await adaptyAdapter.fetchRevenue(input(), { since: Date.parse('2026-05-01T00:00:00Z'), cursor: null }, ctx);
+    expect(page).toMatchObject({ done: true, nextCursor: null });
+    expect(page.daily).toHaveLength(189);
+    expect(charts(calls)).toEqual([
+      'revenue 2026-05-01..2026-07-31',
+      'refund_money 2026-05-01..2026-07-31',
+      'revenue 2026-08-01..2026-10-31',
+      `revenue 2026-11-01..${TODAY}`,
+    ]);
+    expect(ctx.pageBudget).toBe(0);
+    expect(ctx.logs.find((l) => l.event === 'adapty_revenue_fetched')?.data).toEqual({ windows: 3, refundWindows: 0, days: 189, perDay: false });
+  });
+
+  it('starts at the UTC day of `since`, whatever offset it was written with', async () => {
+    const { fetch, calls } = fakeFetch([analytics({ revenue: emptyAnswer(), refund_money: emptyAnswer('common') })]);
+    const since = Date.parse('2026-11-04T23:30:00-02:00'); // 2026-11-05T01:30Z
+    const page = await adaptyAdapter.fetchRevenue(input(), { since, cursor: null }, makeCtx(fetch));
+    expect(charts(calls)).toEqual([`revenue ${TODAY}..${TODAY}`, `refund_money ${TODAY}..${TODAY}`]);
+    expect(page.daily.map((p) => p.day)).toEqual([TODAY]);
   });
 
   it('degrades to an empty, finished page when the revenue chart is refused', async () => {

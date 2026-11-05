@@ -16,6 +16,7 @@ const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const ORIGIN = 'https://hoomuch.test';
 const TOKEN = 'test-session-token';
 let t: TestD1;
+let pending: Promise<unknown>[] = [];
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -26,7 +27,10 @@ beforeEach(async () => {
   t.exec('INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)', '2026-11-04', 'USD', JSON.stringify({ EUR: 0.9, GBP: 0.8, JPY: 150 }), NOW);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Background work (waitUntil) must finish inside this test, not leak into the next one.
+  await Promise.allSettled(pending);
+  pending = [];
   vi.useRealTimers();
 });
 
@@ -44,7 +48,7 @@ function snap(connectionId: string, mrr: Record<string, number>, day = '2026-11-
 
 function get(path: string, cookies: string[] = []): Promise<Response> {
   const req = new Request(`${ORIGIN}${path}`, { headers: { cookie: [`__Host-hm_session=${TOKEN}`, ...cookies].join('; ') } });
-  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {} };
   return worker.fetch!(req as never, testEnv(t.db), ctx as never) as Promise<Response>;
 }
 
@@ -63,6 +67,16 @@ describe('display currency', () => {
     snap('rc', { USD: 300_000 });
     snap('demo', { USD: 9_000_000 }); // fake money doesn't vote
     expect(await dominantMrrCurrency(testEnv(t.db), 'u1')).toBe('EUR');
+  });
+
+  it('compares currencies in real money, not raw minor units (JPY has no decimals)', async () => {
+    seedConnection(t, { id: 'jp', userId: 'u1', provider: 'revenuecat', lastSyncedAt: NOW });
+    seedConnection(t, { id: 'us', userId: 'u1', provider: 'stripe', lastSyncedAt: NOW });
+    snap('jp', { JPY: 600_000 }); // ¥600,000 ≈ $4,000: more minor units, less money
+    snap('us', { USD: 500_000 }); // $5,000
+    expect(await dominantMrrCurrency(testEnv(t.db), 'u1')).toBe('USD');
+    t.exec("UPDATE snapshots SET mrr = ? WHERE connection_id = 'jp'", JSON.stringify({ JPY: 1_000_000 })); // ≈ $6,667
+    expect(await dominantMrrCurrency(testEnv(t.db), 'u1')).toBe('JPY');
   });
 
   it('keeps the default when currencies can’t be compared or nothing has synced', async () => {

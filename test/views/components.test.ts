@@ -5,7 +5,7 @@
 
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { BreakdownTable } from '../../src/views/components/breakdown-table';
 import { ConnectionForm } from '../../src/views/components/connection-form';
 import { DangerZone } from '../../src/views/components/danger-zone';
@@ -905,16 +905,39 @@ describe('connection page', () => {
   });
 });
 
+/** Inline styles are allowed (style-src 'unsafe-inline': Base UI, Recharts and Motion set them). Scripts are not: the only one is the same-origin module bundle. */
+function expectCspSafe(out: string, name: string): void {
+  expect(out.replace('<script type="module" src="/client/entry.js"></script>', ''), name).not.toMatch(/<script/i);
+  expect(out, name).not.toMatch(/\son[a-z]+=/i);
+}
+
+// Every sample the tests above rendered, checked once they have all run, whatever order they ran in.
+// (The CSP test used to read `rendered` itself, so under `--sequence.shuffle` it could run first,
+// against an empty map, and fail.)
+afterAll(() => {
+  for (const [name, out] of Object.entries(rendered)) expectCspSafe(out, name);
+});
+
 describe('CSP', () => {
-  it('no rendered component has an inline script or an inline event handler', () => {
-    const names = Object.keys(rendered);
-    expect(names.length).toBeGreaterThan(30);
-    for (const name of names) {
-      const out = rendered[name]!;
-      // Inline styles are allowed (style-src 'unsafe-inline': Base UI, Recharts and Motion set
-      // them). Scripts are not: the only one is the same-origin module bundle.
-      expect(out.replace('<script type="module" src="/client/entry.js"></script>', ''), name).not.toMatch(/<script/i);
-      expect(out, name).not.toMatch(/\son[a-z]+=/i);
+  it('no page or component has an inline script or an inline event handler', async () => {
+    // Its own samples, so this holds in any test order; the afterAll above covers the rest.
+    const chrome = { user, flash: null };
+    const data = fixtureDashboard(30, 'full', FIXTURE_NOW);
+    const samples: Record<string, ReactElement> = {
+      layout: h(Layout, { title: 'Dashboard', user, flash: { type: 'error', message: 'x' }, nav: 'dashboard', refresh: { seconds: 3, url: '/dashboard?poll=1', stopUrl: '/dashboard?poll=21' } }),
+      landing: h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo: data, cadence: 'every hour' }),
+      dashboard: h(DashboardPage, { chrome, data, connections: FIXTURE_CONNECTIONS, sync: null, now: FIXTURE_NOW, celebrate: { dismissHref: '/dashboard' } }),
+      connection: h(ConnectionDetailPage, { chrome, detail: fixtureConnectionDetail(2), sync: null, now: FIXTURE_NOW }),
+      transactions: h(TransactionsPage, { chrome, page: fixtureTransactions(1, null), hasConnections: true, filterProviders: ['stripe'] }),
+      settings: h(SettingsPage, { chrome, currency: 'USD', deleteAccount: { error: 'x', fieldErrors: { password: 'x' } } }),
+      auth: h(AuthPage, { chrome: { user: null, flash: null }, mode: 'signup', signupOpen: true, error: 'x', field: 'password' }),
+      picker: h(ProviderPickerPage, { chrome }),
+      notFound: h(NotFoundPage, { chrome }),
+      serverError: h(ServerErrorPage, { chrome }),
+    };
+    for (const meta of PROVIDERS) {
+      samples[`form-${meta.id}`] = h(ConnectionForm, { meta, mode: 'create', action: '/connections', error: 'x', fieldErrors: { apiKey: 'x' } });
     }
+    for (const [name, node] of Object.entries(samples)) expectCspSafe(await html(node), name);
   });
 });

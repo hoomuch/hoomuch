@@ -738,6 +738,69 @@ describe('stripe fetchSnapshot', () => {
     expect(err.field).toBe('apiKey');
     expect(calls).toHaveLength(0);
   });
+
+  it('keeps a subscription set to cancel at period end in MRR until it actually ends (SPEC §6)', async () => {
+    const leaving = simple(1500);
+    leaving['cancel_at_period_end'] = true;
+    leaving['cancel_at'] = NOW_S + 10 * DAY_S;
+    const { snap } = await snapshot({ active: [leaving, simple(500)] });
+    expect(snap.mrr).toEqual({ USD: 2000 });
+    expect(snap.activeSubscriptions).toBe(2);
+  });
+
+  it('leaves out discounts it can’t apply (bare ID, amount_off in another currency without currency_options) and logs them', async () => {
+    const { snap, ctx } = await snapshot({
+      coupons: [coupon('OFF5USD', { amount_off: 500, currency: 'usd' })],
+      active: [
+        simple(4000, { currency: 'eur', discounts: [discount('OFF5USD')] }), // a USD amount off an EUR invoice: unknown → 4000
+        simple(3000, { discounts: ['di_FakeNotExpanded' as unknown as Json] }), // not expanded → 3000
+      ],
+    });
+    expect(snap.mrr).toEqual({ EUR: 4000, USD: 3000 });
+    expect(ctx.logs.find((l) => l.event === 'stripe_discounts_unresolved')?.data).toEqual({ discounts: 2 });
+  });
+
+  it.each([
+    [500, 'upstream'],
+    [429, 'rate_limit'],
+  ] as const)('fails the snapshot when a coupon lookup answers %i instead of silently dropping the discount', async (status, kind) => {
+    const { fetch } = fakeFetch(
+      snapshotRoutes({
+        extra: [route('/v1/coupons/PCT25', { status, json: { error: { message: 'nope', type: 'api_error' } } })],
+        active: [simple(4000, { discounts: [discount('PCT25')] })],
+      }),
+    );
+    const err = await catchErr(stripeAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 30 })));
+    expect(err.kind).toBe(kind);
+    expect(err.status).toBe(status);
+  });
+
+  it('surfaces a revoked key (401) during a snapshot as an auth error', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/subscriptions', { status: 401, json: errorInvalidKeyFx })]);
+    const ctx = makeCtx(fetch);
+    const err = await catchErr(stripeAdapter.fetchSnapshot(input(), ctx));
+    expect(err.kind).toBe('auth');
+    expect(calls).toHaveLength(1); // a 401 is not retried
+    expectNoSecretsInLogs(ctx, [RK_TEST]);
+  });
+
+  it.each([
+    ['a list without data', { json: { object: 'list', has_more: false, url: '/v1/subscriptions' } }],
+    ['a non-JSON body', { body: '<html>Bad Gateway</html>' }],
+  ])('refuses %s as unreadable instead of reporting an MRR of 0', async (_label, responder) => {
+    const { fetch } = fakeFetch([route('/v1/subscriptions', responder)]);
+    const err = await catchErr(stripeAdapter.fetchSnapshot(input(), makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(err.message).toMatch(/couldn’t read/);
+  });
+
+  it('stops paging when Stripe says has_more but sends an empty page', async () => {
+    const { snap, calls } = await snapshot({
+      extra: [route('/v1/subscriptions', { json: list([], true) }, { query: { status: 'active' } })],
+    });
+    expect(snap.mrr).toEqual({});
+    expect(calls.map((c) => new URL(c.url).searchParams.get('status'))).toEqual(['active', 'past_due', 'trialing']);
+  });
 });
 
 // ---------- revenue ----------
@@ -848,7 +911,7 @@ describe('stripe fetchRevenue', () => {
   it('returns its cursor untouched without calling Stripe when no budget is left', async () => {
     const { fetch, calls } = fakeFetch([]);
     const r = await stripeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch, { pageBudget: 0 }));
-    expect(r).toMatchObject({ events: [], daily: [], done: false });
+    expect(r).toMatchObject({ events: [], daily: [], done: false, nextCursor: expect.any(String) });
     expect(calls).toHaveLength(0);
 
     const { fetch: fetch2, calls: calls2 } = fakeFetch([
@@ -870,6 +933,20 @@ describe('stripe fetchRevenue', () => {
     }
     expect(calls).toHaveLength(3);
     expect(ctx.logs.filter((l) => l.event === 'stripe_cursor_invalid')).toHaveLength(3);
+  });
+
+  it('finishes on an empty page that claims has_more, and refuses a page whose last item has no id', async () => {
+    const empty = fakeFetch([route('/v1/balance_transactions', { json: list([], true, '/v1/balance_transactions') })]);
+    const r = await stripeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(empty.fetch));
+    expect(r).toEqual({ events: [], daily: [], nextCursor: null, done: true });
+    expect(empty.calls).toHaveLength(1);
+
+    const noId: Json = bt('txn_FakeNoId', 'charge', 100);
+    delete noId['id'];
+    const broken = fakeFetch([route('/v1/balance_transactions', { json: list([noId], true, '/v1/balance_transactions') })]);
+    const err = await catchErr(stripeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(broken.fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(broken.calls).toHaveLength(1); // would otherwise re-read page 1 until the budget ran out
   });
 
   it('refuses a malformed key without a network call', async () => {
