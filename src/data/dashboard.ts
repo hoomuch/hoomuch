@@ -9,12 +9,22 @@
 import type { Bindings, SessionUser } from '../env';
 import type { ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, dayKey, dayRange } from '../lib/time';
+import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
+import type { ProviderId } from '../providers/types';
 import { BACKFILL_DAYS } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
 import { toSummary } from './connections';
-import type { BreakdownRow, DashboardData, Kpi, MrrDay, RangeDays, RevenueDay } from './types';
+import type {
+  BreakdownRow,
+  DashboardData,
+  Kpi,
+  MrrDay,
+  ProductBreakdown,
+  ProductRow,
+  RangeDays,
+  RevenueDay,
+} from './types';
 
 interface SnapRow {
   connection_id: string;
@@ -34,6 +44,18 @@ interface RevRow {
   refunds: number;
 }
 
+export interface ProductSumRow {
+  connection_id: string;
+  /** Null when the transactions had no product name. */
+  product: string | null;
+  currency: string;
+  net: number;
+  charges: number;
+}
+
+/** Product rows the dashboard lists before rolling the rest into "N more products". */
+export const PRODUCT_ROWS = 10;
+
 export function kpi(value: number, previous: number | null): Kpi {
   const deltaPct = previous === null || previous === 0 ? null : ((value - previous) / Math.abs(previous)) * 100;
   return { value, previous, deltaPct };
@@ -50,7 +72,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
-  const [connsR, windowR, latestR, beforeR, revR, fxR] = await db.batch([
+  const [connsR, windowR, latestR, beforeR, revR, fxR, productR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     db
       .prepare(
@@ -80,6 +102,16 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       )
       .bind(user.id, prevStart, today),
     db.prepare(LATEST_FX_SQL),
+    // Same window as the revenue rows above (UTC days start..today), per product and currency.
+    db
+      .prepare(
+        `SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
+                SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges
+           FROM transactions t JOIN connections c ON c.id = t.connection_id
+          WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
+          GROUP BY t.connection_id, product, t.currency`,
+      )
+      .bind(user.id, dayStart(start), dayStart(today) + DAY),
   ]);
 
   const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
@@ -219,6 +251,13 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     return { day, total };
   });
 
+  const products = productBreakdown(
+    (productR!.results ?? []) as unknown as ProductSumRow[],
+    conns,
+    revenueByConn,
+    cv,
+  );
+
   // Reported through fx.missing; the dashboard says it next to the MRR it leaves out.
   const missing = [...cv.missing].sort();
 
@@ -236,9 +275,91 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       revenue: kpi(revenueTotal, revenueContributors > 0 && previousCovered ? previousRevenue : null),
     },
     breakdown,
+    products,
     revenueSeries,
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, missing },
     warnings,
+  };
+}
+
+/**
+ * Revenue in the window by product. Transaction providers are split by the name on each charge or
+ * refund (per connection, so "Pro" in two stores is two rows); everything else in the revenue KPI
+ * (daily totals, charges without a name) goes to `unnamed`, so the whole adds up to that KPI.
+ */
+export function productBreakdown(
+  rows: readonly ProductSumRow[],
+  conns: readonly ConnectionRow[],
+  revenueByConn: ReadonlyMap<string, number>,
+  cv: FxConverter,
+): ProductBreakdown {
+  const connById = new Map(conns.map((c) => [c.id, c]));
+  const products = new Map<string, ProductRow>();
+  const unnamedBy = new Map<string, number>();
+  const addUnnamed = (connectionId: string, v: number) => unnamedBy.set(connectionId, (unnamedBy.get(connectionId) ?? 0) + v);
+
+  for (const r of rows) {
+    const conn = connById.get(r.connection_id);
+    // Only providers whose daily revenue is built from these rows; anything else would count twice.
+    if (!conn || getProviderMeta(conn.provider).revenueHistory !== 'transactions') continue;
+    const net = cv.amount(r.net, r.currency);
+    if (r.product === null) {
+      addUnnamed(conn.id, net);
+      continue;
+    }
+    const key = `${conn.id}\u0000${r.product}`;
+    let p = products.get(key);
+    if (!p) {
+      const { dotClass } = getProviderMeta(conn.provider);
+      p = { name: r.product, connectionId: conn.id, connectionName: conn.name, dotClass, revenue: 0, charges: 0, sharePct: 0 };
+      products.set(key, p);
+    }
+    p.revenue += net;
+    p.charges += r.charges;
+  }
+  // Providers that report daily totals: their whole window has no product name.
+  for (const c of conns) {
+    if (getProviderMeta(c.provider).revenueHistory === 'transactions') continue;
+    const v = revenueByConn.get(c.id) ?? 0;
+    if (v !== 0) addUnnamed(c.id, v);
+  }
+
+  const all = [...products.values()].sort(
+    (a, b) =>
+      b.revenue - a.revenue ||
+      b.charges - a.charges ||
+      a.name.localeCompare(b.name) ||
+      a.connectionName.localeCompare(b.connectionName),
+  );
+  let unnamed = 0;
+  const byProvider = new Map<ProviderId, number>();
+  for (const [id, v] of unnamedBy) {
+    unnamed += v;
+    const provider = connById.get(id)!.provider;
+    if (v !== 0 && !getProviderMeta(provider).productNames) byProvider.set(provider, (byProvider.get(provider) ?? 0) + v);
+  }
+
+  const earned = all.reduce((s, p) => s + Math.max(0, p.revenue), 0) + Math.max(0, unnamed);
+  const share = (v: number) => (v > 0 && earned > 0 ? Math.round((v / earned) * 1000) / 10 : 0);
+  for (const p of all) p.sharePct = share(p.revenue);
+
+  // An 11th row reads better than "1 more product".
+  const shown = all.length <= PRODUCT_ROWS + 1 ? all : all.slice(0, PRODUCT_ROWS);
+  const rest = all.slice(shown.length);
+  const moreRevenue = rest.reduce((s, p) => s + p.revenue, 0);
+
+  return {
+    rows: shown,
+    more:
+      rest.length > 0
+        ? { count: rest.length, revenue: moreRevenue, charges: rest.reduce((s, p) => s + p.charges, 0), sharePct: share(moreRevenue) }
+        : null,
+    unnamed: { revenue: unnamed, sharePct: share(unnamed) },
+    unnamedProviders: [...byProvider.entries()]
+      .map(([id, v]) => ({ name: getProviderMeta(id).name, v }))
+      .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name))
+      .map((p) => p.name),
+    named: conns.some((c) => getProviderMeta(c.provider).productNames),
   };
 }

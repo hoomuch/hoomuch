@@ -57,6 +57,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-15 | Ayarlar: para birimi, parola değiştirme, hesabı tüm verisiyle silme | P1 |
 | F-16 | Günlük gelir CSV dışa aktarma | P2 |
 | F-17 | Webhook ile gerçek zamanlı güncelleme | v1.1 |
+| F-18 | Ürün bazında gelir kırılımı: seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına). Ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall) ve adsız işlemler "No product name" satırında toplanır; tablo gelir KPI'ına eşittir | P1 |
 
 ### 3.2 Fonksiyonel olmayan ihtiyaçlar
 
@@ -526,7 +527,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 |-----|--------|
 | `/` | Landing: wordmark, tek cümlelik değer önerisi, "Get started" / "Log in", desteklenen sağlayıcı satırı. Giriş yapmışsa `/dashboard`'a yönlenir |
 | `/signup`, `/login` | Tek kart, iki alan. Kayıt kapalıysa `/signup` bunu söyler |
-| `/dashboard?range=7\|30\|90` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği, MRR trendi, kırılım tablosu, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
+| `/dashboard?range=7\|30\|90` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği, MRR trendi, bağlantı ve ürün kırılım tabloları, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
 | `/connections/new` | Sağlayıcı seçimi (10 logolu kart + demo satırı) |
 | `/connections/new?provider=…` | Dinamik form (`ProviderMeta.fields`), anahtar oluşturma adımları, gerekli izinler, uyarı |
@@ -538,7 +539,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 ### 7.3 Bileşenler
 
 `Layout` (üst navigasyon), `Flash`, `KpiStat`, `DeltaBadge`, `ProviderDot`, `StatusBadge`, `EmptyState`,
-`RangeTabs`, `RevenueChart` (yığılmış çubuk SVG), `MrrChart` (çizgi/alan SVG), `BreakdownTable`,
+`RangeTabs`, `RevenueChart` (yığılmış çubuk SVG), `MrrChart` (çizgi/alan SVG), `BreakdownTable`, `ProductTable`,
 `ConnectionForm`, `DangerZone`, `RelativeTime`.
 
 ---

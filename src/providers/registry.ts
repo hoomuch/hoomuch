@@ -42,6 +42,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     keyUrl: 'https://dashboard.stripe.com/apikeys/create',
     permissions: ['Subscriptions: Read', 'Prices: Read', 'Coupons: Read', 'Balance: Read'],
     revenueHistory: 'transactions',
+    productNames: false,
   },
   {
     id: 'paddle',
@@ -79,6 +80,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Paddle API keys usually expire (90 days by default, one year at most), and an expired key can’t be renewed. When this one lapses, hoomuch shows an error on the connection and you can paste a new key there.',
     revenueHistory: 'transactions',
+    productNames: true,
   },
   {
     id: 'lemonsqueezy',
@@ -118,6 +120,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Lemon Squeezy API keys can’t be limited, so this key has full access to your account. hoomuch only reads your stores, subscriptions, prices, discounts, orders and invoices, and stores the key encrypted. Treat it like a password.',
     revenueHistory: 'transactions',
+    productNames: true,
   },
   {
     id: 'polar',
@@ -148,6 +151,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Polar access tokens stop working on their expiration date (the form defaults to 30 days). When this one lapses, hoomuch shows an error on the connection and you can paste a new token there.',
     revenueHistory: 'transactions',
+    productNames: true,
   },
   {
     id: 'revenuecat',
@@ -186,6 +190,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'charts_metrics:charts:read — optional, enables daily revenue history',
     ],
     revenueHistory: 'daily',
+    productNames: false,
   },
   {
     id: 'chargebee',
@@ -221,6 +226,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     keyUrl: null, // the API keys page lives on each site's own subdomain
     permissions: ['Allow read-only access to transactional data'],
     revenueHistory: 'transactions',
+    productNames: false,
   },
   {
     id: 'dodo',
@@ -248,6 +254,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     keyUrl: 'https://app.dodopayments.com/',
     permissions: ['Subscriptions: Read', 'Balances: Read'],
     revenueHistory: 'daily',
+    productNames: false,
   },
   {
     id: 'gumroad',
@@ -279,6 +286,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Gumroad access tokens made in Settings can’t be limited, so this token has full access to your account, including refunds. hoomuch only reads your profile name, products, subscribers and sales, and stores the token encrypted. Treat it like a password; deleting the application revokes it.',
     revenueHistory: 'transactions',
+    productNames: true,
   },
   {
     id: 'adapty',
@@ -307,6 +315,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Adapty has no read-only keys: the Secret API key also opens Adapty’s server-side API (profiles, access levels, paywalls). hoomuch only uses it to read analytics, and stores it encrypted.',
     revenueHistory: 'daily',
+    productNames: false,
   },
   {
     id: 'superwall',
@@ -348,6 +357,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Superwall’s data:read scope can query all of your organization’s analytics data. hoomuch only runs aggregate revenue queries, but treat this key as sensitive and give it no other scopes.',
     revenueHistory: 'daily',
+    productNames: false,
   },
   {
     id: 'demo',
@@ -360,6 +370,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     keyUrl: null,
     permissions: [],
     revenueHistory: 'transactions',
+    productNames: true,
   },
 ];
 

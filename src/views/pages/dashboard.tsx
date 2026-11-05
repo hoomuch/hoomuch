@@ -9,7 +9,7 @@
 
 import { Info, TriangleAlert, X } from 'lucide-react';
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
@@ -25,6 +25,7 @@ import { CalendarCard } from '../components/calendar-card';
 import { EmptyState } from '../components/empty-state';
 import { FLAT, KpiStat } from '../components/kpi';
 import { Owl, type OwlPose } from '../components/mascot';
+import { ProductTable } from '../components/product-table';
 import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
 import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
@@ -431,6 +432,41 @@ export function RevenueCard(props: { data: DashboardData; className?: string }) 
 }
 
 /**
+ * Revenue by product, the card. Only some providers name what was sold: when none of the user's
+ * do, it says so instead of a table that's all "No product name".
+ */
+export function ProductCard(props: { data: DashboardData }) {
+  const { data } = props;
+  const { products } = data;
+  const notes = revenueNotes(data, 'split by product here');
+  const text = 'px-3 text-body text-muted-foreground';
+  const names = listNames(products.unnamedProviders);
+  let body: ReactNode;
+  if (!products.named && products.unnamedProviders.length > 0) {
+    body = <p className={text}>Revenue from {names} comes without product names, so it can’t be split by product.</p>;
+  } else if (products.rows.length === 0 && products.unnamed.revenue === 0) {
+    // With nothing counted at all (28-day totals only), the notes below say why.
+    const counted = data.breakdown.some((b) => b.revenue !== null);
+    body = <p className={text}>{counted ? `No sales in the last ${data.rangeDays} days.` : 'No revenue to split by product.'}</p>;
+  } else {
+    body = <ProductTable products={products} currency={data.currency} rangeDays={data.rangeDays} />;
+    if (products.unnamedProviders.length > 0) {
+      notes.unshift({ tone: 'info', text: `Revenue from ${names} comes without product names, so it’s under “No product name”.` });
+    }
+  }
+  return (
+    <Card title="By product" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
+      {body}
+      {notes.length > 0 ? (
+        <div className="px-3">
+          <NoteList notes={notes} />
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
+/**
  * Reward moment after the first real sync. Live numbers only, never a sample figure. It drops in
  * once with CSS and the owl hops with it (`owl-hop`, CSS too: it plays from the first paint, so
  * nothing jumps when hydration lands, and stays smooth while the page is still busy). Once the
@@ -640,6 +676,8 @@ export function DashboardPage(props: DashboardPageProps) {
             <p className="px-3 text-body text-muted-foreground">No numbers yet. They appear after the first sync.</p>
           )}
         </Card>
+
+        <ProductCard data={data} />
 
         <RevenueCard data={data} />
 

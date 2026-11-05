@@ -1,0 +1,9 @@
+#!/bin/sh
+# Checks the commit message against Conventional Commits (CONTRIBUTING.md, "Commit messages").
+# Git runs hooks from the top of the working tree, so the script path is relative to it.
+# Some GUI git clients run hooks without node on PATH; skip the check there rather than block.
+if ! command -v node >/dev/null 2>&1; then
+  echo "commit-msg: node not found, commit message not checked" >&2
+  exit 0
+fi
+exec node scripts/commit-msg.mjs "$1"

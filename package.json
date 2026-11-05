@@ -25,7 +25,8 @@
     "cf-typegen": "wrangler types",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "check": "npm run typecheck && npm run test && npm run build",
+    "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "cloudflare": {
     "bindings": {
