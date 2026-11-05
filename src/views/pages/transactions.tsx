@@ -63,7 +63,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
 
   if (!props.hasConnections) {
     return (
-      <Layout {...props.chrome} title="Transactions" nav="transactions" noindex>
+      <Layout {...props.chrome} title="Transactions" nav="transactions" noindex backdrop>
         <PageHeader title="Transactions" />
         <EmptyState
           title="No transactions yet."
@@ -85,7 +85,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
   const pageTitle = p.page > 1 ? `Transactions, page ${p.page}` : 'Transactions';
 
   return (
-    <Layout {...props.chrome} title={pageTitle} nav="transactions" noindex>
+    <Layout {...props.chrome} title={pageTitle} nav="transactions" noindex backdrop>
       <PageHeader title="Transactions" description={`Charges and refunds, newest first. Amounts in ${cur}.`} />
 
       {/* The same coss segmented control as the dashboard's range tabs: one choice of several. */}

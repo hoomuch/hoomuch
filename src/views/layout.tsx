@@ -58,7 +58,8 @@ export interface LayoutProps extends PageChrome {
   marketing?: boolean;
   /**
    * A still ray light with grain behind the page header (views/components/backdrop.tsx). The
-   * dashboard only: settings, forms and errors stay plain. Marketing pages get the moving hero
+   * top-level app pages (dashboard, connections list, transactions, settings). The connect form, a
+   * connection's page (keys, deletes) and errors stay plain. Marketing pages get the moving hero
    * version on their own.
    */
   backdrop?: boolean;

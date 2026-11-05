@@ -55,7 +55,7 @@ export function SettingsPage(props: SettingsPageProps) {
               ? 'confirm'
               : null;
   return (
-    <Layout {...props.chrome} title={focus ? 'Error: Settings' : 'Settings'} nav="settings" noindex>
+    <Layout {...props.chrome} title={focus ? 'Error: Settings' : 'Settings'} nav="settings" noindex backdrop>
       <PageHeader title="Settings" />
       <div className="grid max-w-xl gap-6">
         <Card

@@ -9,8 +9,9 @@
  * - <HeroBackdrop> (landing, 404: seen once). Still rays and grain are in the server HTML, then
  *   Magic UI's drifting rays fade in over them after hydration (their chunk, with Motion, loads
  *   only here). Reduced motion keeps the still ones.
- * - <QuietBackdrop> (dashboard: seen every day). The same rays and grain, dimmer and still. CSS
- *   only, no JavaScript. It sits behind the page header; cards are opaque, so it never tints data.
+ * - <QuietBackdrop> (dashboard, connections list, transactions, settings). The same rays and
+ *   grain, dimmer and still. CSS only, no JavaScript. It sits behind the page header; cards and
+ *   tables are opaque, so it never tints data.
  * - <HorizonGlow> (landing demo, horizon-glow.tsx): the Dither Field shader. Kept in its own
  *   file so the layout, which imports this one, never pulls the shader into other pages.
  *

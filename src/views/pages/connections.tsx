@@ -30,7 +30,7 @@ export interface ConnectionsPageProps {
 export function ConnectionsPage(props: ConnectionsPageProps) {
   const hasAny = props.connections.length > 0;
   return (
-    <Layout {...props.chrome} title="Connections" nav="connections" noindex>
+    <Layout {...props.chrome} title="Connections" nav="connections" noindex backdrop>
       <PageHeader
         title="Connections"
         description="The provider accounts hoomuch reads from."
