@@ -1,0 +1,48 @@
+{
+  "name": "hoomuch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "All your subscription revenue under one roof — Stripe, Lemon Squeezy, RevenueCat.",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tahabozdemir/hoomuch.git"
+  },
+  "homepage": "https://github.com/tahabozdemir/hoomuch#readme",
+  "bugs": "https://github.com/tahabozdemir/hoomuch/issues",
+  "scripts": {
+    "dev": "wrangler dev",
+    "predeploy": "npm run db:migrate:remote",
+    "deploy": "wrangler deploy",
+    "css": "tailwindcss -i ./src/styles/app.css -o ./public/app.css --minify",
+    "css:watch": "tailwindcss -i ./src/styles/app.css -o ./public/app.css --watch",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run css"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ENCRYPTION_KEY": {
+        "description": "32 random bytes, base64. Generate one with `openssl rand -base64 32`. **Back it up:** if it's lost, every stored provider key becomes unreadable. Never rotate it in place."
+      },
+      "ALLOW_SIGNUP": {
+        "description": "Leave `true` until you've created your own account, then set it to `false` so nobody else can sign up on your instance."
+      }
+    }
+  },
+  "dependencies": {
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.4",
+    "daisyui": "^5.7.50",
+    "tailwindcss": "^4.3.4",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.157.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "di_1M6vk22eZvKYlo2CYMGIhk14",
+  "object": "discount",
+  "checkout_session": "cs_test_b1mywbZHtQCQW2ncaItVPFqupwmfqNU4IMMdw3lArEBGt0QD0CZDrNQswR",
+  "source": {
+    "type": "coupon",
+    "coupon": "nVJYDOag"
+  },
+  "customer": "cus_9s6XKzkNRiz8i3",
+  "end": null,
+  "invoice": null,
+  "invoice_item": null,
+  "promotion_code": null,
+  "start": 1669120702,
+  "subscription": null
+}

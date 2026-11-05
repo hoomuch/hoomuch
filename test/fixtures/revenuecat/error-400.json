@@ -1,0 +1,8 @@
+{
+  "object": "error",
+  "type": "parameter_error",
+  "param": "resolution",
+  "message": "Resolution is not supported for this chart",
+  "retryable": false,
+  "doc_url": "https://errors.rev.cat/parameter-error"
+}

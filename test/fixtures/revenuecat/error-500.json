@@ -1,0 +1,8 @@
+{
+  "object": "error",
+  "type": "server_error",
+  "message": "There was an internal server error",
+  "retryable": true,
+  "doc_url": "https://errors.rev.cat/server-error",
+  "backoff_ms": 1000
+}

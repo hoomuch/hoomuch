@@ -1,0 +1,58 @@
+{
+  "object": "chart_data",
+  "category": "revenue",
+  "display_type": "line",
+  "display_name": "Refunds",
+  "description": "Refunds processed and downward subscription payment adjustments recorded in each period.",
+  "documentation_link": "https://www.revenuecat.com/docs/dashboard-and-metrics/charts/refunds-chart",
+  "last_computed_at": 1793879600000,
+  "start_date": 1793318400000,
+  "end_date": 1793836800000,
+  "yaxis_currency": "USD",
+  "filtering_allowed": true,
+  "segmenting_allowed": true,
+  "resolution": "day",
+  "values": [
+    { "cohort": 1793318400, "incomplete": false, "measure": 0, "value": 0 },
+    { "cohort": 1793318400, "incomplete": false, "measure": 1, "value": 0 },
+    { "cohort": 1793404800, "incomplete": false, "measure": 0, "value": 0 },
+    { "cohort": 1793404800, "incomplete": false, "measure": 1, "value": 0 },
+    { "cohort": 1793491200, "incomplete": false, "measure": 0, "value": 9.99 },
+    { "cohort": 1793491200, "incomplete": false, "measure": 1, "value": 1 },
+    { "cohort": 1793577600, "incomplete": false, "measure": 0, "value": 0 },
+    { "cohort": 1793577600, "incomplete": false, "measure": 1, "value": 0 },
+    { "cohort": 1793664000, "incomplete": false, "measure": 0, "value": 14.98 },
+    { "cohort": 1793664000, "incomplete": false, "measure": 1, "value": 2 },
+    { "cohort": 1793750400, "incomplete": false, "measure": 0, "value": 0 },
+    { "cohort": 1793750400, "incomplete": false, "measure": 1, "value": 0 },
+    { "cohort": 1793836800, "incomplete": true, "measure": 0, "value": 0 },
+    { "cohort": 1793836800, "incomplete": true, "measure": 1, "value": 0 }
+  ],
+  "summary": {
+    "average": { "Refunded Revenue": 3.57, "Refunded Transactions": 0.43 },
+    "total": { "Refunded Revenue": 24.97, "Refunded Transactions": 3 }
+  },
+  "yaxis": "$",
+  "segments": null,
+  "segments_limit": null,
+  "measures": [
+    {
+      "display_name": "Refunded Revenue",
+      "description": "Revenue from refunds processed and downward subscription payment adjustments recorded in the period.",
+      "unit": "$",
+      "decimal_precision": 2,
+      "chartable": true,
+      "tabulable": true
+    },
+    {
+      "display_name": "Refunded Transactions",
+      "description": "Store refund events processed in the period.",
+      "unit": "#",
+      "decimal_precision": 0,
+      "chartable": false,
+      "tabulable": true
+    }
+  ],
+  "user_selectors": { "revenue_type": "revenue" },
+  "unsupported_params": null
+}

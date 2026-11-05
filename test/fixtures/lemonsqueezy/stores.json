@@ -1,0 +1,145 @@
+{
+  "meta": {
+    "page": {
+      "currentPage": 1,
+      "from": 1,
+      "lastPage": 1,
+      "perPage": 100,
+      "to": 2,
+      "total": 2
+    }
+  },
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "links": {
+    "first": "https://api.lemonsqueezy.com/v1/stores?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt",
+    "last": "https://api.lemonsqueezy.com/v1/stores?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt"
+  },
+  "data": [
+    {
+      "type": "stores",
+      "id": "101",
+      "attributes": {
+        "name": "Acme Studio",
+        "slug": "acme-studio",
+        "domain": "acme-studio.lemonsqueezy.com",
+        "url": "https://acme-studio.lemonsqueezy.com",
+        "avatar_url": "https://app.lemonsqueezy.com/storage/avatars/stores/101/avatar.png",
+        "plan": "fresh",
+        "country": "DE",
+        "country_nicename": "Germany",
+        "currency": "EUR",
+        "total_sales": 120,
+        "total_revenue": 1234500,
+        "thirty_day_sales": 14,
+        "thirty_day_revenue": 98700,
+        "created_at": "2024-06-01T10:00:00.000000Z",
+        "updated_at": "2026-11-01T10:00:00.000000Z"
+      },
+      "relationships": {
+        "products": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/products",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/products"
+          }
+        },
+        "orders": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/orders",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/orders"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/subscriptions"
+          }
+        },
+        "discounts": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/discounts",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/discounts"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/license-keys"
+          }
+        },
+        "webhooks": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/101/webhooks",
+            "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/webhooks"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/stores/101"
+      }
+    },
+    {
+      "type": "stores",
+      "id": "102",
+      "attributes": {
+        "name": "Beta Labs",
+        "slug": "beta-labs",
+        "domain": "beta-labs.lemonsqueezy.com",
+        "url": "https://beta-labs.lemonsqueezy.com",
+        "avatar_url": "https://app.lemonsqueezy.com/storage/avatars/stores/102/avatar.png",
+        "plan": "fresh",
+        "country": "US",
+        "country_nicename": "United States",
+        "currency": "USD",
+        "total_sales": 120,
+        "total_revenue": 1234500,
+        "thirty_day_sales": 14,
+        "thirty_day_revenue": 98700,
+        "created_at": "2024-06-01T10:00:00.000000Z",
+        "updated_at": "2026-11-01T10:00:00.000000Z"
+      },
+      "relationships": {
+        "products": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/products",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/products"
+          }
+        },
+        "orders": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/orders",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/orders"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/subscriptions"
+          }
+        },
+        "discounts": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/discounts",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/discounts"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/license-keys"
+          }
+        },
+        "webhooks": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/stores/102/webhooks",
+            "self": "https://api.lemonsqueezy.com/v1/stores/102/relationships/webhooks"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/stores/102"
+      }
+    }
+  ]
+}

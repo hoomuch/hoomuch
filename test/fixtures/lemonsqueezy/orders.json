@@ -1,0 +1,1421 @@
+{
+  "meta": {
+    "page": {
+      "currentPage": 1,
+      "from": 1,
+      "lastPage": 1,
+      "perPage": 100,
+      "to": 14,
+      "total": 14
+    }
+  },
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "links": {
+    "first": "https://api.lemonsqueezy.com/v1/orders?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt",
+    "last": "https://api.lemonsqueezy.com/v1/orders?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt"
+  },
+  "data": [
+    {
+      "type": "orders",
+      "id": "5001",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5901,
+        "identifier": "00000000-0000-4000-8000-000000005001",
+        "order_number": 1001,
+        "user_name": "Buyer5001 Secretname",
+        "user_email": "buyer5001.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 999,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 200,
+        "total": 1199,
+        "refunded_amount": 0,
+        "subtotal_usd": 999,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 200,
+        "total_usd": 1199,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€9.99",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.00",
+        "total_formatted": "€11.99",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11001,
+          "order_id": 5001,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 999,
+          "quantity": 1,
+          "created_at": "2026-11-04T10:00:00.000000Z",
+          "updated_at": "2026-11-04T10:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005001?signature=0000"
+        },
+        "created_at": "2026-11-04T10:00:00.000000Z",
+        "updated_at": "2026-11-04T10:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5001/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5001/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5001"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5002",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5902,
+        "identifier": "00000000-0000-4000-8000-000000005002",
+        "order_number": 1002,
+        "user_name": "Buyer5002 Secretname",
+        "user_email": "buyer5002.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 750,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 150,
+        "total": 900,
+        "refunded_amount": 900,
+        "subtotal_usd": 750,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 150,
+        "total_usd": 900,
+        "refunded_amount_usd": 900,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "refunded",
+        "status_formatted": "Refunded",
+        "refunded": true,
+        "refunded_at": "2026-11-02T08:00:00.000000Z",
+        "subtotal_formatted": "€7.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€1.50",
+        "total_formatted": "€9.00",
+        "refunded_amount_formatted": "€9.00",
+        "first_order_item": {
+          "id": 11002,
+          "order_id": 5002,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 750,
+          "quantity": 1,
+          "created_at": "2026-11-01T09:00:00.000000Z",
+          "updated_at": "2026-11-01T09:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005002?signature=0000"
+        },
+        "created_at": "2026-11-01T09:00:00.000000Z",
+        "updated_at": "2026-11-02T08:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5002/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5002/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5002"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5003",
+      "attributes": {
+        "store_id": 102,
+        "customer_id": 5903,
+        "identifier": "00000000-0000-4000-8000-000000005003",
+        "order_number": 1003,
+        "user_name": "Buyer5003 Secretname",
+        "user_email": "buyer5003.secret@buyer.example",
+        "currency": "USD",
+        "currency_rate": "1.00000000",
+        "subtotal": 1667,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 333,
+        "total": 2000,
+        "refunded_amount": 500,
+        "subtotal_usd": 1667,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 333,
+        "total_usd": 2000,
+        "refunded_amount_usd": 500,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "partial_refund",
+        "status_formatted": "Partial refund",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "$16.67",
+        "discount_total_formatted": "$0.00",
+        "setup_fee_formatted": "$0.00",
+        "tax_formatted": "$3.33",
+        "total_formatted": "$20.00",
+        "refunded_amount_formatted": "$5.00",
+        "first_order_item": {
+          "id": 11003,
+          "order_id": 5003,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Beta Sync",
+          "variant_name": "Default",
+          "price": 1667,
+          "quantity": 1,
+          "created_at": "2026-10-30T15:00:00.000000Z",
+          "updated_at": "2026-10-30T15:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005003?signature=0000"
+        },
+        "created_at": "2026-10-30T15:00:00.000000Z",
+        "updated_at": "2026-10-31T10:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5003/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5003/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5003"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5004",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5904,
+        "identifier": "00000000-0000-4000-8000-000000005004",
+        "order_number": 1004,
+        "user_name": "Buyer5004 Secretname",
+        "user_email": "buyer5004.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 750,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 150,
+        "total": 900,
+        "refunded_amount": 0,
+        "subtotal_usd": 750,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 150,
+        "total_usd": 900,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "pending",
+        "status_formatted": "Pending",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€7.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€1.50",
+        "total_formatted": "€9.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11004,
+          "order_id": 5004,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 750,
+          "quantity": 1,
+          "created_at": "2026-10-29T00:00:00.000000Z",
+          "updated_at": "2026-10-29T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005004?signature=0000"
+        },
+        "created_at": "2026-10-29T00:00:00.000000Z",
+        "updated_at": "2026-10-29T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5004/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5004/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5004"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5005",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5905,
+        "identifier": "00000000-0000-4000-8000-000000005005",
+        "order_number": 1005,
+        "user_name": "Buyer5005 Secretname",
+        "user_email": "buyer5005.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 3750,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 750,
+        "total": 4500,
+        "refunded_amount": 0,
+        "subtotal_usd": 3750,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 750,
+        "total_usd": 4500,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€37.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€7.50",
+        "total_formatted": "€45.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11005,
+          "order_id": 5005,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 3750,
+          "quantity": 1,
+          "created_at": "2026-10-28T00:00:00.000000Z",
+          "updated_at": "2026-10-28T00:00:00.000000Z",
+          "test_mode": true
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005005?signature=0000"
+        },
+        "created_at": "2026-10-28T00:00:00.000000Z",
+        "updated_at": "2026-10-28T00:00:00.000000Z",
+        "test_mode": true
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5005/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5005/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5005"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5006",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5906,
+        "identifier": "00000000-0000-4000-8000-000000005006",
+        "order_number": 1006,
+        "user_name": "Buyer5006 Secretname",
+        "user_email": "buyer5006.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 750,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 150,
+        "total": 900,
+        "refunded_amount": 0,
+        "subtotal_usd": 750,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 150,
+        "total_usd": 900,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "failed",
+        "status_formatted": "Failed",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€7.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€1.50",
+        "total_formatted": "€9.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11006,
+          "order_id": 5006,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 750,
+          "quantity": 1,
+          "created_at": "2026-10-27T00:00:00.000000Z",
+          "updated_at": "2026-10-27T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005006?signature=0000"
+        },
+        "created_at": "2026-10-27T00:00:00.000000Z",
+        "updated_at": "2026-10-27T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5006/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5006/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5006"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5007",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5907,
+        "identifier": "00000000-0000-4000-8000-000000005007",
+        "order_number": 1007,
+        "user_name": "Buyer5007 Secretname",
+        "user_email": "buyer5007.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 0,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 0,
+        "total": 0,
+        "refunded_amount": 0,
+        "subtotal_usd": 0,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 0,
+        "total_usd": 0,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€0.00",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€0.00",
+        "total_formatted": "€0.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11007,
+          "order_id": 5007,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Yearly",
+          "price": 0,
+          "quantity": 1,
+          "created_at": "2026-10-26T00:00:00.000000Z",
+          "updated_at": "2026-10-26T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005007?signature=0000"
+        },
+        "created_at": "2026-10-26T00:00:00.000000Z",
+        "updated_at": "2026-10-26T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5007/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5007/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5007"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5008",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5908,
+        "identifier": "00000000-0000-4000-8000-000000005008",
+        "order_number": 1008,
+        "user_name": "Buyer5008 Secretname",
+        "user_email": "buyer5008.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 1250,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 250,
+        "total": 1500,
+        "refunded_amount": 300,
+        "subtotal_usd": 1250,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 250,
+        "total_usd": 1500,
+        "refunded_amount_usd": 300,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "partial_refund",
+        "status_formatted": "Partial refund",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€12.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.50",
+        "total_formatted": "€15.00",
+        "refunded_amount_formatted": "€3.00",
+        "first_order_item": {
+          "id": 11008,
+          "order_id": 5008,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 1250,
+          "quantity": 1,
+          "created_at": "2026-10-20T12:00:00.000000Z",
+          "updated_at": "2026-10-20T12:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005008?signature=0000"
+        },
+        "created_at": "2026-10-20T12:00:00.000000Z",
+        "updated_at": "2026-11-03T12:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5008/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5008/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5008"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5009",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5909,
+        "identifier": "00000000-0000-4000-8000-000000005009",
+        "order_number": 1009,
+        "user_name": "Buyer5009 Secretname",
+        "user_email": "buyer5009.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 1250,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 250,
+        "total": 1500,
+        "refunded_amount": 0,
+        "subtotal_usd": 1250,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 250,
+        "total_usd": 1500,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€12.50",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.50",
+        "total_formatted": "€15.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11009,
+          "order_id": 5009,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 1250,
+          "quantity": 1,
+          "created_at": "2026-10-15T00:00:00.000000Z",
+          "updated_at": "2026-10-15T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005009?signature=0000"
+        },
+        "created_at": "2026-10-15T00:00:00.000000Z",
+        "updated_at": "2026-10-15T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5009/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5009/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5009"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5010",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5910,
+        "identifier": "00000000-0000-4000-8000-000000005010",
+        "order_number": 1010,
+        "user_name": "Buyer5010 Secretname",
+        "user_email": "buyer5010.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 583,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 117,
+        "total": 700,
+        "refunded_amount": 700,
+        "subtotal_usd": 583,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 117,
+        "total_usd": 700,
+        "refunded_amount_usd": 700,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "refunded",
+        "status_formatted": "Refunded",
+        "refunded": true,
+        "refunded_at": "2026-10-16T00:00:00.000000Z",
+        "subtotal_formatted": "€5.83",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€1.17",
+        "total_formatted": "€7.00",
+        "refunded_amount_formatted": "€7.00",
+        "first_order_item": {
+          "id": 11010,
+          "order_id": 5010,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 583,
+          "quantity": 1,
+          "created_at": "2026-10-14T00:00:00.000000Z",
+          "updated_at": "2026-10-14T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005010?signature=0000"
+        },
+        "created_at": "2026-10-14T00:00:00.000000Z",
+        "updated_at": "2026-10-16T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5010/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5010/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5010"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5011",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5911,
+        "identifier": "00000000-0000-4000-8000-000000005011",
+        "order_number": 1011,
+        "user_name": "Buyer5011 Secretname",
+        "user_email": "buyer5011.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 917,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 183,
+        "total": 1100,
+        "refunded_amount": 0,
+        "subtotal_usd": 917,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 183,
+        "total_usd": 1100,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€9.17",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€1.83",
+        "total_formatted": "€11.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11011,
+          "order_id": 5011,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 917,
+          "quantity": 1,
+          "created_at": "2026-10-01T00:00:00.000000Z",
+          "updated_at": "2026-10-01T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005011?signature=0000"
+        },
+        "created_at": "2026-10-01T00:00:00.000000Z",
+        "updated_at": "2026-10-01T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5011/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5011/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5011"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5012",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5912,
+        "identifier": "00000000-0000-4000-8000-000000005012",
+        "order_number": 1012,
+        "user_name": "Buyer5012 Secretname",
+        "user_email": "buyer5012.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 1000,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 200,
+        "total": 1200,
+        "refunded_amount": 0,
+        "subtotal_usd": 1000,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 200,
+        "total_usd": 1200,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€10.00",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.00",
+        "total_formatted": "€12.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11012,
+          "order_id": 5012,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 1000,
+          "quantity": 1,
+          "created_at": "2026-09-15T00:00:00.000000Z",
+          "updated_at": "2026-09-15T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005012?signature=0000"
+        },
+        "created_at": "2026-09-15T00:00:00.000000Z",
+        "updated_at": "2026-09-15T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5012/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5012/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5012"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5013",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5913,
+        "identifier": "00000000-0000-4000-8000-000000005013",
+        "order_number": 1013,
+        "user_name": "Buyer5013 Secretname",
+        "user_email": "buyer5013.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 1083,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 217,
+        "total": 1300,
+        "refunded_amount": 0,
+        "subtotal_usd": 1083,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 217,
+        "total_usd": 1300,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€10.83",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.17",
+        "total_formatted": "€13.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11013,
+          "order_id": 5013,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 1083,
+          "quantity": 1,
+          "created_at": "2026-09-01T00:00:00.000000Z",
+          "updated_at": "2026-09-01T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005013?signature=0000"
+        },
+        "created_at": "2026-09-01T00:00:00.000000Z",
+        "updated_at": "2026-09-01T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5013/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5013/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5013"
+      }
+    },
+    {
+      "type": "orders",
+      "id": "5014",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 5914,
+        "identifier": "00000000-0000-4000-8000-000000005014",
+        "order_number": 1014,
+        "user_name": "Buyer5014 Secretname",
+        "user_email": "buyer5014.secret@buyer.example",
+        "currency": "EUR",
+        "currency_rate": "1.08000000",
+        "subtotal": 1167,
+        "setup_fee": 0,
+        "discount_total": 0,
+        "tax": 233,
+        "total": 1400,
+        "refunded_amount": 0,
+        "subtotal_usd": 1167,
+        "setup_fee_usd": 0,
+        "discount_total_usd": 0,
+        "tax_usd": 233,
+        "total_usd": 1400,
+        "refunded_amount_usd": 0,
+        "tax_name": "VAT",
+        "tax_rate": "20.00",
+        "tax_inclusive": false,
+        "status": "paid",
+        "status_formatted": "Paid",
+        "refunded": false,
+        "refunded_at": null,
+        "subtotal_formatted": "€11.67",
+        "discount_total_formatted": "€0.00",
+        "setup_fee_formatted": "€0.00",
+        "tax_formatted": "€2.33",
+        "total_formatted": "€14.00",
+        "refunded_amount_formatted": "€0.00",
+        "first_order_item": {
+          "id": 11014,
+          "order_id": 5014,
+          "product_id": 41,
+          "variant_id": 71,
+          "price_id": 11,
+          "product_name": "Acme Pro",
+          "variant_name": "Monthly",
+          "price": 1167,
+          "quantity": 1,
+          "created_at": "2026-08-20T00:00:00.000000Z",
+          "updated_at": "2026-08-20T00:00:00.000000Z",
+          "test_mode": false
+        },
+        "urls": {
+          "receipt": "https://app.lemonsqueezy.com/my-orders/00000000-0000-4000-8000-000000005014?signature=0000"
+        },
+        "created_at": "2026-08-20T00:00:00.000000Z",
+        "updated_at": "2026-08-20T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/store",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/customer",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/customer"
+          }
+        },
+        "order-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/order-items",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/order-items"
+          }
+        },
+        "subscriptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/subscriptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/subscriptions"
+          }
+        },
+        "license-keys": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/license-keys",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/license-keys"
+          }
+        },
+        "discount-redemptions": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/orders/5014/discount-redemptions",
+            "self": "https://api.lemonsqueezy.com/v1/orders/5014/relationships/discount-redemptions"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/orders/5014"
+      }
+    }
+  ]
+}

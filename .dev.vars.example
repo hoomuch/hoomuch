@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development. In production use:
+#   wrangler secret put ENCRYPTION_KEY
+#
+# 32 random bytes, base64. Generate with:
+#   openssl rand -base64 32
+ENCRYPTION_KEY=

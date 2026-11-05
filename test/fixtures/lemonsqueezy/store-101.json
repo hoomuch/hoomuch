@@ -1,0 +1,70 @@
+{
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "links": {
+    "self": "https://api.lemonsqueezy.com/v1/stores/101"
+  },
+  "data": {
+    "type": "stores",
+    "id": "101",
+    "attributes": {
+      "name": "Acme Studio",
+      "slug": "acme-studio",
+      "domain": "acme-studio.lemonsqueezy.com",
+      "url": "https://acme-studio.lemonsqueezy.com",
+      "avatar_url": "https://app.lemonsqueezy.com/storage/avatars/stores/101/avatar.png",
+      "plan": "fresh",
+      "country": "DE",
+      "country_nicename": "Germany",
+      "currency": "EUR",
+      "total_sales": 120,
+      "total_revenue": 1234500,
+      "thirty_day_sales": 14,
+      "thirty_day_revenue": 98700,
+      "created_at": "2024-06-01T10:00:00.000000Z",
+      "updated_at": "2026-11-01T10:00:00.000000Z"
+    },
+    "relationships": {
+      "products": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/products",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/products"
+        }
+      },
+      "orders": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/orders",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/orders"
+        }
+      },
+      "subscriptions": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/subscriptions",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/subscriptions"
+        }
+      },
+      "discounts": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/discounts",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/discounts"
+        }
+      },
+      "license-keys": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/license-keys",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/license-keys"
+        }
+      },
+      "webhooks": {
+        "links": {
+          "related": "https://api.lemonsqueezy.com/v1/stores/101/webhooks",
+          "self": "https://api.lemonsqueezy.com/v1/stores/101/relationships/webhooks"
+        }
+      }
+    },
+    "links": {
+      "self": "https://api.lemonsqueezy.com/v1/stores/101"
+    }
+  }
+}

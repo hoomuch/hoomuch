@@ -1,0 +1,486 @@
+/*
+ * hoomuch design system: Tailwind v4 + daisyUI v5. Owner: Experience (design).
+ * Compiled to public/app.css by `npm run css`; never edit the output by hand.
+ *
+ * Principles (SPEC §7.1, design/brief.md §4): neutral greys from one hue family (264), ONE accent
+ * (blue) used sparingly (focus ring, active nav marker, MRR line, links, the owl's right eye),
+ * semantic colours only for deltas / status / flash, no shadows, 1px borders, tabular figures.
+ * Two type weights only: 400 (body, nav, table heads) and 600 (headings, buttons, badges,
+ * figures, labels). Never font-medium (500).
+ *
+ * Contrast (WCAG AA, both themes; full table in the Experience report):
+ *   text on base-100/200 ......... base-content ≥ 14.8:1, base-content/70 ≥ 6.3:1,
+ *                                  base-content/60 ≥ 4.5:1 (floor for any text; prefer /70)
+ *   accent, success, warning, error, info as TEXT on base-100/200 ≥ 4.8:1
+ *   *-content on its fill ........ ≥ 5.1:1
+ *   field (input/segment borders)  ≥ 3.2:1 against base-100/200
+ *
+ * Class conventions for pages/charts:
+ *   hairline/decorative border → border-base-300   · state-bearing border → border-field
+ *   secondary text → text-base-content/70           · never below /60 for text
+ *   figures → tabular-nums (tables get it automatically)
+ *   charts → stroke-accent for the MRR line, provider hex via fill=/stroke= attributes,
+ *            gridlines stroke-base-300, axis labels fill-base-content/70
+ *   focus: every focusable element gets the accent ring automatically; never remove it. Add
+ *          `focus-inset` to links/buttons inside overflow-x-auto scrollers so it isn't clipped.
+ *   wide tables → wrap in <TableScroller> (ui.tsx), not a bare overflow-x-auto div: it is
+ *          keyboard-scrollable, named by the caption, and `relative` so sr-only text can't
+ *          escape it and widen the page at 320px.
+ *   Prefer opacity modifiers that already exist (/70, /60): every new one costs ~250 bytes,
+ *   because Tailwind ships a color-mix() fallback for each.
+ */
+
+@import "tailwindcss" source("../");
+
+/* Words in our TypeScript that Tailwind would otherwise read as utilities (`.filter(Boolean)`,
+   `invert` props, "rings", "container"…). Nothing in the views means them as classes. */
+@source not inline("container filter invert ring lowercase outline");
+
+/*
+ * daisyUI supplies the themes, the colour utilities (bg-base-200, text-error, fill-accent…),
+ * rounded-box/-field/-selector, the root colour + scrollbar base, and loading/kbd. It emits a
+ * component whenever its name appears anywhere in src/, and many are everyday words in our code
+ * (range, filter, steps, status, label, list, card…), so this is a whitelist.
+ * btn, input, select, textarea, checkbox, radio, table, badge and link keep their daisyUI class
+ * names and meaning but are implemented below at a fraction of the size (with daisyUI's own
+ * versions the bundle was 51 KB).
+ * Need another daisyUI component? Add it to `include`.
+ */
+@plugin "daisyui" {
+  themes: false;
+  logs: false;
+  include: rootcolor, scrollbar, radius, loading, kbd;
+}
+
+/* ---------- themes ---------- */
+
+@plugin "daisyui/theme" {
+  name: "hoomuch";
+  default: true;
+  color-scheme: light;
+  --color-base-100: oklch(100% 0 0); /* #ffffff page */
+  --color-base-200: oklch(97.5% 0.003 264); /* #f6f7f9 quiet fill */
+  --color-base-300: oklch(91.8% 0.006 264); /* #e2e4e8 hairline */
+  --color-base-content: oklch(21% 0.012 264); /* #15181e ink */
+  --color-field: oklch(63% 0.012 264); /* #858991 3:1 boundary */
+  --color-primary: oklch(21% 0.012 264); /* ink buttons */
+  --color-primary-content: oklch(99.5% 0 0);
+  --color-secondary: oklch(45% 0.012 264); /* #52555c graphite */
+  --color-secondary-content: oklch(99.5% 0 0);
+  --color-accent: oklch(52% 0.18 257); /* #0864cd */
+  --color-accent-content: oklch(99.5% 0 0);
+  --color-neutral: oklch(27% 0.012 264); /* #23262c */
+  --color-neutral-content: oklch(98.5% 0.002 264);
+  --color-info: oklch(52% 0.18 257); /* = accent */
+  --color-info-content: oklch(99.5% 0 0);
+  --color-success: oklch(52% 0.13 152); /* #137d41 */
+  --color-success-content: oklch(99.5% 0 0);
+  --color-warning: oklch(54% 0.12 65); /* #9d5d03 */
+  --color-warning-content: oklch(99.5% 0 0);
+  --color-error: oklch(53% 0.19 26); /* #c2272a */
+  --color-error-content: oklch(99.5% 0 0);
+  --radius-selector: 0.3125rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "hoomuch-dark";
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: oklch(17.5% 0.006 264); /* #0f1013 page */
+  --color-base-200: oklch(21% 0.007 264); /* #17181c raised fill */
+  --color-base-300: oklch(29.5% 0.009 264); /* #2a2d31 hairline */
+  --color-base-content: oklch(94% 0.005 264); /* #e9ebef */
+  --color-field: oklch(54% 0.012 264); /* #6b6f76 3:1 boundary */
+  --color-primary: oklch(94% 0.005 264);
+  --color-primary-content: oklch(17.5% 0.006 264);
+  --color-secondary: oklch(75% 0.01 264); /* #abaeb4 */
+  --color-secondary-content: oklch(17.5% 0.006 264);
+  --color-accent: oklch(72% 0.14 254); /* #62a7fa */
+  --color-accent-content: oklch(17.5% 0.006 264);
+  --color-neutral: oklch(32% 0.01 264); /* #303338 */
+  --color-neutral-content: oklch(96% 0.004 264);
+  --color-info: oklch(72% 0.14 254);
+  --color-info-content: oklch(17.5% 0.006 264);
+  --color-success: oklch(74% 0.15 152); /* #54c57a */
+  --color-success-content: oklch(17.5% 0.006 264);
+  --color-warning: oklch(80% 0.14 75); /* #f2af48 */
+  --color-warning-content: oklch(17.5% 0.006 264);
+  --color-error: oklch(70% 0.17 24); /* #f66c69 */
+  --color-error-content: oklch(17.5% 0.006 264);
+  --radius-selector: 0.3125rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ---------- tokens ---------- */
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  /* `border-field` etc. Fallback only: each daisyUI theme above sets the real value. */
+  --color-field: oklch(63% 0.012 264);
+}
+
+/* ---------- base ---------- */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  ::selection {
+    background-color: color-mix(in oklab, var(--color-accent) 24%, transparent);
+  }
+  ::placeholder {
+    color: color-mix(in oklab, currentColor 60%, transparent);
+    opacity: 1;
+  }
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+  /* The UA makes <th> bold (700), a third weight. Header cells inherit; 400 by default. */
+  th {
+    font-weight: inherit;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  /* Bare links in prose are the accent; anything with a class styles itself. */
+  a:not([class]) {
+    color: var(--color-accent);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+  }
+}
+
+/* ---------- components ----------
+ * Same class names and semantics as daisyUI v5, lean implementations. Tailwind utilities in
+ * the markup always win (they sit in a later layer), e.g. `btn w-full`, `input font-mono`. */
+
+@layer components {
+  /* Buttons: btn (= quiet bordered), btn-primary (ink), btn-ghost, btn-error (solid red),
+     btn-active / aria-current / aria-pressed (selected), btn-sm, btn-block, disabled. */
+  .btn {
+    --btn-bg: var(--color-base-100);
+    --btn-fg: var(--color-base-content);
+    --btn-border: var(--color-base-300);
+    --btn-hover: var(--color-base-200);
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    height: 2.5rem;
+    padding-inline: 1rem;
+    border: var(--border) solid var(--btn-border);
+    border-radius: var(--radius-field);
+    background-color: var(--btn-bg);
+    color: var(--btn-fg);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    white-space: nowrap;
+    text-decoration-line: none;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    transition-property: color, background-color, border-color;
+    transition-duration: 150ms;
+  }
+  @media (hover: hover) {
+    .btn:hover {
+      background-color: var(--btn-hover);
+      border-color: var(--btn-hover-border, var(--btn-border));
+    }
+  }
+  .btn-sm {
+    height: 2rem;
+    padding-inline: 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .btn-block {
+    width: 100%;
+  }
+  .btn-primary {
+    --btn-bg: var(--color-primary);
+    --btn-fg: var(--color-primary-content);
+    --btn-border: var(--color-primary);
+    /* Ink can't get darker on hover, so it lightens toward the page. */
+    --btn-hover: color-mix(in oklab, var(--color-primary) 84%, var(--color-base-100));
+    --btn-hover-border: var(--btn-hover);
+  }
+  .btn-error {
+    --btn-bg: var(--color-error);
+    --btn-fg: var(--color-error-content);
+    --btn-border: var(--color-error);
+    --btn-hover: color-mix(in oklab, var(--color-error) 88%, var(--color-base-content));
+    --btn-hover-border: var(--btn-hover);
+  }
+  .btn-ghost {
+    --btn-bg: transparent;
+    --btn-border: transparent;
+  }
+  .btn-active,
+  .btn:is([aria-pressed="true"], [aria-current]:not([aria-current="false"])) {
+    --btn-bg: var(--color-base-200);
+    --btn-border: var(--color-field);
+    --btn-hover: var(--color-base-200);
+  }
+  .btn:is(:disabled, [aria-disabled="true"], .btn-disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn:is([aria-disabled="true"], .btn-disabled) {
+    pointer-events: none;
+  }
+
+  /* Fields: input, select, textarea. 1px boundary at ≥3:1 (--color-field); red when invalid. */
+  .input,
+  .select,
+  .textarea {
+    --input-color: var(--color-field);
+    width: clamp(3rem, 20rem, 100%);
+    min-width: 0;
+    height: 2.5rem;
+    padding-inline: 0.75rem;
+    border: var(--border) solid var(--input-color);
+    border-radius: var(--radius-field);
+    background-color: var(--color-base-100);
+    color: var(--color-base-content);
+    font-size: 0.9375rem;
+    transition: border-color 150ms;
+  }
+  .textarea {
+    height: auto;
+    min-height: 5rem;
+    padding-block: 0.5rem;
+  }
+  .select {
+    appearance: none;
+    padding-inline-end: 2.25rem;
+    text-overflow: ellipsis;
+    background-image: linear-gradient(45deg, #0000 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, #0000 50%);
+    background-position: calc(100% - 1.125rem) calc(50% + 1px), calc(100% - 0.8125rem) calc(50% + 1px);
+    background-size: 0.3125rem 0.3125rem;
+    background-repeat: no-repeat;
+  }
+  .input-sm,
+  .select-sm {
+    height: 2rem;
+    font-size: 0.875rem;
+  }
+  .input-error,
+  .select-error,
+  .textarea-error,
+  :is(.input, .select, .textarea)[aria-invalid="true"] {
+    --input-color: var(--color-error);
+  }
+  :is(.input, .select, .textarea):is(:disabled, [disabled]) {
+    background-color: var(--color-base-200);
+    border-color: var(--color-base-300);
+    color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+    cursor: not-allowed;
+  }
+  /* iOS zooms into fields under 16px. */
+  @media (pointer: coarse) {
+    .input,
+    .select,
+    .textarea {
+      font-size: 1rem;
+    }
+  }
+
+  /* Checkbox / radio: native controls (crisp, forced-colours aware), tinted ink. */
+  .checkbox,
+  .radio {
+    width: 1.125rem;
+    height: 1.125rem;
+    flex-shrink: 0;
+    margin: 0;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+  }
+  .checkbox-sm,
+  .radio-sm {
+    width: 1rem;
+    height: 1rem;
+  }
+  .checkbox:disabled,
+  .radio:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Table: quiet header, hairline rows, flush outer edges, tabular figures.
+     table-sm / table-xs tighten; table-zebra and tr.row-hover add a quiet fill. */
+  .table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    text-align: start;
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .table :where(th, td) {
+    padding: 0.625rem 0.75rem;
+    text-align: start;
+    vertical-align: middle;
+  }
+  .table :where(thead, tfoot) {
+    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+    font-size: 0.75rem;
+    font-weight: 400;
+    white-space: nowrap;
+  }
+  .table :where(thead tr :is(th, td), tbody tr:not(:last-child) :is(th, td)) {
+    border-bottom: var(--border) solid var(--color-base-300);
+  }
+  .table :where(tfoot tr:first-child :is(th, td)) {
+    border-top: var(--border) solid var(--color-base-300);
+  }
+  .table-sm :where(th, td) {
+    padding-block: 0.5rem;
+  }
+  .table-sm :where(tbody) {
+    font-size: 0.8125rem;
+  }
+  .table-xs :where(th, td) {
+    padding: 0.25rem 0.5rem;
+  }
+  .table-xs :where(tbody) {
+    font-size: 0.75rem;
+  }
+  /* Flush outer edges at every size, so figures line up with card titles. */
+  .table :where(tr > :first-child) {
+    padding-inline-start: 0;
+  }
+  .table :where(tr > :last-child) {
+    padding-inline-end: 0;
+  }
+  .table-zebra :where(tbody tr:nth-child(even)),
+  .table :where(tr.row-hover:hover) {
+    background-color: var(--color-base-200);
+  }
+
+  /* Badge: small capsule. badge-{success,warning,error,info} fill; badge-outline keeps the
+     colour on text + border only. */
+  .badge {
+    --badge-color: var(--color-base-content);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    height: 1.25rem;
+    padding-inline: 0.5rem;
+    border: var(--border) solid var(--color-base-300);
+    border-radius: 9999px;
+    background-color: var(--color-base-200);
+    color: var(--color-base-content);
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  .badge-sm {
+    height: 1.125rem;
+    padding-inline: 0.4375rem;
+    font-size: 0.6875rem;
+  }
+  .badge-success {
+    --badge-color: var(--color-success);
+    --badge-fg: var(--color-success-content);
+  }
+  .badge-warning {
+    --badge-color: var(--color-warning);
+    --badge-fg: var(--color-warning-content);
+  }
+  .badge-error {
+    --badge-color: var(--color-error);
+    --badge-fg: var(--color-error-content);
+  }
+  .badge-info {
+    --badge-color: var(--color-info);
+    --badge-fg: var(--color-info-content);
+  }
+  .badge:is(.badge-success, .badge-warning, .badge-error, .badge-info) {
+    border-color: var(--badge-color);
+    background-color: var(--badge-color);
+    color: var(--badge-fg);
+  }
+  .badge.badge-outline {
+    border-color: color-mix(in oklab, var(--badge-color) 45%, transparent);
+    background-color: transparent;
+    color: var(--badge-color);
+  }
+
+  /* Links are the accent, underlined; link-hover underlines on hover only. */
+  .link {
+    color: var(--color-accent);
+    text-decoration-line: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+  }
+  .link-hover {
+    text-decoration-line: none;
+  }
+  .link-hover:hover {
+    text-decoration-line: underline;
+  }
+}
+
+/* ---------- focus & motion ----------
+ * Unlayered on purpose: these must win over every component and utility. */
+
+:focus-visible,
+:is(.input, .select, .textarea):focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+:is(.input, .select) :focus-visible {
+  outline: none;
+}
+/* Inside scrollers (overflow-x-auto) an outset ring gets clipped: draw it inside instead. */
+.focus-inset:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Forced colours (Windows contrast themes) paint every border in one system colour, transparent
+   ones included, so the current nav item, range and filter looked like all the others. Hide the
+   idle borders and draw the current marker in Highlight. Text and outlines are left to the system. */
+@media (forced-colors: active) {
+  nav a:not(.btn, [aria-current="page"]) {
+    border-color: Canvas;
+  }
+  nav a[aria-current="page"],
+  .btn:is(.btn-active, [aria-pressed="true"], [aria-current]:not([aria-current="false"])) {
+    border-color: Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+public/app.css
+dist/
+.DS_Store
+*.log
+.vitest/
+
+# Private design notes and assets; not part of the open-source release.
+design/

@@ -1,0 +1,290 @@
+/**
+ * Realistic, deterministic read-model fixtures. Owner: Experience.
+ * Used by view tests (test/views) and by the landing page's live demo (`fixtureDashboard` with
+ * `now = Date.now()`). Everything else here is test-only.
+ */
+
+import type {
+  BreakdownRow,
+  ConnectionDetail,
+  ConnectionSummary,
+  DashboardData,
+  MrrDay,
+  RangeDays,
+  RevenueDay,
+  TransactionPage,
+  TransactionRow,
+} from '../data/types';
+import { addDays, dayKey, dayStart, DAY, HOUR, MINUTE } from '../lib/time';
+
+/** Fixed "now" so fixtures (and their screenshots) are stable: 2026-11-05 10:30 UTC. */
+export const FIXTURE_NOW = Date.UTC(2026, 10, 5, 10, 30);
+
+/** Small deterministic PRNG (mulberry32). */
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export const FIXTURE_CONNECTIONS: ConnectionSummary[] = [
+  {
+    id: '6f1c2b8e-3a4d-4c5e-9f60-1a2b3c4d5e01',
+    name: 'Acme Analytics',
+    provider: 'stripe',
+    color: '#635BFF',
+    dotClass: 'bg-[#635BFF]',
+    status: 'ok',
+    lastSyncedAt: FIXTURE_NOW - 4 * MINUTE,
+    lastError: null,
+    testMode: false,
+  },
+  {
+    id: '6f1c2b8e-3a4d-4c5e-9f60-1a2b3c4d5e02',
+    name: 'Habit — iOS',
+    provider: 'revenuecat',
+    color: '#F2545B',
+    dotClass: 'bg-[#F2545B]',
+    status: 'ok',
+    lastSyncedAt: FIXTURE_NOW - 27 * MINUTE,
+    lastError: null,
+    testMode: false,
+  },
+  {
+    id: '6f1c2b8e-3a4d-4c5e-9f60-1a2b3c4d5e03',
+    name: 'Pagekit',
+    provider: 'lemonsqueezy',
+    color: '#AD7D00',
+    dotClass: 'bg-[#AD7D00]',
+    status: 'error',
+    lastSyncedAt: FIXTURE_NOW - 3 * HOUR,
+    lastError: 'Lemon Squeezy rejected the key. Check that you pasted all of it and that it hasn’t been revoked.',
+    testMode: false,
+  },
+  {
+    id: '6f1c2b8e-3a4d-4c5e-9f60-1a2b3c4d5e04',
+    name: 'Stripe sandbox',
+    provider: 'stripe',
+    color: '#635BFF',
+    dotClass: 'bg-[#635BFF]',
+    status: 'syncing',
+    lastSyncedAt: null,
+    lastError: null,
+    testMode: true,
+  },
+];
+
+/** Per-connection profile: today's MRR (USD cents), growth over 90 days, subs, trials, daily revenue. */
+const PROFILES = [
+  { mrr: 482_000, growth: 0.11, subs: 131, trials: 9, dailyAvg: 15_800, refundEvery: 9 },
+  { mrr: 231_000, growth: 0.18, subs: 402, trials: 37, dailyAvg: 7_900, refundEvery: 14 },
+  { mrr: 196_000, growth: 0.04, subs: 74, trials: 4, dailyAvg: 6_400, refundEvery: 11 },
+] as const;
+
+function windowDays(range: number, now: number): string[] {
+  const today = dayKey(now);
+  const out: string[] = [];
+  for (let i = range - 1; i >= 0; i--) out.push(addDays(today, -i));
+  return out;
+}
+
+function mrrOn(profileIdx: number, daysAgo: number): number {
+  const p = PROFILES[profileIdx]!;
+  const r = rng(1000 + profileIdx * 97 + daysAgo);
+  const trend = p.mrr / (1 + p.growth * (daysAgo / 90));
+  return Math.round(trend * (1 + (r() - 0.5) * 0.006));
+}
+
+function revenueOn(profileIdx: number, day: string): number {
+  const p = PROFILES[profileIdx]!;
+  const n = Math.round(dayStart(day) / DAY);
+  const r = rng(n * 31 + profileIdx);
+  const weekday = new Date(dayStart(day)).getUTCDay();
+  const weekendDip = weekday === 0 || weekday === 6 ? 0.7 : 1;
+  let v = p.dailyAvg * weekendDip * (0.55 + r() * 0.9);
+  if (r() < 0.06) v *= 2.6; // annual renewals spike
+  if (n % p.refundEvery === 0) v -= p.dailyAvg * (0.4 + r() * 0.5);
+  return Math.round(v);
+}
+
+export type FixtureState = 'full' | 'empty' | 'sparse' | 'warnings' | 'single';
+
+/** A complete DashboardData, in USD, for the given window. */
+export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState = 'full', now = FIXTURE_NOW): DashboardData {
+  const days = windowDays(rangeDays, now);
+  const conns = (state === 'single' ? FIXTURE_CONNECTIONS.slice(0, 1) : FIXTURE_CONNECTIONS.slice(0, 3)).slice();
+  const zeroKpi = { value: 0, previous: null, deltaPct: null };
+
+  if (state === 'empty') {
+    return {
+      currency: 'USD',
+      rangeDays,
+      generatedAt: now,
+      hasConnections: false,
+      kpis: { mrr: zeroKpi, arr: zeroKpi, activeSubscriptions: zeroKpi, activeTrials: zeroKpi, revenue: zeroKpi },
+      breakdown: [],
+      revenueSeries: days.map((day) => ({ day, total: 0, byConnection: {} })),
+      mrrSeries: [],
+      fx: { asOf: null, missing: [] },
+      warnings: [],
+    };
+  }
+
+  // Sparse = a connection added 2 days ago: only the last 3 days have data.
+  const firstDataIdx = state === 'sparse' ? days.length - 3 : 0;
+
+  const revenueSeries: RevenueDay[] = days.map((day, i) => {
+    const byConnection: Record<string, number> = {};
+    let total = 0;
+    if (i >= firstDataIdx) {
+      conns.forEach((c, ci) => {
+        const v = revenueOn(ci, day);
+        byConnection[c.id] = v;
+        total += v;
+      });
+    }
+    return { day, total, byConnection };
+  });
+
+  const mrrSeries: MrrDay[] = days
+    .map((day, i) => ({ day, i }))
+    .filter(({ i }) => i >= firstDataIdx)
+    .map(({ day, i }) => ({
+      day,
+      total: conns.reduce((s, _c, ci) => s + mrrOn(ci, days.length - 1 - i), 0),
+    }));
+
+  const kpiFrom = (value: number, previous: number | null) => ({
+    value,
+    previous,
+    deltaPct: previous ? ((value - previous) / previous) * 100 : null,
+  });
+
+  const mrrNow = mrrSeries.at(-1)?.total ?? 0;
+  const mrrStart = state === 'sparse' ? null : (mrrSeries[0]?.total ?? null);
+  const subsNow = conns.reduce((s, _c, ci) => s + PROFILES[ci]!.subs, 0);
+  const trialsNow = conns.reduce((s, _c, ci) => s + PROFILES[ci]!.trials, 0);
+  const revenueNow = revenueSeries.reduce((s, d) => s + d.total, 0);
+  const revenuePrev =
+    state === 'sparse'
+      ? null
+      : windowDays(rangeDays, now - rangeDays * DAY).reduce((s, day) => s + conns.reduce((t, _c, ci) => t + revenueOn(ci, day), 0), 0);
+
+  const breakdown: BreakdownRow[] = conns
+    .map((c, ci) => {
+      const mrr = mrrOn(ci, 0);
+      return {
+        ...c,
+        mrr,
+        activeSubscriptions: PROFILES[ci]!.subs,
+        activeTrials: c.provider === 'lemonsqueezy' ? null : PROFILES[ci]!.trials,
+        revenue: revenueSeries.reduce((s, d) => s + (d.byConnection[c.id] ?? 0), 0),
+        sharePct: mrrNow ? (mrr / mrrNow) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.mrr - a.mrr);
+
+  return {
+    currency: 'USD',
+    rangeDays,
+    generatedAt: now,
+    hasConnections: true,
+    kpis: {
+      mrr: kpiFrom(mrrNow, mrrStart),
+      arr: kpiFrom(mrrNow * 12, mrrStart === null ? null : mrrStart * 12),
+      activeSubscriptions: kpiFrom(subsNow, state === 'sparse' ? null : Math.round(subsNow * 0.94)),
+      activeTrials: kpiFrom(trialsNow, state === 'sparse' ? null : trialsNow + 6),
+      revenue: kpiFrom(revenueNow, revenuePrev),
+    },
+    breakdown,
+    revenueSeries,
+    mrrSeries,
+    fx: { asOf: '2026-11-04', missing: state === 'warnings' ? ['ARS'] : [] },
+    warnings:
+      state === 'warnings'
+        ? [
+            'Habit — iOS (RevenueCat) has no daily revenue history; showing the 28-day total only.',
+            'Pagekit couldn’t sync: Lemon Squeezy rejected the key.',
+          ]
+        : [],
+  };
+}
+
+const PLANS = ['Pro monthly', 'Pro yearly', 'Team monthly', 'Starter monthly', 'Premium (iOS)', 'Lifetime'];
+
+export function fixtureTransactions(page = 1, provider: TransactionPage['provider'] = null): TransactionPage {
+  const pageSize = 50;
+  const all: TransactionRow[] = [];
+  const conns = FIXTURE_CONNECTIONS.slice(0, 3);
+  const r = rng(42);
+  let t = FIXTURE_NOW - 7 * MINUTE;
+  for (let i = 0; i < 140; i++) {
+    const c = conns[Math.floor(r() * conns.length)]!;
+    const refund = r() < 0.07;
+    const eur = c.provider === 'lemonsqueezy';
+    const base = [900, 1200, 2900, 9900, 4900][Math.floor(r() * 5)]!;
+    const amount = refund ? -base : base;
+    all.push({
+      connectionId: c.id,
+      connectionName: c.name,
+      provider: c.provider,
+      color: c.color,
+      dotClass: c.dotClass,
+      externalId: `txn_${(i + 1).toString(36).padStart(6, '0')}`,
+      occurredAt: t,
+      type: refund ? 'refund' : 'charge',
+      amount,
+      originalCurrency: eur ? 'EUR' : 'USD',
+      displayAmount: eur ? Math.round(amount * 1.08) : amount,
+      description: PLANS[Math.floor(r() * PLANS.length)]!,
+    });
+    t -= Math.floor(r() * 5 * HOUR) + 3 * MINUTE;
+  }
+  const filtered = provider ? all.filter((x) => x.provider === provider) : all;
+  const start = (page - 1) * pageSize;
+  return {
+    currency: 'USD',
+    provider,
+    items: filtered.slice(start, start + pageSize),
+    page,
+    pageSize,
+    hasMore: filtered.length > start + pageSize,
+  };
+}
+
+export function fixtureConnectionDetail(idx = 0): ConnectionDetail {
+  const c = FIXTURE_CONNECTIONS[idx] ?? FIXTURE_CONNECTIONS[0]!;
+  const today = dayKey(FIXTURE_NOW);
+  const profile = PROFILES[Math.min(idx, 2)]!;
+  return {
+    ...c,
+    createdAt: FIXTURE_NOW - 41 * DAY,
+    keyHint: c.provider === 'demo' ? null : '…a1b2',
+    config: c.provider === 'lemonsqueezy' ? { storeId: '18234', storeCurrencies: '{"18234":"EUR"}', testMode: 'false' } : c.provider === 'revenuecat' ? { projectId: 'proj1a2b3c4d', reportingCurrency: 'USD', revenueHistory: 'daily' } : {},
+    currency: 'USD',
+    snapshots: Array.from({ length: 14 }, (_, i) => ({
+      day: addDays(today, -i),
+      mrr: mrrOn(Math.min(idx, 2), i),
+      activeSubscriptions: profile.subs - Math.floor(i / 3),
+      activeTrials: c.provider === 'lemonsqueezy' ? null : profile.trials - (i % 4),
+    })),
+    recentRuns: [
+      { kind: 'cron', startedAt: FIXTURE_NOW - 4 * MINUTE, finishedAt: FIXTURE_NOW - 4 * MINUTE + 2_300, ok: true, events: 12, message: null },
+      { kind: 'manual', startedAt: FIXTURE_NOW - 2 * HOUR, finishedAt: FIXTURE_NOW - 2 * HOUR + 1_900, ok: true, events: 3, message: null },
+      {
+        kind: 'cron',
+        startedAt: FIXTURE_NOW - 5 * HOUR,
+        finishedAt: FIXTURE_NOW - 5 * HOUR + 30_000,
+        ok: false,
+        events: 0,
+        message: 'Stripe is rate-limiting requests. Try again in a minute.',
+      },
+      { kind: 'initial', startedAt: FIXTURE_NOW - 41 * DAY, finishedAt: FIXTURE_NOW - 41 * DAY + 48_000, ok: true, events: 1_204, message: null },
+    ],
+  };
+}

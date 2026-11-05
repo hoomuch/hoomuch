@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hoomuch",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-11-01",
+
+  // Tailwind is compiled before every dev reload and deploy.
+  "build": {
+    "command": "npm run css",
+    "watch_dir": "src"
+  },
+
+  // Files in ./public are served directly, before the Worker runs.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hoomuch",
+      // Replace with the id printed by `wrangler d1 create hoomuch` before the first deploy.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "triggers": {
+    "crons": ["*/30 * * * *"]
+  },
+
+  "vars": {
+    "APP_NAME": "hoomuch",
+    "ALLOW_SIGNUP": "true",
+    "SYNC_INTERVAL_MINUTES": "60"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+  // Secrets (not in this file): ENCRYPTION_KEY — see .dev.vars.example
+}

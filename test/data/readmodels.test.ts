@@ -1,0 +1,316 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getDashboardData } from '../../src/data/dashboard';
+import { listTransactions } from '../../src/data/transactions';
+import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
+import { addDays } from '../../src/lib/time';
+import type { SessionUser } from '../../src/env';
+import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
+
+const NOW = Date.parse('2026-11-05T12:00:00.000Z');
+const TODAY = '2026-11-05';
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+
+let t: TestD1;
+
+function snap(conn: string, day: string, mrr: Record<string, number>, subs: number, trials: number | null = null, extra: { revenuePeriod?: Record<string, number>; days?: number } = {}) {
+  t.exec(
+    `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, revenue_period, revenue_period_days, new_customers, captured_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
+    conn, day, JSON.stringify(mrr), subs, trials, extra.revenuePeriod ? JSON.stringify(extra.revenuePeriod) : null, extra.days ?? null,
+  );
+}
+
+function rev(conn: string, day: string, currency: string, gross: number, refunds = 0, source: 'transactions' | 'provider' = 'transactions') {
+  t.exec(
+    'INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES (?, ?, ?, ?, ?, 1, ?)',
+    conn, day, currency, gross, refunds, source,
+  );
+}
+
+function fx(rates: Record<string, number>, day = '2026-11-04') {
+  t.exec('INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)', day, 'USD', JSON.stringify(rates), NOW);
+}
+
+function tx(conn: string, id: string, at: number, amount: number, currency = 'USD', description: string | null = 'Pro') {
+  t.exec(
+    `INSERT INTO transactions (connection_id, external_id, occurred_at, type, amount, currency, fee, description)
+     VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+    conn, id, at, amount < 0 ? 'refund' : 'charge', amount, currency, description,
+  );
+}
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
+  t = createTestD1();
+  seedUser(t, { id: 'u1' });
+  seedUser(t, { id: 'u2' });
+});
+afterEach(() => vi.useRealTimers());
+
+describe('getDashboardData', () => {
+  it('returns a valid empty state in one round trip', async () => {
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(t.roundTrips()).toBe(1);
+    expect(d.hasConnections).toBe(false);
+    expect(d.revenueSeries.map((r) => r.day)).toEqual([
+      '2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05',
+    ]);
+    expect(d.revenueSeries.every((r) => r.total === 0)).toBe(true);
+    expect(d.kpis.mrr).toEqual({ value: 0, previous: null, deltaPct: null });
+    expect(d.kpis.revenue.previous).toBeNull();
+    expect(d.fx).toEqual({ asOf: null, missing: [] });
+    expect(d.warnings).toEqual([]);
+  });
+
+  it('converts MRR into the display currency, sorts the breakdown and computes shares and deltas', async () => {
+    fx({ EUR: 0.9, GBP: 0.8 });
+    seedConnection(t, { id: 'stripe1', userId: 'u1', provider: 'stripe', name: 'Acme', createdAt: 1 });
+    seedConnection(t, { id: 'ls1', userId: 'u1', provider: 'lemonsqueezy', name: 'Shop', createdAt: 2 });
+    // window = 2026-10-07 … 2026-11-05 (30 days)
+    snap('stripe1', '2026-10-01', { USD: 100_00 }, 10, 2); // 6 days before start
+    snap('stripe1', '2026-10-10', { USD: 110_00 }, 11, 2); // 3 days after start → nearest
+    snap('stripe1', TODAY, { USD: 150_00, EUR: 90_00 }, 16, 3);
+    snap('ls1', '2026-10-06', { EUR: 450_00 }, 30, null); // 1 day before start → nearest
+    snap('ls1', TODAY, { EUR: 540_00 }, 36, null);
+
+    const d = await getDashboardData(testEnv(t.db), user, 30);
+    expect(t.roundTrips()).toBe(1);
+    // stripe: 150 + 90€→100 = 250 USD; ls: 540€ → 600 USD
+    expect(d.kpis.mrr.value).toBe(850_00);
+    expect(d.kpis.arr.value).toBe(850_00 * 12);
+    // previous: stripe 2026-10-10 (110) + ls 2026-10-06 (450€ → 500) = 610
+    expect(d.kpis.mrr.previous).toBe(610_00);
+    expect(d.kpis.mrr.deltaPct).toBeCloseTo(((850 - 610) / 610) * 100, 6);
+    expect(d.kpis.arr.previous).toBe(610_00 * 12);
+    expect(d.kpis.activeSubscriptions).toMatchObject({ value: 52, previous: 41 });
+    expect(d.kpis.activeTrials).toMatchObject({ value: 3, previous: 2 });
+    expect(d.breakdown.map((b) => [b.id, b.mrr, b.sharePct])).toEqual([
+      ['ls1', 600_00, 70.6],
+      ['stripe1', 250_00, 29.4],
+    ]);
+    expect(d.breakdown[0]).toMatchObject({ provider: 'lemonsqueezy', color: '#AD7D00', status: 'ok', activeTrials: null });
+    expect(d.fx).toEqual({ asOf: '2026-11-04', missing: [] });
+    // MRR series: only days with snapshots, other connections carried forward.
+    expect(d.mrrSeries).toEqual([
+      { day: '2026-10-10', total: 110_00 + 500_00 },
+      { day: TODAY, total: 850_00 },
+    ]);
+  });
+
+  it('reports a null delta when no connection has an earlier snapshot to compare with', async () => {
+    seedConnection(t, { id: 's1', userId: 'u1', provider: 'stripe' });
+    snap('s1', TODAY, { USD: 500 }, 1);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.kpis.mrr).toEqual({ value: 500, previous: null, deltaPct: null });
+    expect(d.mrrSeries).toEqual([{ day: TODAY, total: 500 }]);
+  });
+
+  it('builds a zero-filled revenue series and compares revenue with the previous window', async () => {
+    fx({ EUR: 0.5 });
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe', name: 'A' });
+    seedConnection(t, { id: 'b', userId: 'u1', provider: 'demo', name: 'B' });
+    rev('a', TODAY, 'USD', 10_00);
+    rev('a', '2026-11-03', 'USD', 5_00, 2_00);
+    rev('b', '2026-11-03', 'EUR', 5_00); // → 10 USD
+    rev('a', '2026-10-30', 'USD', 1_00); // first day of the 7-day window
+    rev('a', '2026-10-29', 'USD', 4_00); // previous window
+    rev('a', '2026-10-22', 'USD', 4_00); // previous window starts 2026-10-23 → excluded
+    rev('a', '2026-11-06', 'USD', 99_00); // future, excluded
+
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.revenueSeries).toHaveLength(7);
+    expect(d.revenueSeries[0]).toEqual({ day: '2026-10-30', total: 1_00, byConnection: { a: 1_00 } });
+    expect(d.revenueSeries[1]).toEqual({ day: '2026-10-31', total: 0, byConnection: {} });
+    expect(d.revenueSeries[4]).toEqual({ day: '2026-11-03', total: 13_00, byConnection: { a: 3_00, b: 10_00 } });
+    expect(d.revenueSeries[6]).toEqual({ day: TODAY, total: 10_00, byConnection: { a: 10_00 } });
+    expect(d.kpis.revenue.value).toBe(24_00);
+    expect(d.kpis.revenue.previous).toBe(4_00);
+    expect(d.kpis.revenue.deltaPct).toBeCloseTo(500, 6);
+    expect(d.breakdown.find((b) => b.id === 'a')!.revenue).toBe(14_00);
+    expect(d.breakdown.find((b) => b.id === 'b')!.revenue).toBe(10_00);
+    expect(d.revenueSeries.reduce((s, r) => s + r.total, 0)).toBe(d.kpis.revenue.value);
+  });
+
+  it('warns about RevenueCat without daily history and leaves it out of revenue totals', async () => {
+    seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'Main app' });
+    t.exec('UPDATE connections SET revenue_synced_until = ? WHERE id = ?', NOW, 'rc');
+    snap('rc', TODAY, { USD: 300_00 }, 40, 5, { revenuePeriod: { USD: 1234_00 }, days: 28 });
+    seedConnection(t, { id: 'rc2', userId: 'u1', provider: 'revenuecat', name: 'Other app' });
+    snap('rc2', TODAY, { USD: 100_00 }, 10, 1);
+    rev('rc2', TODAY, 'USD', 7_00, 0, 'provider');
+
+    const d = await getDashboardData(testEnv(t.db), user, 30);
+    const rc = d.breakdown.find((b) => b.id === 'rc')!;
+    expect(rc.revenue).toBeNull();
+    expect(d.breakdown.find((b) => b.id === 'rc2')!.revenue).toBe(7_00);
+    expect(d.kpis.revenue.value).toBe(7_00);
+    expect(d.warnings).toEqual([
+      "Main app has no daily revenue history, so it’s left out of revenue totals; its last 28-day revenue was $1,234.",
+    ]);
+  });
+
+  it('does not warn about missing RevenueCat history before the first revenue sync finished', async () => {
+    seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'Main app', status: 'pending' });
+    const d = await getDashboardData(testEnv(t.db), user, 30);
+    expect(d.breakdown[0]!.revenue).toBeNull();
+    expect(d.warnings).toEqual(['Main app is still syncing; its numbers will appear shortly.']);
+  });
+
+  it('surfaces connections in error without breaking the rest', async () => {
+    seedConnection(t, { id: 'ok', userId: 'u1', provider: 'stripe', name: 'Good' });
+    seedConnection(t, { id: 'bad', userId: 'u1', provider: 'lemonsqueezy', name: 'Broken', status: 'error', lastError: 'Lemon Squeezy rejected the API key.' });
+    snap('ok', TODAY, { USD: 1000 }, 1);
+    snap('bad', '2026-11-01', { USD: 500 }, 1); // last known value still counts
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.kpis.mrr.value).toBe(1500);
+    expect(d.warnings).toEqual(["Broken couldn’t sync: Lemon Squeezy rejected the API key."]);
+    expect(d.breakdown.find((b) => b.id === 'bad')).toMatchObject({ status: 'error', lastError: 'Lemon Squeezy rejected the API key.' });
+  });
+
+  it('leaves out and reports currencies without an FX rate', async () => {
+    fx({ EUR: 0.9 });
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
+    snap('a', TODAY, { USD: 1000, XAF: 5000 }, 2);
+    rev('a', TODAY, 'XAF', 700);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.kpis.mrr.value).toBe(1000);
+    expect(d.fx.missing).toEqual(['XAF']);
+    expect(d.fx.asOf).toBeNull(); // nothing was actually converted
+    expect(d.warnings).toEqual(['No exchange rate for XAF; those amounts are left out of totals.']);
+  });
+
+  it('without any FX table only the display currency counts', async () => {
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
+    snap('a', TODAY, { USD: 1000, EUR: 900 }, 2);
+    const d = await getDashboardData(testEnv(t.db), { ...user, baseCurrency: 'EUR' }, 7);
+    expect(d.currency).toBe('EUR');
+    expect(d.kpis.mrr.value).toBe(900);
+    expect(d.fx.missing).toEqual(['USD']);
+    expect(d.warnings[0]).toMatch(/Exchange rates aren’t available yet/);
+  });
+
+  it('converts JPY (zero-decimal) correctly into the display currency', async () => {
+    fx({ JPY: 150 });
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
+    snap('a', TODAY, { JPY: 15000 }, 1);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.kpis.mrr.value).toBe(100_00);
+  });
+
+  it("never includes another user’s data", async () => {
+    seedConnection(t, { id: 'mine', userId: 'u1', provider: 'stripe' });
+    seedConnection(t, { id: 'theirs', userId: 'u2', provider: 'stripe' });
+    snap('theirs', TODAY, { USD: 999_00 }, 9);
+    rev('theirs', TODAY, 'USD', 999_00);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.breakdown.map((b) => b.id)).toEqual(['mine']);
+    expect(d.kpis.mrr.value).toBe(0);
+    expect(d.kpis.revenue.value).toBe(0);
+  });
+
+  it('only compares revenue with a previous window the backfill fully covers', async () => {
+    // Connected 10 days ago → history reaches back to day −99; a 30-day window's previous
+    // period starts at day −59 (covered), a 90-day window's at day −179 (not covered).
+    const created = NOW - 10 * 86_400_000;
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe', createdAt: created });
+    t.exec('UPDATE connections SET revenue_synced_until = ? WHERE id = ?', NOW, 'a');
+    rev('a', addDays(TODAY, -40), 'USD', 300);
+    rev('a', TODAY, 'USD', 600);
+    expect((await getDashboardData(testEnv(t.db), user, 30)).kpis.revenue).toMatchObject({ value: 600, previous: 300, deltaPct: 100 });
+    expect((await getDashboardData(testEnv(t.db), user, 90)).kpis.revenue).toMatchObject({ value: 900, previous: null });
+
+    // A connection added today also backfills 90 days, so the 30-day comparison stays valid…
+    seedConnection(t, { id: 'b', userId: 'u1', provider: 'demo', createdAt: NOW - 1000 });
+    rev('b', TODAY, 'USD', 10);
+    expect((await getDashboardData(testEnv(t.db), user, 30)).kpis.revenue).toMatchObject({ value: 610, previous: 300 });
+    // …while a's history (back to day −99) still doesn't reach a 90-day window's previous period (day −179).
+    expect((await getDashboardData(testEnv(t.db), user, 90)).kpis.revenue.previous).toBeNull();
+    // Connections that never finished a revenue sync and have no rows don't block the comparison.
+    seedConnection(t, { id: 'c', userId: 'u1', provider: 'stripe', createdAt: NOW, status: 'pending' });
+    expect((await getDashboardData(testEnv(t.db), user, 30)).kpis.revenue.previous).toBe(300);
+  });
+
+  it('handles a 90-day window', async () => {
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
+    rev('a', addDays(TODAY, -89), 'USD', 100);
+    rev('a', addDays(TODAY, -90), 'USD', 50);
+    const d = await getDashboardData(testEnv(t.db), user, 90);
+    expect(d.revenueSeries).toHaveLength(90);
+    expect(d.revenueSeries[0]!.total).toBe(100);
+    expect(d.kpis.revenue).toMatchObject({ value: 100, previous: 50 });
+  });
+});
+
+describe('listTransactions', () => {
+  beforeEach(() => {
+    fx({ EUR: 0.5 });
+    seedConnection(t, { id: 's', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    seedConnection(t, { id: 'l', userId: 'u1', provider: 'lemonsqueezy', name: 'Shop' });
+    seedConnection(t, { id: 'x', userId: 'u2', provider: 'stripe', name: 'Theirs' });
+    tx('s', 'txn_1', NOW - 1000, 12_00);
+    tx('s', 'txn_2', NOW - 2000, -12_00);
+    tx('l', 'order:1', NOW - 3000, 10_00, 'EUR', 'Pro (yearly)');
+    tx('l', 'order:2', NOW - 4000, 10_00, 'XAF');
+    tx('x', 'txn_9', NOW, 1_00);
+  });
+
+  it('lists the newest first with converted display amounts, scoped to the user', async () => {
+    const p = await listTransactions(testEnv(t.db), user, { provider: null, page: 1 });
+    expect(t.roundTrips()).toBe(1);
+    expect(p.items.map((i) => i.externalId)).toEqual(['txn_1', 'txn_2', 'order:1', 'order:2']);
+    expect(p.items[1]).toMatchObject({ type: 'refund', amount: -12_00, displayAmount: -12_00, connectionName: 'Acme', color: '#635BFF' });
+    expect(p.items[2]).toMatchObject({ amount: 10_00, originalCurrency: 'EUR', displayAmount: 20_00, description: 'Pro (yearly)' });
+    expect(p.items[3]!.displayAmount).toBeNull();
+    expect(p).toMatchObject({ currency: 'USD', provider: null, page: 1, pageSize: 50, hasMore: false });
+  });
+
+  it('filters by provider and paginates', async () => {
+    const p1 = await listTransactions(testEnv(t.db), user, { provider: 'stripe', page: 1, pageSize: 1 });
+    expect(p1.items.map((i) => i.externalId)).toEqual(['txn_1']);
+    expect(p1.hasMore).toBe(true);
+    const p2 = await listTransactions(testEnv(t.db), user, { provider: 'stripe', page: 2, pageSize: 1 });
+    expect(p2.items.map((i) => i.externalId)).toEqual(['txn_2']);
+    expect(p2.hasMore).toBe(false);
+    const p3 = await listTransactions(testEnv(t.db), user, { provider: 'stripe', page: 3, pageSize: 1 });
+    expect(p3.items).toEqual([]);
+  });
+
+  it('clamps bad paging input', async () => {
+    const p = await listTransactions(testEnv(t.db), user, { provider: null, page: -4, pageSize: 10_000 });
+    expect(p.page).toBe(1);
+    expect(p.pageSize).toBe(200);
+    const q = await listTransactions(testEnv(t.db), user, { provider: null, page: Number.NaN });
+    expect(q.page).toBe(1);
+  });
+});
+
+describe('connection read models', () => {
+  it('returns detail with converted snapshots (latest first, ≤30) and runs (latest first, ≤10)', async () => {
+    fx({ EUR: 0.5 });
+    seedConnection(t, { id: 'c', userId: 'u1', provider: 'lemonsqueezy', name: 'Shop', config: { storeId: '42' } });
+    for (let i = 0; i < 35; i++) snap('c', addDays(TODAY, -i), { EUR: 1000 + i }, i);
+    for (let i = 0; i < 12; i++) {
+      t.exec(
+        'INSERT INTO sync_runs (connection_id, kind, started_at, finished_at, ok, events, message) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'c', i === 0 ? 'initial' : 'cron', 1000 + i, i === 11 ? null : 2000 + i, i === 11 ? null : i % 2, i, i % 2 ? null : 'boom',
+      );
+    }
+    const d = await getConnectionDetail(testEnv(t.db), { ...user, baseCurrency: 'USD' }, 'c');
+    expect(t.roundTrips()).toBe(1);
+    expect(d).not.toBeNull();
+    expect(d!.config).toEqual({ storeId: '42' });
+    expect(d!.snapshots).toHaveLength(30);
+    expect(d!.snapshots[0]).toEqual({ day: TODAY, mrr: 2000, activeSubscriptions: 0, activeTrials: null });
+    expect(d!.recentRuns).toHaveLength(10);
+    expect(d!.recentRuns[0]).toEqual({ kind: 'cron', startedAt: 1011, finishedAt: null, ok: null, events: 11, message: null });
+    expect(d!.recentRuns[1]).toMatchObject({ ok: false, message: 'boom' });
+    expect(d!.recentRuns[2]).toMatchObject({ ok: true });
+  });
+
+  it("returns null for someone else’s connection", async () => {
+    seedConnection(t, { id: 'c', userId: 'u2', provider: 'stripe' });
+    expect(await getConnectionDetail(testEnv(t.db), user, 'c')).toBeNull();
+    expect(await listConnectionSummaries(testEnv(t.db), 'u1')).toEqual([]);
+  });
+});

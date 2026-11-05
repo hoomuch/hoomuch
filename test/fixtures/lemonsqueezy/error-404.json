@@ -1,0 +1,12 @@
+{
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "errors": [
+    {
+      "detail": "The route stores/999 could not be found.",
+      "status": "404",
+      "title": "Not Found"
+    }
+  ]
+}

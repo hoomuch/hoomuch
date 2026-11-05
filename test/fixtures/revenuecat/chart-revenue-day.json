@@ -1,0 +1,56 @@
+{
+  "object": "chart_data",
+  "category": "revenue",
+  "display_type": "line",
+  "display_name": "Revenue",
+  "description": "Revenue generated in each period, minus refunds and downward subscription payment adjustments recorded in that period.",
+  "documentation_link": "https://www.revenuecat.com/docs/dashboard-and-metrics/charts/revenue-chart",
+  "last_computed_at": 1793879600000,
+  "start_date": 1793318400000,
+  "end_date": 1793836800000,
+  "yaxis_currency": "USD",
+  "filtering_allowed": true,
+  "segmenting_allowed": true,
+  "resolution": "day",
+  "values": [
+    { "cohort": 1793318400, "incomplete": false, "measure": 0, "value": 129.99 },
+    { "cohort": 1793318400, "incomplete": false, "measure": 1, "value": 7 },
+    { "cohort": 1793404800, "incomplete": false, "measure": 0, "value": 0 },
+    { "cohort": 1793404800, "incomplete": false, "measure": 1, "value": null },
+    { "cohort": 1793491200, "incomplete": false, "measure": 0, "value": 45.5 },
+    { "cohort": 1793491200, "incomplete": false, "measure": 1, "value": 3 },
+    { "cohort": 1793664000, "incomplete": false, "measure": 0, "value": -4.99 },
+    { "cohort": 1793664000, "incomplete": false, "measure": 1, "value": 1 },
+    { "cohort": 1793750400, "incomplete": false, "measure": 0, "value": 19.99 },
+    { "cohort": 1793750400, "incomplete": false, "measure": 1, "value": 1 },
+    { "cohort": 1793836800, "incomplete": true, "measure": 0, "value": 12.34 },
+    { "cohort": 1793836800, "incomplete": true, "measure": 1, "value": 2 }
+  ],
+  "summary": {
+    "average": { "Revenue": 28.98, "Transactions": 2 },
+    "total": { "Revenue": 202.83, "Transactions": 14 }
+  },
+  "yaxis": "$",
+  "segments": null,
+  "segments_limit": null,
+  "measures": [
+    {
+      "display_name": "Revenue",
+      "description": "Revenue generated in the period, minus refunds and downward adjustments recorded in the period.",
+      "unit": "$",
+      "decimal_precision": 2,
+      "chartable": true,
+      "tabulable": true
+    },
+    {
+      "display_name": "Transactions",
+      "description": "Paid subscription and one-time purchase transactions in the period.",
+      "unit": "#",
+      "decimal_precision": 0,
+      "chartable": false,
+      "tabulable": true
+    }
+  ],
+  "user_selectors": { "revenue_type": "revenue" },
+  "unsupported_params": null
+}

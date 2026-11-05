@@ -1,0 +1,7 @@
+{
+  "object": "error",
+  "type": "authorization_error",
+  "message": "You're not authorized to access this resource",
+  "retryable": false,
+  "doc_url": "https://errors.rev.cat/authorization-error"
+}
