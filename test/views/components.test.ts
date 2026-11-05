@@ -31,15 +31,28 @@ import { Layout } from '../../src/views/layout';
 import { SyncNotice, syncCadence } from '../../src/views/pages/shared';
 import { Owl, OWL_SIZE } from '../../src/views/components/mascot';
 import { LandingPage } from '../../src/views/pages/landing';
-import { DashboardPage, isRangeHigh } from '../../src/views/pages/dashboard';
+import {
+  completenessNotes,
+  DashboardPage,
+  freshness,
+  milestoneAtOrBelow,
+  recentMilestone,
+} from '../../src/views/pages/dashboard';
 import { NotFoundPage, ServerErrorPage } from '../../src/views/pages/errors';
 import { AuthPage } from '../../src/views/pages/auth';
 import { SettingsPage } from '../../src/views/pages/settings';
 import { TransactionsPage } from '../../src/views/pages/transactions';
+import { ConnectionDetailPage } from '../../src/views/pages/connection-detail';
 import { MAX_POLLS, parsePoll, POLL_SECONDS, POLL_STOPPED, syncState } from '../../src/routes/util';
-import { fixtureDashboard, FIXTURE_CONNECTIONS, FIXTURE_NOW, fixtureTransactions } from '../../src/views/fixtures';
+import {
+  fixtureConnectionDetail,
+  fixtureDashboard,
+  FIXTURE_CONNECTIONS,
+  FIXTURE_NOW,
+  fixtureTransactions,
+} from '../../src/views/fixtures';
 import { getProviderMeta, PROVIDERS } from '../../src/providers/registry';
-import { MINUTE } from '../../src/lib/time';
+import { HOUR, MINUTE } from '../../src/lib/time';
 
 /** Components are plain functions; their result stringifies (possibly async) to HTML. */
 async function html(node: unknown): Promise<string> {
@@ -58,7 +71,7 @@ async function render(name: string, node: unknown): Promise<string> {
 const user = { id: 'u1', email: 'ada@example.com', baseCurrency: 'USD' };
 
 describe('Layout', () => {
-  it('renders the shell with doctype, title, skip link, nav state and sign-out form', async () => {
+  it('renders the shell with doctype, title, skip link, nav state and Settings apart on the right', async () => {
     const out = await render(
       'layout',
       Layout({ title: 'Dashboard', user, flash: { type: 'success', message: 'Connected.' }, nav: 'dashboard', noindex: true, children: 'Body' }),
@@ -69,8 +82,12 @@ describe('Layout', () => {
     expect(out).toContain('id="main"');
     expect(out).toMatch(/<a href="\/dashboard" aria-current="page"/);
     expect(out.match(/aria-current="page"/g)).toHaveLength(1);
-    expect(out).toContain('action="/logout"');
-    expect(out).toContain('Log out');
+    // Three daily places in the nav; Settings on its own; Log out lives in Settings, not the bar.
+    expect(out.match(/<li><a href="\/(dashboard|connections|transactions)"/g)).toHaveLength(3);
+    expect(out).toMatch(/<a href="\/settings" class="[^"]*ml-auto/);
+    expect(out).not.toContain('action="/logout"');
+    // The optional submit-feedback script: same origin, deferred, never inline.
+    expect(out).toContain('<script src="/app.js" defer=""></script>');
     expect(out).toContain('name="robots" content="noindex"');
     expect(out).toContain('role="status"');
     expect(out).toContain('Body');
@@ -134,11 +151,11 @@ describe('DeltaBadge and KpiStat', () => {
 
   it('makes the hero the biggest figure, with tabular numbers', async () => {
     const hero = await render('kpi-hero', KpiStat({ label: 'MRR', value: '$9,090', hero: true, deltaPct: 4.2, deltaLabel: 'vs. 30 days ago' }));
-    expect(hero).toContain('text-5xl');
+    expect(hero).toContain('sm:text-display');
     expect(hero).toContain('tabular-nums');
     expect(hero).toContain('vs. 30 days ago');
     const small = await render('kpi', KpiStat({ label: 'ARR', value: '$109,080', deltaPct: null, hint: 'MRR × 12' }));
-    expect(small).not.toContain('text-5xl');
+    expect(small).not.toContain('text-display');
     expect(small).toContain('—');
     const noDelta = await render('kpi-nodelta', KpiStat({ label: 'Trials', value: '50' }));
     expect(noDelta).not.toContain('—');
@@ -416,6 +433,7 @@ describe('accessibility', () => {
     expect(clean).toContain('<title>Log in · hoomuch</title>');
     expect(clean).toMatch(/<input id="email"[^>]*autofocus=""/);
     expect(clean).toContain('autocomplete="current-password"');
+    expect(clean).toContain('data-busy="Logging in…"');
 
     const settings = await render(
       'settings-errors',
@@ -429,6 +447,20 @@ describe('accessibility', () => {
     expect(settings.match(/autofocus=""/g)).toHaveLength(1);
     expect(settings).toMatch(/<input id="delete-password"[^>]*autofocus=""/);
     expect(await html(SettingsPage({ chrome: { user, flash: null }, currency: 'USD' }))).not.toContain('autofocus');
+  });
+
+  it('keeps Log out in Settings, in the order currency, password, session, delete', async () => {
+    const out = await render('settings', SettingsPage({ chrome: { user, flash: null }, currency: 'EUR', currencySource: 'inferred' }));
+    const at = (needle: string) => out.indexOf(needle);
+    expect(at('>Display currency<')).toBeLessThan(at('>Change password<'));
+    expect(at('>Change password<')).toBeLessThan(at('>Session<'));
+    expect(at('>Session<')).toBeLessThan(at('>Delete account<'));
+    expect(out).toContain('action="/logout"');
+    expect(out).toContain('ada@example.com');
+    expect(out).toContain('Picked automatically: most of your MRR is in this currency.');
+    expect(await html(SettingsPage({ chrome: { user, flash: null }, currency: 'USD', currencySource: 'chosen' }))).not.toContain(
+      'Picked automatically',
+    );
   });
 
   it('gives transactions a row header, a sort-order caption and named pagination', async () => {
@@ -475,7 +507,8 @@ describe('personality: owl, landing, first sync, 404', () => {
     const out = await render('landing', LandingPage({ chrome: { user: null, flash: null }, signupOpen: true, demo, cadence: 'every hour' }));
     expect(out).toContain('Stripe + Lemon\u00a0Squeezy + RevenueCat =\u00a0one\u00a0MRR.');
     expect(out.match(/href="\/signup"/g)).toHaveLength(2); // hero + last call, same action
-    expect(out).toContain('aria-label="Key metrics"'); // the real KPI strip
+    expect(out).toContain('aria-label="MRR"'); // the real MRR card
+    expect(out).toContain('aria-label="Subscriptions, trials and revenue"');
     expect(out).toContain('href="/?range=90#demo"');
     expect(out).toContain('Create a Stripe key');
     expect(out).not.toContain('dashboard.stripe.com'); // preview drops the outbound link
@@ -494,12 +527,122 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(closed).not.toContain('No key handy?');
   });
 
-  it('flags a range high only with enough days and a strict new maximum', () => {
-    const days = (vals: number[]) => vals.map((total, i) => ({ day: `2026-10-${String(i + 1).padStart(2, '0')}`, total }));
-    expect(isRangeHigh(days([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]))).toBe(true);
-    expect(isRangeHigh(days([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]))).toBe(false); // < 14 days
-    expect(isRangeHigh(days([14, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]))).toBe(false); // tie
-    expect(isRangeHigh(days(Array(14).fill(0)))).toBe(false);
+  it('finds a milestone crossed in the last 7 days and still held, never one it can’t see crossed', () => {
+    expect([999, 1000, 2499, 2500, 9999, 10_000, 19_999, 20_000, 41_000].map(milestoneAtOrBelow)).toEqual([
+      null, 1000, 1000, 2500, 5000, 10_000, 10_000, 20_000, 40_000,
+    ]);
+    // Series values are minor units (cents); days count back from 2026-11-05.
+    const series = (vals: number[]) =>
+      vals.map((major, i) => ({ day: `2026-11-${String(5 - vals.length + 1 + i).padStart(2, '0')}`, total: major * 100 }));
+    expect(recentMilestone(series([4800, 4900, 5100]), 'USD', '2026-11-05')).toBe(5000);
+    expect(recentMilestone(series([900, 2600, 5200]), 'USD', '2026-11-05')).toBe(5000); // the highest one
+    expect(recentMilestone(series([4900, 5100, 4950]), 'USD', '2026-11-05')).toBeNull(); // fell back below
+    expect(recentMilestone(series([5100, 5200]), 'USD', '2026-11-05')).toBeNull(); // never seen below it
+    expect(recentMilestone(series([5100]), 'USD', '2026-11-05')).toBeNull();
+    // Crossed 8 days before today: too old.
+    const old = [
+      { day: '2026-10-27', total: 4_900_00 },
+      { day: '2026-10-28', total: 5_100_00 },
+      { day: '2026-11-05', total: 5_200_00 },
+    ];
+    expect(recentMilestone(old, 'USD', '2026-11-05')).toBeNull();
+    // Zero-decimal currencies count in their own units.
+    expect(recentMilestone([{ day: '2026-11-04', total: 900 }, { day: '2026-11-05', total: 1_200 }], 'JPY', '2026-11-05')).toBe(1000);
+  });
+
+  it('says how fresh the numbers are from the oldest healthy sync', () => {
+    const [stripe, rc, pagekit, sandbox] = FIXTURE_CONNECTIONS;
+    const twoHours = 2 * HOUR;
+    // Pagekit is failing, so the oldest healthy sync is RevenueCat's, 27 minutes ago.
+    expect(freshness([stripe!, rc!, pagekit!], FIXTURE_NOW, twoHours)).toEqual({ kind: 'fresh', ms: FIXTURE_NOW - 27 * MINUTE });
+    expect(freshness([stripe!], FIXTURE_NOW + 3 * HOUR, twoHours).kind).toBe('stale');
+    expect(freshness([pagekit!], FIXTURE_NOW, twoHours)).toEqual({ kind: 'down', ms: pagekit!.lastSyncedAt });
+    expect(freshness([sandbox!], FIXTURE_NOW, twoHours)).toEqual({ kind: 'never', ms: null });
+  });
+
+  it('explains what the MRR leaves out or shows out of date, next to it', () => {
+    const [stripe, rc, pagekit, sandbox] = FIXTURE_CONNECTIONS;
+    const base = { fxMissing: [] as string[], now: FIXTURE_NOW, staleAfterMs: 2 * HOUR };
+    const one = completenessNotes({ ...base, connections: [stripe!, rc!, pagekit!] });
+    expect(one).toEqual([
+      {
+        tone: 'warning',
+        text: 'Pagekit is showing numbers from Nov 5, 07:30 UTC. Its last sync failed.',
+        link: { href: `/connections/${pagekit!.id}`, label: 'Fix it' },
+      },
+    ]);
+    const bothFailing = completenessNotes({ ...base, connections: [{ ...stripe!, status: 'error' }, pagekit!] });
+    expect(bothFailing[0]!.text).toBe('None of your connections has synced since Nov 5, 10:26 UTC.');
+    const staleOne = completenessNotes({ ...base, connections: [stripe!], now: FIXTURE_NOW + 3 * HOUR });
+    expect(staleOne[0]).toMatchObject({ text: 'Acme Analytics hasn’t synced since Nov 5, 10:26 UTC.', link: { label: 'See why' } });
+    // A first sync: said here unless the sync notice already says it.
+    expect(completenessNotes({ ...base, connections: [stripe!, sandbox!] })[0]).toMatchObject({
+      tone: 'info',
+      text: 'Stripe sandbox isn’t counted yet. Its first sync is running.',
+    });
+    expect(completenessNotes({ ...base, connections: [stripe!, sandbox!], firstSyncShown: true })).toEqual([]);
+    expect(completenessNotes({ ...base, connections: [stripe!], fxMissing: ['ARS'] })[0]!.text).toBe(
+      'ARS amounts aren’t included. There’s no exchange rate for ARS yet.',
+    );
+    const demo = { ...stripe!, id: 'demo-id', name: 'Demo data', provider: 'demo' as const };
+    expect(completenessNotes({ ...base, connections: [stripe!, demo] })[0]).toMatchObject({
+      text: 'Includes demo data, so these totals aren’t all real.',
+      form: { action: '/connections/demo-id/delete', label: 'Remove demo data', fields: { back: '/dashboard' } },
+    });
+    expect(completenessNotes({ ...base, connections: [demo] })).toEqual([]); // demo alone is honest
+    // Never more than three lines.
+    const many = completenessNotes({ ...base, connections: [stripe!, pagekit!, sandbox!, demo], fxMissing: ['ARS', 'XAF'] });
+    expect(many).toHaveLength(3);
+    // Failing, first sync, FX and demo: two shown, two folded.
+    expect(many[2]).toMatchObject({ text: '2 more things need a look.', link: { href: '/connections' } });
+  });
+
+  it('leads with MRR and its trend, then puts each warning next to the figure it affects', async () => {
+    const data = fixtureDashboard(30, 'warnings', FIXTURE_NOW);
+    const out = await render(
+      'dashboard-warnings',
+      DashboardPage({
+        chrome: { user, flash: null },
+        data,
+        connections: FIXTURE_CONNECTIONS.slice(0, 3),
+        sync: null,
+        now: FIXTURE_NOW,
+        staleAfterMinutes: 120,
+      }),
+    );
+    const at = (needle: string) => {
+      const i = out.indexOf(needle);
+      expect(i, needle).toBeGreaterThan(-1);
+      return i;
+    };
+    // Order: freshness, MRR card (figure, ARR, trend, notes), secondary row, By connection, Revenue.
+    expect(at('Updated <time')).toBeLessThan(at('aria-label="MRR"'));
+    expect(at('aria-label="MRR"')).toBeLessThan(at('ARR</p>'));
+    expect(at('ARR</p>')).toBeLessThan(at('MRR, last 30 days'));
+    expect(at('MRR, last 30 days')).toBeLessThan(at('Pagekit is showing numbers from'));
+    expect(at('Pagekit is showing numbers from')).toBeLessThan(at('ARS amounts aren’t included.'));
+    expect(at('ARS amounts aren’t included.')).toBeLessThan(at('aria-label="Subscriptions, trials and revenue"'));
+    expect(at('aria-label="Subscriptions, trials and revenue"')).toBeLessThan(at('>By connection<'));
+    expect(at('>By connection<')).toBeLessThan(at('>Revenue per day<'));
+    expect(at('>Revenue per day<')).toBeLessThan(at('Habit — iOS reports a 28-day total only ($2,214)'));
+    // The comparison is said once; each delta still speaks it.
+    expect(out).toContain('Changes compare with 30 days ago. Revenue compares with the 30 days before.');
+    expect(out.match(/>vs\. 30 days ago</g) ?? []).toHaveLength(1); // only the MRR delta shows it
+    expect(out).toContain('<span class="sr-only"> vs. 30 days ago</span>');
+    // Whole units on the dashboard. The "Show data" tables, tooltips and chart descriptions keep
+    // cents: they're the detail. No area fill under the MRR line.
+    const visible = out.replace(/<(details|title|desc)\b[\s\S]*?<\/\1>/g, '');
+    expect(visible).not.toMatch(/\$[\d,]+\.\d\d/);
+    expect(out).not.toContain('linearGradient');
+  });
+
+  it('keeps the trials delta neutral: fewer trials isn’t bad news by itself', async () => {
+    const down = await html(DeltaBadge({ pct: -4.3, neutral: true }));
+    expect(down).toContain('Down ');
+    expect(down).toContain('text-base-content');
+    expect(down).not.toContain('text-error');
+    const up = await html(DeltaBadge({ pct: 4.3, neutral: true }));
+    expect(up).not.toContain('text-success');
   });
 
   it('celebrates the first sync with live numbers, once, with a plain-link dismiss', async () => {
@@ -515,6 +658,57 @@ describe('personality: owl, landing, first sync, 404', () => {
     const syncing = await html(DashboardPage({ ...base, sync: { refresh: null }, celebrate: { dismissHref: '/dashboard' } }));
     expect(syncing).not.toContain('There it is');
     expect(await html(DashboardPage({ ...base, sync: null }))).not.toContain('There it is');
+  });
+
+  it('confirms a new connection in the sync notice, so no flash has to', async () => {
+    const sync = { refresh: { seconds: 5, url: '/dashboard?poll=1', stopUrl: '/dashboard?poll=21' } };
+    const one = await render('sync-connected', SyncNotice({ sync, connected: ['Acme'], note: 'Demo data removed, so your totals are real.' }));
+    expect(one).toContain('Connected to Acme. Adding up its first 90 days, usually in a few seconds. Demo data removed, so your totals are real.');
+    const two = await html(SyncNotice({ sync, connected: ['Acme', 'Habit'] }));
+    expect(two).toContain('Connected to Acme and Habit. Adding up their first 90 days');
+    expect(await html(SyncNotice({ sync }))).toContain('Adding up your first 90 days');
+  });
+
+  it('shows a skeleton during the first sync and an explanation after a failed one, never $0', async () => {
+    const [, , pagekit, sandbox] = FIXTURE_CONNECTIONS;
+    const empty = fixtureDashboard(30, 'empty', FIXTURE_NOW);
+    const base = { chrome: { user, flash: null }, data: empty, now: FIXTURE_NOW };
+    const syncing = await render(
+      'dashboard-first-sync',
+      DashboardPage({ ...base, connections: [sandbox!], sync: { refresh: { seconds: 5, url: '/dashboard?poll=1' } } }),
+    );
+    expect(syncing).toContain('aria-busy="true"');
+    expect(syncing).toContain('Your first numbers are on their way.');
+    expect(syncing).toContain('Connected to Stripe sandbox.');
+    expect(syncing).not.toContain('$0');
+    expect(syncing).not.toContain('aria-label="Date range"'); // nothing to range over yet
+
+    const failed = await render(
+      'dashboard-no-numbers',
+      DashboardPage({ ...base, connections: [{ ...pagekit!, lastSyncedAt: null }], sync: null }),
+    );
+    expect(failed).toContain('No numbers yet');
+    expect(failed).toContain('Pagekit isn’t counted. Its first sync failed.');
+    expect(failed).toContain(`href="/connections/${pagekit!.id}"`);
+    expect(failed).not.toContain('$0');
+    expect(failed).not.toContain('aria-busy');
+  });
+
+  it('fades the first-numbers strip in once and says when demo data made way', async () => {
+    const data = fixtureDashboard(30, 'full', FIXTURE_NOW);
+    const out = await html(
+      DashboardPage({
+        chrome: { user, flash: null },
+        data,
+        connections: FIXTURE_CONNECTIONS.slice(0, 2),
+        sync: null,
+        now: FIXTURE_NOW,
+        celebrate: { dismissHref: '/dashboard?range=30' },
+        demoRemoved: true,
+      }),
+    );
+    expect(out).toMatch(/<section aria-labelledby="first-numbers" class="fade-in /);
+    expect(out).toContain('You can stop checking now. Demo data removed, so your totals are real.');
   });
 
   it('gives the dashboard empty state the dozing owl and keeps the 500 page literal', async () => {
@@ -535,6 +729,50 @@ describe('personality: owl, landing, first sync, 404', () => {
   });
 });
 
+describe('connection page', () => {
+  const chrome = { user, flash: null };
+  const page = (detail: ReturnType<typeof fixtureConnectionDetail>, extra: Record<string, unknown> = {}) =>
+    ConnectionDetailPage({ chrome, detail, sync: null, now: FIXTURE_NOW, ...extra });
+
+  it('leads with status and numbers, keeps changes in a closed Manage section, Sync now first', async () => {
+    const out = await render('connection-ok', page(fixtureConnectionDetail(0)));
+    expect(out).toMatch(/<form method="post" action="\/connections\/[^"]+\/sync"><button type="submit" class="btn btn-primary">Sync now<\/button>/);
+    expect(out).toContain('<details id="manage" class="rounded-box');
+    expect(out).not.toContain('<details id="manage" open');
+    expect(out.indexOf('>Details<')).toBeLessThan(out.indexOf('>Recent snapshots<'));
+    expect(out.indexOf('>Sync history<')).toBeLessThan(out.indexOf('id="manage"'));
+    expect(out).toContain('Show the last 4 syncs');
+  });
+
+  it('makes Replace key the primary action after a failed sync, with Manage open', async () => {
+    const failing = { ...fixtureConnectionDetail(2), status: 'error' as const };
+    const out = await render('connection-failing', page(failing));
+    expect(out).toContain('<a href="#replace-key" class="btn btn-primary">Replace key</a>');
+    expect(out).toMatch(/<button type="submit" class="btn">Sync now<\/button>/); // still there, secondary
+    expect(out).toContain('<details id="manage" open=""');
+    expect(out).toContain('Last sync failed');
+  });
+
+  it('removes demo data from the header in one click, with no Manage section or checkbox', async () => {
+    const demo = { ...fixtureConnectionDetail(0), provider: 'demo' as const, name: 'Demo data', keyHint: null };
+    const out = await render('connection-demo', page(demo));
+    expect(out).toContain('>Remove demo data</button>');
+    expect(out).not.toContain('id="manage"');
+    expect(out).not.toContain('type="checkbox"');
+  });
+
+  it('follows a manual sync and reports it once it’s done', async () => {
+    const d = fixtureConnectionDetail(0);
+    const running = await html(
+      page(d, { manual: { state: 'running', why: 'key', sync: { refresh: { seconds: 5, url: '/x?poll=1', stopUrl: '/x?poll=21' } } } }),
+    );
+    expect(running).toContain('Key replaced. Syncing with the new key, usually in a few seconds.');
+    expect(running).toContain('>Syncing…</button>');
+    const done = await html(page(d, { manual: { state: 'done', why: 'sync', run: d.recentRuns[0]! } }));
+    expect(done).toContain('Synced. 12 revenue events processed.');
+  });
+});
+
 describe('CSP', () => {
   it('no rendered component uses an inline style attribute or inline script', () => {
     const names = Object.keys(rendered);
@@ -542,7 +780,8 @@ describe('CSP', () => {
     for (const name of names) {
       const out = rendered[name]!;
       expect(out, name).not.toContain(' style=');
-      expect(out, name).not.toMatch(/<script/i);
+      // The one script is the optional same-origin /app.js; never inline code.
+      expect(out.replace('<script src="/app.js" defer=""></script>', ''), name).not.toMatch(/<script/i);
       expect(out, name).not.toMatch(/\son[a-z]+=/i);
     }
   });

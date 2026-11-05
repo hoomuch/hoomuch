@@ -132,7 +132,7 @@ describe('getDashboardData', () => {
     expect(d.revenueSeries.reduce((s, r) => s + r.total, 0)).toBe(d.kpis.revenue.value);
   });
 
-  it('warns about RevenueCat without daily history and leaves it out of revenue totals', async () => {
+  it('reports RevenueCat without daily history as a period total and leaves it out of revenue totals', async () => {
     seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'Main app' });
     t.exec('UPDATE connections SET revenue_synced_until = ? WHERE id = ?', NOW, 'rc');
     snap('rc', TODAY, { USD: 300_00 }, 40, 5, { revenuePeriod: { USD: 1234_00 }, days: 28 });
@@ -145,16 +145,18 @@ describe('getDashboardData', () => {
     expect(rc.revenue).toBeNull();
     expect(d.breakdown.find((b) => b.id === 'rc2')!.revenue).toBe(7_00);
     expect(d.kpis.revenue.value).toBe(7_00);
-    expect(d.warnings).toEqual([
-      "Main app has no daily revenue history, so it’s left out of revenue totals; its last 28-day revenue was $1,234.",
-    ]);
+    expect(rc.periodRevenue).toEqual({ amount: 1234_00, days: 28 });
+    expect(d.breakdown.find((b) => b.id === 'rc2')!.periodRevenue).toBeNull();
+    expect(d.warnings).toEqual([]);
   });
 
-  it('does not warn about missing RevenueCat history before the first revenue sync finished', async () => {
+  it('does not report missing RevenueCat history before the first revenue sync finished', async () => {
     seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'Main app', status: 'pending' });
     const d = await getDashboardData(testEnv(t.db), user, 30);
     expect(d.breakdown[0]!.revenue).toBeNull();
-    expect(d.warnings).toEqual(['Main app is still syncing; its numbers will appear shortly.']);
+    expect(d.breakdown[0]!.periodRevenue).toBeNull(); // not "no history" yet, just not synced
+    expect(d.breakdown[0]).toMatchObject({ status: 'pending', lastSyncedAt: null });
+    expect(d.warnings).toEqual([]);
   });
 
   it('surfaces connections in error without breaking the rest', async () => {
@@ -164,7 +166,7 @@ describe('getDashboardData', () => {
     snap('bad', '2026-11-01', { USD: 500 }, 1); // last known value still counts
     const d = await getDashboardData(testEnv(t.db), user, 7);
     expect(d.kpis.mrr.value).toBe(1500);
-    expect(d.warnings).toEqual(["Broken couldn’t sync: Lemon Squeezy rejected the API key."]);
+    expect(d.warnings).toEqual([]); // the row carries it; the dashboard says it
     expect(d.breakdown.find((b) => b.id === 'bad')).toMatchObject({ status: 'error', lastError: 'Lemon Squeezy rejected the API key.' });
   });
 
@@ -177,7 +179,7 @@ describe('getDashboardData', () => {
     expect(d.kpis.mrr.value).toBe(1000);
     expect(d.fx.missing).toEqual(['XAF']);
     expect(d.fx.asOf).toBeNull(); // nothing was actually converted
-    expect(d.warnings).toEqual(['No exchange rate for XAF; those amounts are left out of totals.']);
+    expect(d.warnings).toEqual([]); // reported through fx.missing
   });
 
   it('without any FX table only the display currency counts', async () => {
@@ -187,7 +189,7 @@ describe('getDashboardData', () => {
     expect(d.currency).toBe('EUR');
     expect(d.kpis.mrr.value).toBe(900);
     expect(d.fx.missing).toEqual(['USD']);
-    expect(d.warnings[0]).toMatch(/Exchange rates aren’t available yet/);
+    expect(d.warnings).toEqual([]);
   });
 
   it('converts JPY (zero-decimal) correctly into the display currency', async () => {

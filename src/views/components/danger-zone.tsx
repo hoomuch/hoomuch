@@ -18,7 +18,7 @@ export function DangerZone(props: { title: string; description?: Child; children
         <IconWarning class="size-4 shrink-0" />
         {props.title}
       </h2>
-      {props.description ? <p class="mt-1.5 max-w-prose text-sm text-base-content/70">{props.description}</p> : null}
+      {props.description ? <p class="mt-1.5 max-w-prose text-body text-ink-2">{props.description}</p> : null}
       {props.children ? <div class="mt-5">{props.children}</div> : null}
     </section>
   );

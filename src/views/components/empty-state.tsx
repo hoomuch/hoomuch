@@ -20,8 +20,8 @@ export function EmptyState(props: {
   return (
     <section class={cx('rounded-box border border-base-300 px-6 py-12 text-center sm:py-16', props.class)}>
       {props.plain ? null : <Owl pose="dozing" class="mx-auto mb-5" />}
-      <h2 class="text-lg font-semibold tracking-tight">{props.title}</h2>
-      {props.children ? <div class="mx-auto mt-2 max-w-md text-pretty text-base-content/70">{props.children}</div> : null}
+      <h2 class="text-title">{props.title}</h2>
+      {props.children ? <div class="mx-auto mt-2 max-w-md text-pretty text-ink-2">{props.children}</div> : null}
       {props.actions ? <div class="mt-6 flex flex-wrap justify-center gap-3">{props.actions}</div> : null}
     </section>
   );

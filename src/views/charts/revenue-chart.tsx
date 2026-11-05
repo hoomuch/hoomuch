@@ -56,9 +56,9 @@ export interface RevenueChartProps {
 const BAND = 10;
 /** Vertical gap between stacked segments, in CSS px (y units are px, see scale.ts). */
 const SEGMENT_GAP = 1;
-const OTHER_CLASS = 'fill-base-content/25';
+const OTHER_CLASS = 'fill-ink-3';
 /** Fallback for a connection whose colour isn't a valid hex. */
-const NEUTRAL_CLASS = 'fill-base-content/50';
+const NEUTRAL_CLASS = 'fill-series-neutral';
 
 export interface RevenueSeries {
   key: string;
@@ -293,7 +293,7 @@ export function RevenueChart(props: RevenueChartProps) {
         x2={svgNum(W)}
         y1={svgNum(y0)}
         y2={svgNum(y0)}
-        class="stroke-base-content/40"
+        class="stroke-field"
         vector-effect="non-scaling-stroke"
         shape-rendering="crispEdges"
       />
@@ -309,7 +309,7 @@ export function RevenueChart(props: RevenueChartProps) {
               y="0"
               width={svgNum(BAND)}
               height={String(H)}
-              class="fill-transparent hover:fill-base-content/5"
+              class="fill-transparent hover:fill-base-200"
             >
               <title>{tooltip(row, series, currency)}</title>
             </rect>

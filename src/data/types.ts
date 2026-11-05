@@ -45,6 +45,12 @@ export interface BreakdownRow extends ConnectionSummary {
   activeTrials: number | null;
   /** Revenue in the selected window; null when the provider has no history for it. */
   revenue: number | null;
+  /**
+   * Set when the provider has no daily revenue history (RevenueCat without Charts access) and a
+   * revenue sync has run: its own trailing total in the display currency (`amount` null if it
+   * reported none) over `days`. Null or absent otherwise.
+   */
+  periodRevenue?: { amount: number | null; days: number } | null;
   /** Share of total MRR, 0–100. */
   sharePct: number;
 }
@@ -87,7 +93,12 @@ export interface DashboardData {
     /** Currencies that couldn't be converted and were left out of totals. */
     missing: string[];
   };
-  /** Human-readable, e.g. "RevenueCat (Main app) has no daily revenue history; showing 28-day total only." */
+  /**
+   * Human-readable notices the structured fields can't express (empty today). Not repeated here:
+   * sync problems (breakdown status / lastError / lastSyncedAt), currencies without a rate
+   * (fx.missing) and providers without daily revenue (BreakdownRow.periodRevenue). The dashboard
+   * turns those into sentences next to the figure they affect.
+   */
   warnings: string[];
 }
 

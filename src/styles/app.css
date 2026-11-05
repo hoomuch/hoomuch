@@ -15,19 +15,25 @@
  *   *-content on its fill ........ ≥ 5.1:1
  *   field (input/segment borders)  ≥ 3.2:1 against base-100/200
  *
+ * Tokens are the only vocabulary (design/system.md §3). Tailwind's default size scale is switched
+ * off below, so text-sm, text-lg, text-[17px]… generate nothing; use the named sizes:
+ *   app      text-caption 12/16 · text-body 14/20 · text-title 20/28 · text-display(-sm) 44/48 (36/40)
+ *   landing  text-hero(-sm) 48/52 (34/40) · text-section(-sm) 28/34 (24/30) · text-lead 18/28
+ *   At most three sizes per screen; the dashboard adds the MRR display figure.
+ *
  * Class conventions for pages/charts:
  *   hairline/decorative border → border-base-300   · state-bearing border → border-field
- *   secondary text → text-base-content/70           · never below /60 for text
+ *   text tones → text-base-content (ink), text-ink-2 (secondary), text-ink-3 (meta, floor).
+ *                Solid colours, not /70 or /60: they keep AA on the base-200 fill too.
  *   figures → tabular-nums (tables get it automatically)
- *   charts → stroke-accent for the MRR line, provider hex via fill=/stroke= attributes,
- *            gridlines stroke-base-300, axis labels fill-base-content/70
+ *   charts → stroke-accent for the MRR line (no area fill), provider hex via fill=/stroke=
+ *            attributes, gridlines stroke-base-300, zero line stroke-field, axis labels fill-ink-2,
+ *            hover band fill-base-200, "Other" fill-ink-3, colourless series fill-series-neutral
  *   focus: every focusable element gets the accent ring automatically; never remove it. Add
  *          `focus-inset` to links/buttons inside overflow-x-auto scrollers so it isn't clipped.
  *   wide tables → wrap in <TableScroller> (ui.tsx), not a bare overflow-x-auto div: it is
  *          keyboard-scrollable, named by the caption, and `relative` so sr-only text can't
  *          escape it and widen the page at 320px.
- *   Prefer opacity modifiers that already exist (/70, /60): every new one costs ~250 bytes,
- *   because Tailwind ships a color-mix() fallback for each.
  */
 
 @import "tailwindcss" source("../");
@@ -62,6 +68,8 @@
   --color-base-200: oklch(97.5% 0.003 264); /* #f6f7f9 quiet fill */
   --color-base-300: oklch(91.8% 0.006 264); /* #e2e4e8 hairline */
   --color-base-content: oklch(21% 0.012 264); /* #15181e ink */
+  --color-ink-2: oklch(47.8% 0.008 264); /* #5b5d62 secondary text: 6.59 page · 6.15 fill */
+  --color-ink-3: oklch(53.5% 0.006 264); /* #6c6d71 meta text, the floor: 5.17 page · 4.82 fill */
   --color-field: oklch(63% 0.012 264); /* #858991 3:1 boundary */
   --color-primary: oklch(21% 0.012 264); /* ink buttons */
   --color-primary-content: oklch(99.5% 0 0);
@@ -97,6 +105,8 @@
   --color-base-200: oklch(21% 0.007 264); /* #17181c raised fill */
   --color-base-300: oklch(29.5% 0.009 264); /* #2a2d31 hairline */
   --color-base-content: oklch(94% 0.005 264); /* #e9ebef */
+  --color-ink-2: oklch(73.5% 0.006 264); /* #a8a9ad secondary text: 8.10 page · 7.55 fill */
+  --color-ink-3: oklch(66.4% 0.006 264); /* #929397 meta text, the floor: 6.20 page · 5.78 fill */
   --color-field: oklch(54% 0.012 264); /* #6b6f76 3:1 boundary */
   --color-primary: oklch(94% 0.005 264);
   --color-primary-content: oklch(17.5% 0.006 264);
@@ -130,13 +140,61 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
   --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  /* `border-field` etc. Fallback only: each daisyUI theme above sets the real value. */
+  /* `border-field`, `text-ink-2` etc. Fallbacks only: each daisyUI theme above sets the real value. */
   --color-field: oklch(63% 0.012 264);
+  --color-ink-2: oklch(47.8% 0.008 264);
+  --color-ink-3: oklch(53.5% 0.006 264);
+  /* Chart series without a brand colour (demo uses the same grey). 3.25:1 light · 5.86:1 dark. */
+  --color-series-neutral: oklch(64.9% 0.015 262); /* #8a8f98 */
+
+  /* Type scale (design/system.md §3.2). The reset removes Tailwind's text-xs…text-9xl. */
+  --text-*: initial;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+  --text-display: 2.75rem;
+  --text-display--line-height: 3rem;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 600;
+  --text-display-sm: 2.25rem;
+  --text-display-sm--line-height: 2.5rem;
+  --text-display-sm--letter-spacing: -0.02em;
+  --text-display-sm--font-weight: 600;
+  /* Landing only. */
+  --text-hero: 3rem;
+  --text-hero--line-height: 3.25rem;
+  --text-hero--letter-spacing: -0.025em;
+  --text-hero--font-weight: 600;
+  --text-hero-sm: 2.125rem;
+  --text-hero-sm--line-height: 2.5rem;
+  --text-hero-sm--letter-spacing: -0.025em;
+  --text-hero-sm--font-weight: 600;
+  --text-section: 1.75rem;
+  --text-section--line-height: 2.125rem;
+  --text-section--letter-spacing: -0.02em;
+  --text-section--font-weight: 600;
+  --text-section-sm: 1.5rem;
+  --text-section-sm--line-height: 1.875rem;
+  --text-section-sm--letter-spacing: -0.02em;
+  --text-section-sm--font-weight: 600;
+  --text-lead: 1.125rem;
+  --text-lead--line-height: 1.75rem;
 }
 
 /* ---------- base ---------- */
 
 @layer base {
+  /* Motion tokens (design/system.md §3.6): colour changes are fast, appearing things are base. */
+  :root {
+    --dur-fast: 150ms;
+    --dur-base: 200ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -145,7 +203,7 @@
     background-color: color-mix(in oklab, var(--color-accent) 24%, transparent);
   }
   ::placeholder {
-    color: color-mix(in oklab, currentColor 60%, transparent);
+    color: var(--color-ink-3);
     opacity: 1;
   }
   table {
@@ -175,12 +233,14 @@
 
 @layer components {
   /* Buttons: btn (= quiet bordered), btn-primary (ink), btn-ghost, btn-error (solid red),
-     btn-active / aria-current / aria-pressed (selected), btn-sm, btn-block, disabled. */
+     btn-active / aria-current / aria-pressed (selected), btn-sm, btn-block, disabled.
+     Pressed (:active) goes one step past hover and nudges down half a pixel. */
   .btn {
     --btn-bg: var(--color-base-100);
     --btn-fg: var(--color-base-content);
     --btn-border: var(--color-base-300);
     --btn-hover: var(--color-base-200);
+    --btn-press: var(--color-base-300);
     display: inline-flex;
     flex-shrink: 0;
     align-items: center;
@@ -201,7 +261,8 @@
     user-select: none;
     touch-action: manipulation;
     transition-property: color, background-color, border-color;
-    transition-duration: 150ms;
+    transition-duration: var(--dur-fast);
+    transition-timing-function: var(--ease-standard);
   }
   @media (hover: hover) {
     .btn:hover {
@@ -209,10 +270,16 @@
       border-color: var(--btn-hover-border, var(--btn-border));
     }
   }
+  /* Outside the hover query: a tap on a touch screen has no hover, so this is its only feedback. */
+  .btn:active:not(:disabled) {
+    background-color: var(--btn-press);
+    border-color: var(--btn-press-border, var(--btn-border));
+    translate: 0 0.5px;
+  }
+  /* Smaller box, same body size: size steps come from height and padding, not a 13px font. */
   .btn-sm {
     height: 2rem;
     padding-inline: 0.75rem;
-    font-size: 0.8125rem;
   }
   .btn-block {
     width: 100%;
@@ -224,6 +291,8 @@
     /* Ink can't get darker on hover, so it lightens toward the page. */
     --btn-hover: color-mix(in oklab, var(--color-primary) 84%, var(--color-base-100));
     --btn-hover-border: var(--btn-hover);
+    --btn-press: color-mix(in oklab, var(--color-primary) 74%, var(--color-base-100));
+    --btn-press-border: var(--btn-press);
   }
   .btn-error {
     --btn-bg: var(--color-error);
@@ -231,6 +300,8 @@
     --btn-border: var(--color-error);
     --btn-hover: color-mix(in oklab, var(--color-error) 88%, var(--color-base-content));
     --btn-hover-border: var(--btn-hover);
+    --btn-press: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
+    --btn-press-border: var(--btn-press);
   }
   .btn-ghost {
     --btn-bg: transparent;
@@ -249,6 +320,22 @@
   .btn:is([aria-disabled="true"], .btn-disabled) {
     pointer-events: none;
   }
+  /* On its way (set by /app.js on submit): a small spinner before the label, full opacity, no
+     second click. The spinner only turns while the request runs; reduced motion holds it still. */
+  .btn[aria-busy="true"] {
+    pointer-events: none;
+    cursor: progress;
+  }
+  .btn[aria-busy="true"]::before {
+    content: "";
+    width: 0.875rem;
+    height: 0.875rem;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 9999px;
+    animation: btn-spin 700ms linear infinite;
+  }
 
   /* Fields: input, select, textarea. 1px boundary at ≥3:1 (--color-field); red when invalid. */
   .input,
@@ -263,8 +350,8 @@
     border-radius: var(--radius-field);
     background-color: var(--color-base-100);
     color: var(--color-base-content);
-    font-size: 0.9375rem;
-    transition: border-color 150ms;
+    font-size: 0.875rem;
+    transition: border-color var(--dur-fast) var(--ease-standard);
   }
   .textarea {
     height: auto;
@@ -295,7 +382,7 @@
   :is(.input, .select, .textarea):is(:disabled, [disabled]) {
     background-color: var(--color-base-200);
     border-color: var(--color-base-300);
-    color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+    color: var(--color-ink-3);
     cursor: not-allowed;
   }
   /* iOS zooms into fields under 16px. */
@@ -343,7 +430,7 @@
     vertical-align: middle;
   }
   .table :where(thead, tfoot) {
-    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+    color: var(--color-ink-2);
     font-size: 0.75rem;
     font-weight: 400;
     white-space: nowrap;
@@ -358,7 +445,7 @@
     padding-block: 0.5rem;
   }
   .table-sm :where(tbody) {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
   }
   .table-xs :where(th, td) {
     padding: 0.25rem 0.5rem;
@@ -400,7 +487,7 @@
   .badge-sm {
     height: 1.125rem;
     padding-inline: 0.4375rem;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
   }
   .badge-success {
     --badge-color: var(--color-success);
@@ -443,6 +530,24 @@
   .link-hover:hover {
     text-decoration-line: underline;
   }
+
+  /* Something new appeared because of what you just did (a flash, the first-numbers strip):
+     fade it in once. Opacity only, so nothing moves; reduced motion makes it instant. */
+  .fade-in {
+    animation: fade-in var(--dur-base) var(--ease-standard) both;
+  }
+}
+
+@keyframes btn-spin {
+  to {
+    rotate: 1turn;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* ---------- focus & motion ----------
@@ -482,5 +587,9 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  /* No movement at all: the pressed colour is feedback enough. */
+  .btn:active {
+    translate: none;
   }
 }

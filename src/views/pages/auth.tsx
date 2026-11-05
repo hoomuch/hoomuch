@@ -30,8 +30,8 @@ export function AuthPage(props: AuthPageProps) {
     return (
       <Layout {...props.chrome} title="Sign-ups closed" width="narrow">
         <Card>
-          <h1 class="text-xl font-semibold tracking-tight">Sign-ups are closed</h1>
-          <p class="mt-2 text-sm text-base-content/70">
+          <h1 class="text-title">Sign-ups are closed</h1>
+          <p class="mt-2 text-body text-ink-2">
             This hoomuch instance isn’t accepting new accounts. If you already have one, log in.
           </p>
           <div class="mt-6">
@@ -54,8 +54,8 @@ export function AuthPage(props: AuthPageProps) {
   return (
     <Layout {...props.chrome} title={pageTitle} width="narrow">
       <Card>
-        <h1 class={isSignup ? 'text-xl font-semibold tracking-tight' : 'mb-6 text-xl font-semibold tracking-tight'}>{title}</h1>
-        {isSignup ? <p class="mt-1.5 mb-6 text-sm text-base-content/70">Two fields, then your MRR.</p> : null}
+        <h1 class={isSignup ? 'text-title' : 'mb-6 text-title'}>{title}</h1>
+        {isSignup ? <p class="mt-1.5 mb-6 text-body text-ink-2">Two fields, then your MRR.</p> : null}
         <form method="post" action={isSignup ? '/signup' : '/login'}>
           <FormError message={formError} autofocus={focus === 'form'} />
           {props.next ? <input type="hidden" name="next" value={props.next} /> : null}
@@ -83,10 +83,10 @@ export function AuthPage(props: AuthPageProps) {
             error={passwordError}
           />
           <div class="mt-6">
-            <Button>{isSignup ? 'Create account' : 'Log in'}</Button>
+            <Button busyLabel={isSignup ? 'Creating account…' : 'Logging in…'}>{isSignup ? 'Create account' : 'Log in'}</Button>
           </div>
         </form>
-        <p class="mt-6 text-sm text-base-content/70">
+        <p class="mt-6 text-body text-ink-2">
           {isSignup ? (
             <>
               Already have an account?{' '}

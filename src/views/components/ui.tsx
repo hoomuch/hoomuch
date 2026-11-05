@@ -29,15 +29,15 @@ export function PageHeader(props: {
         {props.back ? (
           <a
             href={props.back.href}
-            class="-ml-1 mb-2 inline-flex items-center gap-0.5 rounded-field pr-1 text-sm text-base-content/70 hover:text-base-content"
+            class="-ml-1 mb-2 inline-flex items-center gap-0.5 rounded-field pr-1 text-body text-ink-2 hover:text-base-content"
           >
             <IconChevronLeft class="size-4 shrink-0" />
             {props.back.label}
           </a>
         ) : null}
         {/* wrap-break-word: a long unbroken connection name must wrap at 320px, not widen the page. */}
-        <h1 class="text-2xl font-semibold tracking-tight wrap-break-word">{props.title}</h1>
-        {props.description ? <p class="mt-1.5 max-w-2xl text-base-content/70">{props.description}</p> : null}
+        <h1 class="text-title wrap-break-word">{props.title}</h1>
+        {props.description ? <p class="mt-1.5 max-w-2xl text-ink-2">{props.description}</p> : null}
       </div>
       {props.actions ? <div class="flex flex-wrap items-center gap-2">{props.actions}</div> : null}
     </div>
@@ -60,7 +60,7 @@ export function Card(props: {
         <div class="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
           <div class="min-w-0">
             <h2 class="font-semibold">{props.title}</h2>
-            {props.description ? <p class="mt-1 text-sm text-base-content/70">{props.description}</p> : null}
+            {props.description ? <p class="mt-1 text-body text-ink-2">{props.description}</p> : null}
           </div>
           {props.actions ? <div class="flex flex-wrap items-center gap-2">{props.actions}</div> : null}
         </div>
@@ -126,13 +126,13 @@ export function ToneBox(props: {
       role={role === 'none' ? undefined : role}
       tabindex={props.autofocus ? -1 : undefined}
       autofocus={props.autofocus || undefined}
-      class={cx('flex items-start gap-3 rounded-box border px-4 py-3 text-sm', TONE_BOX[props.tone], props.class)}
+      class={cx('flex items-start gap-3 rounded-box border px-4 py-3 text-body', TONE_BOX[props.tone], props.class)}
     >
       <ToneIcon tone={props.tone} class="mt-0.5" />
       <div class="min-w-0 flex-1">
         <span class="sr-only">{TONE_WORD[props.tone]} </span>
         {props.title ? <p class="font-semibold">{props.title}</p> : null}
-        {props.children ? <div class={props.title ? 'mt-0.5 text-base-content/80' : undefined}>{props.children}</div> : null}
+        {props.children ? <div class={props.title ? 'mt-0.5 text-base-content' : undefined}>{props.children}</div> : null}
       </div>
     </div>
   );
@@ -184,11 +184,17 @@ export function Button(props: {
   form?: string;
   /** Extra literal classes. */
   class?: string;
+  /**
+   * Label while the form is on its way, e.g. "Checking key…" (shown by /app.js, with a spinner).
+   * Worth it where the server takes seconds; other buttons just get the spinner.
+   */
+  busyLabel?: string;
   children?: Child;
 }) {
   return (
     <button
       type={props.type ?? 'submit'}
+      data-busy={props.busyLabel}
       name={props.name}
       value={props.value}
       form={props.form}
@@ -218,12 +224,12 @@ export function LinkButton(props: {
 // ---------- form fields ----------
 // Every field: visible <label for>, help + error wired with aria-describedby, aria-invalid on error.
 
-const LABEL = 'mb-1.5 block text-sm font-semibold';
-const HELP = 'mt-1.5 text-sm text-base-content/70';
+const LABEL = 'mb-1.5 block text-body font-semibold';
+const HELP = 'mt-1.5 text-body text-ink-2';
 
 function FieldError(props: { id: string; message: string }) {
   return (
-    <p id={props.id} class="mt-1.5 flex items-start gap-1.5 text-sm text-error">
+    <p id={props.id} class="mt-1.5 flex items-start gap-1.5 text-body text-error">
       <IconErrorCircle class="mt-0.5 size-3.5 shrink-0" />
       <span>{props.message}</span>
     </p>
@@ -269,7 +275,7 @@ export function Field(props: FieldProps) {
     <div class="mb-5">
       <label for={id} class={LABEL}>
         {props.label}
-        {props.required || props.hideOptional ? null : <span class="font-normal text-base-content/60"> (optional)</span>}
+        {props.required || props.hideOptional ? null : <span class="font-normal text-ink-3"> (optional)</span>}
       </label>
       <input
         id={id}
@@ -353,7 +359,7 @@ export function ConfirmCheckbox(props: { name?: string; label: Child; error?: st
   const errId = props.error ? `${id}-error` : undefined;
   return (
     <div class="mb-5">
-      <label for={id} class="flex cursor-pointer items-start gap-2.5 text-sm">
+      <label for={id} class="flex cursor-pointer items-start gap-2.5 text-body">
         <input
           id={id}
           type="checkbox"
@@ -417,7 +423,7 @@ export function TableScroller(props: { labelledBy?: string; label?: string; clas
 /** "—" for a value a provider doesn't report; screen readers hear "Not available" instead. */
 export function NotAvailable(props: { class?: string } = {}) {
   return (
-    <span class={props.class ?? 'text-base-content/60'}>
+    <span class={props.class ?? 'text-ink-3'}>
       <span aria-hidden="true">—</span>
       <span class="sr-only">Not available</span>
     </span>

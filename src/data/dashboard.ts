@@ -8,7 +8,7 @@
 
 import type { Bindings, SessionUser } from '../env';
 import type { ConnectionRow } from '../db/queries';
-import { formatMoney, normalizeCurrency, parseMoneyMap } from '../lib/money';
+import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, dayKey, dayRange } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import { BACKFILL_DAYS } from '../sync/aggregate';
@@ -129,6 +129,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     timeline.set(s.connection_id, list);
   }
 
+  /** Notices the structured fields below can't express. None today; see DashboardData.warnings. */
   const warnings: string[] = [];
   const breakdown: BreakdownRow[] = [];
   let mrr = 0;
@@ -170,16 +171,13 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     }
 
     let revenue: number | null = revenueByConn.get(row.id) ?? 0;
+    let periodRevenue: BreakdownRow['periodRevenue'] = null;
     if (meta.revenueHistory === 'daily' && !hasDailyRows.has(row.id)) {
       revenue = null;
+      // Only once a revenue sync has run: before that, "no history" just means "not yet".
       if (row.revenue_synced_until !== null) {
         const period = latest?.revenue_period ? parseMoneyMap(latest.revenue_period) : null;
-        const periodDays = latest?.revenue_period_days ?? 28;
-        warnings.push(
-          period
-            ? `${row.name} has no daily revenue history, so it’s left out of revenue totals; its last ${periodDays}-day revenue was ${formatMoney(cv.map(period), currency, { whole: true })}.`
-            : `${row.name} has no daily revenue history, so it’s left out of revenue totals.`,
-        );
+        periodRevenue = { amount: period ? cv.map(period) : null, days: latest?.revenue_period_days ?? 28 };
       }
     } else {
       revenueTotal += revenue;
@@ -190,18 +188,15 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       }
     }
 
-    if (row.status === 'error') {
-      warnings.push(`${row.name} couldn’t sync${row.last_error ? `: ${row.last_error}` : '.'}`);
-    } else if (!latest && (row.status === 'pending' || row.status === 'syncing')) {
-      warnings.push(`${row.name} is still syncing; its numbers will appear shortly.`);
-    }
-
+    // Sync problems aren't turned into sentences here: the row carries status, lastError and
+    // lastSyncedAt, and the dashboard explains each one next to the figure it affects.
     breakdown.push({
       ...toSummary(row),
       mrr: connMrr,
       activeSubscriptions: connSubs,
       activeTrials: connTrials,
       revenue,
+      periodRevenue,
       sharePct: 0,
     });
   }
@@ -224,14 +219,8 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     return { day, total };
   });
 
+  // Reported through fx.missing; the dashboard says it next to the MRR it leaves out.
   const missing = [...cv.missing].sort();
-  if (missing.length > 0) {
-    warnings.push(
-      fx
-        ? `No exchange rate for ${missing.join(', ')}; those amounts are left out of totals.`
-        : `Exchange rates aren’t available yet, so ${missing.join(', ')} amounts are left out of totals.`,
-    );
-  }
 
   const previous = anyComparable;
   return {

@@ -1,11 +1,11 @@
 /**
- * MrrChart — MRR trend as a line + soft area. Server-rendered SVG, no JS.
+ * MrrChart — MRR trend as a line (no area fill). Server-rendered SVG, no JS.
  * Owner: Experience (data-viz). CONTRACT: props are fixed.
  *
  * - x domain = windowDays (edge to edge), so a sparse history sits honestly at the right end.
  * - y domain = a padded nice domain around the data (see mrrScale in scale.ts); the bottom tick is
  *   always labelled, and it falls back to zero-based when the data spans most of its own magnitude.
- * - 0 points → calm empty message; 1 point → a dot + a note; 2+ → line, area and a last-value dot.
+ * - 0 points → calm empty message; 1 point → a dot + a note; 2+ → line and a last-value dot.
  */
 
 import type { MrrDay } from '../../data/types';
@@ -129,17 +129,12 @@ export function MrrChart(props: MrrChartProps) {
   const id = chartId('mrr', `${title}|${currency}|${domain[0] ?? ''}|${n}|${points.map((p) => `${p.i}:${p.value}`).join(',')}`);
   const titleId = `${id}-title`;
   const descId = `${id}-desc`;
-  const fillId = `${id}-fill`;
   const desc = describe(domain, points, scale, currency);
 
   const xy = points.map((p) => ({ x: xAt(p.i), y: y(p.value), p }));
   const line = xy.map((q, k) => `${k === 0 ? 'M' : 'L'}${svgNum(q.x)} ${svgNum(q.y)}`).join('');
-  const firstQ = xy[0];
+  // Line only, no area: the y-axis rarely starts at zero, and a filled area would overstate change.
   const lastQ = xy[xy.length - 1];
-  const area =
-    firstQ && lastQ && xy.length > 1
-      ? `M${svgNum(firstQ.x)} ${H}` + xy.map((q) => `L${svgNum(q.x)} ${svgNum(q.y)}`).join('') + `L${svgNum(lastQ.x)} ${H}Z`
-      : '';
   // A zero-length round-capped stroke is a perfect circle even though the plot stretches in x.
   const dot = lastQ ? `M${svgNum(lastQ.x)} ${svgNum(lastQ.y)}h0.01` : '';
 
@@ -159,14 +154,6 @@ export function MrrChart(props: MrrChartProps) {
     >
       <title id={titleId}>{title}</title>
       <desc id={descId}>{desc}</desc>
-      {area ? (
-        <defs>
-          <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1" class="text-accent">
-            <stop offset="0" stop-color="currentColor" stop-opacity="0.16" />
-            <stop offset="1" stop-color="currentColor" stop-opacity="0" />
-          </linearGradient>
-        </defs>
-      ) : null}
       {gridTicks.map((t) => (
         <line
           x1="0"
@@ -184,12 +171,11 @@ export function MrrChart(props: MrrChartProps) {
           x2={svgNum(W)}
           y1={String(H)}
           y2={String(H)}
-          class={empty ? 'stroke-base-300' : 'stroke-base-content/40'}
+          class={empty ? 'stroke-base-300' : 'stroke-field'}
           vector-effect="non-scaling-stroke"
           shape-rendering="crispEdges"
         />
       ) : null}
-      {area ? <path d={area} fill={`url(#${fillId})`} /> : null}
       {xy.length > 1 ? (
         <path
           d={line}
@@ -229,7 +215,7 @@ export function MrrChart(props: MrrChartProps) {
                 y="0"
                 width={svgNum(Math.max(0, right - left))}
                 height={String(H)}
-                class="fill-transparent hover:fill-base-content/5"
+                class="fill-transparent hover:fill-base-200"
               >
                 <title>{`${longDay(q.p.day)}: MRR ${money(q.p.value, currency)}`}</title>
               </rect>

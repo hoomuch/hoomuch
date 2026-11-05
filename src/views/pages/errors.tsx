@@ -23,8 +23,8 @@ function ErrorShell(props: {
     <Layout {...props.chrome} title={props.title} noindex marketing={props.marketing}>
       <section class="mx-auto max-w-md py-16 text-center">
         {props.illustration}
-        <h1 class="text-2xl font-semibold tracking-tight">{props.heading}</h1>
-        <p class="mt-2 text-pretty text-base-content/70">{props.message}</p>
+        <h1 class="text-title">{props.heading}</h1>
+        <p class="mt-2 text-pretty text-ink-2">{props.message}</p>
         <div class="mt-8">
           <LinkButton href={home} variant="secondary">
             {props.chrome.user ? 'Back to the dashboard' : 'Back to the home page'}

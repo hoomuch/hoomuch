@@ -1,4 +1,4 @@
-/** Settings (GET /settings): display currency, password, account deletion. Owner: Experience (pages). */
+/** Settings (GET /settings): display currency, password, session (log out), account deletion. Owner: Experience (pages). */
 
 import { PASSWORD_MIN } from '../../lib/auth';
 import { SUPPORTED_CURRENCIES } from '../../lib/money';
@@ -10,6 +10,8 @@ export interface SettingsPageProps {
   chrome: PageChrome;
   /** The user's display currency (ISO 4217). */
   currency: string;
+  /** "inferred": picked from their numbers, so say so next to the select. */
+  currencySource?: 'default' | 'inferred' | 'chosen';
   /** Errors from a failed password change (re-rendered with 422). */
   password?: { error?: string | null; fieldErrors?: { current?: string; next?: string } };
   /** Errors from a failed account deletion (re-rendered with 422). */
@@ -54,10 +56,7 @@ export function SettingsPage(props: SettingsPageProps) {
               : null;
   return (
     <Layout {...props.chrome} title={focus ? 'Error: Settings' : 'Settings'} nav="settings" noindex>
-      <PageHeader
-        title="Settings"
-        description={props.chrome.user ? `Logged in as ${props.chrome.user.email}.` : undefined}
-      />
+      <PageHeader title="Settings" />
       <div class="grid max-w-xl gap-6">
         <Card
           id="display-currency"
@@ -65,7 +64,13 @@ export function SettingsPage(props: SettingsPageProps) {
           description="Converted at the latest ECB rates, past days included. Transactions also show the original amount."
         >
           <form method="post" action="/settings/currency">
-            <SelectField name="currency" label="Currency" options={options} value={props.currency} />
+            <SelectField
+              name="currency"
+              label="Currency"
+              options={options}
+              value={props.currency}
+              help={props.currencySource === 'inferred' ? 'Picked automatically: most of your MRR is in this currency.' : undefined}
+            />
             <Button variant="secondary">Save currency</Button>
           </form>
         </Card>
@@ -96,6 +101,15 @@ export function SettingsPage(props: SettingsPageProps) {
               error={pw?.fieldErrors?.next}
             />
             <Button variant="secondary">Change password</Button>
+          </form>
+        </Card>
+
+        <Card id="session" title="Session">
+          <p class="text-body text-ink-2">
+            Logged in as <span class="font-semibold text-base-content wrap-anywhere">{props.chrome.user?.email}</span>.
+          </p>
+          <form method="post" action="/logout" class="mt-4">
+            <Button variant="secondary">Log out</Button>
           </form>
         </Card>
 

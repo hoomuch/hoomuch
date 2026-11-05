@@ -178,12 +178,15 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
   const breakdown: BreakdownRow[] = conns
     .map((c, ci) => {
       const mrr = mrrOn(ci, 0);
+      // 'warnings': the RevenueCat connection has no daily history, only its own 28-day total.
+      const periodOnly = state === 'warnings' && c.provider === 'revenuecat';
       return {
         ...c,
         mrr,
         activeSubscriptions: PROFILES[ci]!.subs,
         activeTrials: c.provider === 'lemonsqueezy' ? null : PROFILES[ci]!.trials,
-        revenue: revenueSeries.reduce((s, d) => s + (d.byConnection[c.id] ?? 0), 0),
+        revenue: periodOnly ? null : revenueSeries.reduce((s, d) => s + (d.byConnection[c.id] ?? 0), 0),
+        periodRevenue: periodOnly ? { amount: 221_400, days: 28 } : null,
         sharePct: mrrNow ? (mrr / mrrNow) * 100 : 0,
       };
     })
@@ -205,13 +208,8 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     revenueSeries,
     mrrSeries,
     fx: { asOf: '2026-11-04', missing: state === 'warnings' ? ['ARS'] : [] },
-    warnings:
-      state === 'warnings'
-        ? [
-            'Habit — iOS (RevenueCat) has no daily revenue history; showing the 28-day total only.',
-            'Pagekit couldn’t sync: Lemon Squeezy rejected the key.',
-          ]
-        : [],
+    // Sync problems come from the connections (Pagekit is in error); FX from fx.missing.
+    warnings: [],
   };
 }
 

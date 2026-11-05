@@ -13,7 +13,6 @@
 import type { Child } from 'hono/jsx';
 import type { DashboardData } from '../../data/types';
 import { getProviderMeta } from '../../providers/registry';
-import { RevenueChart } from '../charts/revenue-chart';
 import { ProviderDot } from '../components/badges';
 import { BreakdownTable } from '../components/breakdown-table';
 import { KeyGuide } from '../components/connection-form';
@@ -22,7 +21,7 @@ import { Owl } from '../components/mascot';
 import { RangeTabs } from '../components/range-tabs';
 import { Card, LinkButton } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { KpiStrip } from './dashboard';
+import { MrrCard, RevenueCard, SecondaryStats } from './dashboard';
 
 export interface LandingPageProps {
   chrome: PageChrome;
@@ -47,8 +46,8 @@ const FOUNDER_NOTE: { paragraphs: string[]; name: string; role: string } | null 
 const PRICING: { plan: string; price: string; includes: string }[] | null = null;
 
 const SECTION = 'mx-auto mt-28 max-w-[40rem] sm:mt-32';
-const H2 = 'text-2xl leading-[1.875rem] font-semibold tracking-[-0.02em] sm:text-[1.75rem] sm:leading-[2.125rem]';
-const LEAD = 'mt-3 text-pretty text-base-content/70 sm:text-lg sm:leading-7';
+const H2 = 'text-section-sm sm:text-section';
+const LEAD = 'mt-3 text-pretty text-lead text-ink-2';
 
 /** Keeps brand names whole and "= one MRR" together when the headline wraps. */
 const NB = ' ';
@@ -70,20 +69,20 @@ export function LandingPage(props: LandingPageProps) {
     >
       {/* 1. Hero */}
       <section class="mx-auto max-w-[40rem] pt-6 text-center sm:pt-14">
-        <h1 class="text-[2.125rem] leading-10 font-semibold tracking-[-0.025em] sm:text-5xl sm:leading-[3.25rem]">
+        <h1 class="text-hero-sm sm:text-hero">
           Stripe + Lemon{NB}Squeezy + RevenueCat ={NB}one{NB}MRR.
         </h1>
-        <p class="mx-auto mt-5 max-w-[36rem] text-lg leading-7 text-pretty text-base-content/70">
+        <p class="mx-auto mt-5 max-w-[36rem] text-lead text-pretty text-ink-2">
           A revenue dashboard for founders who sell in more than one place. It only ever reads. You can close the other
           three tabs.
         </p>
         <div class="mt-8">
-          <LinkButton href={cta.href} class="h-11 px-5 text-base">
+          <LinkButton href={cta.href} class="h-11 px-5">
             {cta.label}
           </LinkButton>
         </div>
         {props.signupOpen ? (
-          <p class="mt-3 text-sm text-base-content/70">No key handy? Start with demo data after you sign up.</p>
+          <p class="mt-3 text-body text-ink-2">No key handy? Start with demo data after you sign up.</p>
         ) : null}
       </section>
 
@@ -93,18 +92,18 @@ export function LandingPage(props: LandingPageProps) {
           <Owl pose="perched" eager class="absolute right-6 bottom-full sm:right-10" />
           <div class="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1 sm:mb-4">
             <h2 id="demo-title" class="font-semibold">
-              Dashboard <span class="font-normal text-base-content/70">· demo data</span>
+              Dashboard <span class="font-normal text-ink-2">· demo data</span>
             </h2>
             <RangeTabs current={demo.rangeDays} basePath="/" anchor="demo" />
           </div>
-          <KpiStrip data={demo} class="bg-base-100" />
+          {/* Same pieces, same order as /dashboard. */}
+          <MrrCard data={demo} class="bg-base-100" />
+          <SecondaryStats data={demo} class="mt-3 sm:mt-4" />
           <div class="mt-3 grid gap-3 sm:mt-4 sm:gap-4">
-            <Card title="Revenue" description={`Charges minus refunds per day, before fees. Last ${demo.rangeDays} days.`} class="bg-base-100">
-              <RevenueChart series={demo.revenueSeries} connections={demo.breakdown} currency={demo.currency} />
-            </Card>
             <Card title="By connection" class="bg-base-100">
               <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
             </Card>
+            <RevenueCard data={demo} class="bg-base-100" />
           </div>
         </div>
       </section>
@@ -121,21 +120,21 @@ export function LandingPage(props: LandingPageProps) {
         <div class="mt-8">
           <KeyGuide meta={stripe} headingId="landing-key-guide" preview />
         </div>
-        <ul class="mt-8 space-y-3" aria-label="What each provider's key can do">
+        <ul class="mt-8 space-y-3 text-lead" aria-label="What each provider's key can do">
           <li class="flex gap-3">
-            <ProviderDot dotClass={stripe.dotClass} size="md" class="mt-1.5" />
+            <ProviderDot dotClass={stripe.dotClass} size="md" class="mt-2.5" />
             <span>
               <span class="font-semibold">Stripe:</span> restricted key, read-only.
             </span>
           </li>
           <li class="flex gap-3">
-            <ProviderDot dotClass={revenuecat.dotClass} size="md" class="mt-1.5" />
+            <ProviderDot dotClass={revenuecat.dotClass} size="md" class="mt-2.5" />
             <span>
               <span class="font-semibold">RevenueCat:</span> v2 secret key with read-only scopes.
             </span>
           </li>
           <li class="flex gap-3">
-            <ProviderDot dotClass={lemon.dotClass} size="md" class="mt-1.5" />
+            <ProviderDot dotClass={lemon.dotClass} size="md" class="mt-2.5" />
             <span>
               <span class="font-semibold">Lemon Squeezy:</span> API key. Lemon Squeezy keys can’t be limited to
               read-only, so this one has full access. hoomuch only reads with it.
@@ -151,8 +150,8 @@ export function LandingPage(props: LandingPageProps) {
         </h2>
         <div class="mt-8 grid gap-8 sm:grid-cols-2">
           <div>
-            <h3 class="font-semibold">Stored</h3>
-            <ul class="mt-3 space-y-2.5 text-base-content/70">
+            <h3 class="text-lead font-semibold">Stored</h3>
+            <ul class="mt-3 space-y-2.5 text-lead text-ink-2">
               <StoreItem>
                 Your API keys, encrypted with <span class="whitespace-nowrap">AES-256-GCM</span>
               </StoreItem>
@@ -161,15 +160,15 @@ export function LandingPage(props: LandingPageProps) {
             </ul>
           </div>
           <div>
-            <h3 class="font-semibold">Never stored</h3>
-            <ul class="mt-3 space-y-2.5 text-base-content/70">
+            <h3 class="text-lead font-semibold">Never stored</h3>
+            <ul class="mt-3 space-y-2.5 text-lead text-ink-2">
               <StoreItem never>Your customers’ names or email addresses</StoreItem>
               <StoreItem never>Card details</StoreItem>
               <StoreItem never>Your password. Only a PBKDF2 hash of it.</StoreItem>
             </ul>
           </div>
         </div>
-        <p class="mt-8 text-base-content/70">
+        <p class="mt-8 text-lead text-ink-2">
           Syncs run {props.cadence}. Currencies convert at the European Central Bank’s daily rates. Deleting your account
           deletes your keys and every synced number, immediately.
         </p>
@@ -182,9 +181,9 @@ export function LandingPage(props: LandingPageProps) {
             Why this exists
           </h2>
           {FOUNDER_NOTE.paragraphs.map((p) => (
-            <p class="mt-4 sm:text-lg sm:leading-7">{p}</p>
+            <p class="mt-4 text-lead">{p}</p>
           ))}
-          <p class="mt-6 text-sm text-base-content/70">
+          <p class="mt-6 text-body text-ink-2">
             <span class="font-semibold text-base-content">{FOUNDER_NOTE.name}</span>, {FOUNDER_NOTE.role}
           </p>
         </section>
@@ -196,14 +195,14 @@ export function LandingPage(props: LandingPageProps) {
           <h2 id="pricing-title" class={H2}>
             Pricing
           </h2>
-          <dl class="mt-8 divide-y divide-base-300 border-y border-base-300">
+          <dl class="mt-8 text-lead divide-y divide-base-300 border-y border-base-300">
             {PRICING.map((p) => (
               <div class="grid gap-1 py-5 sm:grid-cols-[10rem_1fr] sm:gap-6">
                 <dt class="font-semibold">
                   {p.plan}
                   <span class="block font-normal tabular-nums">{p.price}</span>
                 </dt>
-                <dd class="text-base-content/70">{p.includes}</dd>
+                <dd class="text-ink-2">{p.includes}</dd>
               </div>
             ))}
           </dl>
@@ -217,7 +216,7 @@ export function LandingPage(props: LandingPageProps) {
             One number. Every store.
           </h2>
           <div class="mt-6">
-            <LinkButton href={cta.href} class="h-11 px-5 text-base">
+            <LinkButton href={cta.href} class="h-11 px-5">
               {cta.label}
             </LinkButton>
           </div>
@@ -231,11 +230,11 @@ function StoreItem(props: { never?: boolean; children?: Child }) {
   return (
     <li class="flex gap-2.5">
       {props.never ? (
-        <span aria-hidden="true" class="mt-0.5 flex size-5 shrink-0 items-center justify-center text-base-content/60">
+        <span aria-hidden="true" class="mt-1 flex size-5 shrink-0 items-center justify-center text-ink-3">
           ×
         </span>
       ) : (
-        <IconCheck class="mt-1 size-4 shrink-0 text-base-content/70" />
+        <IconCheck class="mt-1.5 size-4 shrink-0 text-ink-2" />
       )}
       <span>{props.children}</span>
     </li>

@@ -17,26 +17,51 @@ export interface SyncState {
   stopped?: boolean;
 }
 
+/** The effective sync interval in minutes: SYNC_INTERVAL_MINUTES rounded up to a 30-minute cron tick. */
+export function syncIntervalMinutes(intervalMinutes: string | undefined): number {
+  const n = Number(intervalMinutes);
+  return Math.max(30, Math.ceil((Number.isFinite(n) && n > 0 ? n : 60) / 30) * 30);
+}
+
 /**
  * How often a connection syncs, in words: "every hour", "every 30 minutes", "every 2 hours".
  * The cron ticks every 30 minutes, so the effective cadence is SYNC_INTERVAL_MINUTES rounded up
  * to a tick (the engine subtracts a small grace, so 60 really is hourly).
  */
 export function syncCadence(intervalMinutes: string | undefined): string {
-  const n = Number(intervalMinutes);
-  const minutes = Math.max(30, Math.ceil((Number.isFinite(n) && n > 0 ? n : 60) / 30) * 30);
+  const minutes = syncIntervalMinutes(intervalMinutes);
   if (minutes % 60 !== 0) return `every ${minutes} minutes`;
   const hours = minutes / 60;
   return hours === 1 ? 'every hour' : `every ${hours} hours`;
 }
 
-export function SyncNotice(props: { sync: SyncState }) {
+/** "A", "A and B", "A, B and C". */
+export function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+/**
+ * The first-sync notice. Right after connecting it is the confirmation (there's no "Connected."
+ * flash on top), so it names what was connected. `note` adds one plain sentence.
+ */
+export function SyncNotice(props: {
+  sync: SyncState;
+  /** Connections waiting for their first sync, by name. */
+  connected?: string[];
+  /** e.g. "Demo data removed, so your totals are real." */
+  note?: string;
+}) {
   const { refresh } = props.sync;
+  const names = props.connected ?? [];
+  const lead = names.length > 0 ? `Connected to ${listNames(names)}. ` : '';
+  const whose = names.length > 1 ? 'their' : names.length === 1 ? 'its' : 'your';
+  const note = props.note ? ` ${props.note}` : '';
   return (
     <Alert tone="info" title="Syncing…" role="status">
       {refresh ? (
         <>
-          Adding up your first 90 days, usually in a few seconds. This page refreshes on its own.
+          {lead}Adding up {whose} first 90 days, usually in a few seconds.{note} This page refreshes on its own.
           {refresh.stopUrl ? (
             <>
               {' '}
@@ -47,9 +72,9 @@ export function SyncNotice(props: { sync: SyncState }) {
           ) : null}
         </>
       ) : props.sync.stopped ? (
-        'Automatic refresh is off. Reload the page to check on it.'
+        `${lead}Automatic refresh is off. Reload the page to check on it.${note}`
       ) : (
-        'This is taking longer than usual. Reload the page in a minute.'
+        `${lead}This is taking longer than usual. Reload the page in a minute.${note}`
       )}
     </Alert>
   );
@@ -58,8 +83,8 @@ export function SyncNotice(props: { sync: SyncState }) {
 /** A quiet "← Back" link above a page header. The arrow is decoration, not part of the name. */
 export function BackLink(props: { href: string; label: string }) {
   return (
-    <p class="mb-4 text-sm">
-      <a href={props.href} class="link link-hover text-base-content/70">
+    <p class="mb-4 text-body">
+      <a href={props.href} class="link link-hover text-ink-2">
         <span aria-hidden="true">←</span> {props.label}
       </a>
     </p>
@@ -81,6 +106,21 @@ const DAY_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numer
 /** "Nov 5, 2026, 10:23" (UTC). */
 export function formatDateTime(ms: number): string {
   return DATE_TIME.format(new Date(ms));
+}
+
+const WHEN_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'UTC',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** "Nov 4, 09:14 UTC"; the year is added when it isn't the current one ("Dec 30, 2025, 09:14 UTC"). */
+export function formatWhen(ms: number, now: number = Date.now()): string {
+  if (new Date(ms).getUTCFullYear() !== new Date(now).getUTCFullYear()) return `${formatDateTime(ms)} UTC`;
+  return `${WHEN_FMT.format(new Date(ms))} UTC`;
 }
 
 /** 'YYYY-MM-DD' → "Nov 5, 2026". */

@@ -47,7 +47,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
   return (
     // A named <section> (region), not <aside>: the steps are part of the task, and a complementary
     // landmark nested inside <main> is flagged by axe (landmark-complementary-is-top-level).
-    <section aria-labelledby={props.headingId} class="rounded-box border border-base-300 bg-base-200 p-5 text-sm sm:p-6">
+    <section aria-labelledby={props.headingId} class="rounded-box border border-base-300 bg-base-200 p-5 text-body sm:p-6">
       <Heading id={props.headingId} class="flex items-center gap-2 font-semibold">
         <ProviderDot dotClass={meta.dotClass} size="md" />
         Create a {meta.name} key
@@ -59,7 +59,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
             <li class="flex gap-3">
               <span
                 aria-hidden="true"
-                class="flex size-5 shrink-0 items-center justify-center rounded-full border border-field text-xs leading-none font-semibold tabular-nums text-base-content/70"
+                class="flex size-5 shrink-0 items-center justify-center rounded-full border border-field text-caption leading-none font-semibold tabular-nums text-ink-2"
               >
                 {i + 1}
               </span>
@@ -85,12 +85,12 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
           <ul class="mt-2 space-y-1.5">
             {meta.permissions.map((p) => (
               <li class="flex items-start gap-2">
-                <IconCheck class="mt-0.5 size-4 shrink-0 text-base-content/70" />
+                <IconCheck class="mt-0.5 size-4 shrink-0 text-ink-2" />
                 <span>{p}</span>
               </li>
             ))}
           </ul>
-          <p class="mt-3 text-base-content/70">hoomuch only makes read requests.</p>
+          <p class="mt-3 text-ink-2">hoomuch only makes read requests.</p>
         </div>
       ) : null}
     </section>
@@ -150,7 +150,8 @@ export function ConnectionForm(props: ConnectionFormProps) {
           />
         ))}
         <div class="mt-6 flex flex-wrap items-center gap-3">
-          <Button>{submitLabel(meta, props.mode)}</Button>
+          {/* Verifying a key is a live call to the provider: a few seconds, so say what's happening. */}
+          <Button busyLabel="Checking key…">{submitLabel(meta, props.mode)}</Button>
           {props.cancelHref ? (
             <LinkButton href={props.cancelHref} variant="ghost">
               Cancel
@@ -158,7 +159,7 @@ export function ConnectionForm(props: ConnectionFormProps) {
           ) : null}
         </div>
         {hasSecret ? (
-          <p class="mt-3 text-sm text-base-content/70">
+          <p class="mt-3 text-body text-ink-2">
             The key is checked with {meta.name} before it’s saved, then stored encrypted with AES-256-GCM.
           </p>
         ) : null}

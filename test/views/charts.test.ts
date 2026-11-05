@@ -307,7 +307,7 @@ describe('RevenueChart', () => {
       expectSafe(html);
       expectTable(html);
       // One hover/tooltip column per day, one row per day + the totals row.
-      expect(count(html, 'hover:fill-base-content/5')).toBe(range);
+      expect(count(html, 'hover:fill-base-200')).toBe(range);
       expect(count(html, 'scope="row"')).toBe(range + 1);
       // Date + 3 connections + Total.
       expect(count(html, 'scope="col"')).toBe(5);
@@ -343,7 +343,7 @@ describe('RevenueChart', () => {
     expect(descOf(html)).toContain('No revenue in this period yet.');
     expect(html).toContain('$0');
     expect(html).not.toContain('stroke-base-300'); // no gridlines for a fake scale
-    expect(html).toContain('stroke-base-content/40'); // the baseline
+    expect(html).toContain('stroke-field'); // the baseline
     expect(html).not.toContain('<rect x');
     expect(html).not.toContain('<details');
 
@@ -368,8 +368,8 @@ describe('RevenueChart', () => {
     const scale = revenueScale(-30_000, 50_000, 'USD');
     expect(scale.min).toBeLessThan(0);
     const y0 = svgNum(yMapper(scale)(0));
-    expect(html).toContain(`class="stroke-base-content/40"`);
-    expect(html).toContain(`y1="${y0}" y2="${y0}" class="stroke-base-content/40"`);
+    expect(html).toContain(`class="stroke-field"`);
+    expect(html).toContain(`y1="${y0}" y2="${y0}" class="stroke-field"`);
     // The negative bar starts at the baseline and goes down; the positive part sits on top of it.
     expect(html).toMatch(new RegExp(`<rect x="[\\d.]+" y="${y0.replace('.', '\\.')}" width="[\\d.]+" height="[\\d.]+" fill="#635BFF"`));
     expect(descOf(html)).toContain('1 day had more refunds than charges');
@@ -409,7 +409,7 @@ describe('RevenueChart', () => {
     expectTable(html);
     expect(html).toContain('>Other</span>');
     expect(html).toContain('>Other</th>');
-    expect(html).toContain('class="fill-base-content/25"');
+    expect(html).toContain('class="fill-ink-3"');
     expect(html).not.toContain('ghost');
   });
 
@@ -419,7 +419,7 @@ describe('RevenueChart', () => {
     const html = await render(RevenueChart({ series, connections: [bad], currency: 'USD' }));
     expectSafe(html);
     expect(html).not.toContain('onload');
-    expect(html).toContain('class="fill-base-content/50"');
+    expect(html).toContain('class="fill-series-neutral"');
   });
 
   it('survives garbage amounts without leaking NaN', async () => {
@@ -464,7 +464,7 @@ describe('MrrChart', () => {
   });
 
   for (const range of [7, 30, 90] as const) {
-    it(`2+ points: line, soft area and last-value dot (${range} days)`, async () => {
+    it(`2+ points: line and last-value dot, no area fill (${range} days)`, async () => {
       const d = fixtureDashboard(range, 'full');
       const html = await render(
         MrrChart({ series: d.mrrSeries, windowDays: d.revenueSeries.map((r) => r.day), currency: 'USD' }),
@@ -472,8 +472,9 @@ describe('MrrChart', () => {
       expectSafe(html);
       expectTable(html);
       expect(html).toMatch(/<path d="M0 [\d.]+(L[\d.]+ [\d.]+)+" fill="none" class="stroke-accent" stroke-width="2"/);
-      expect(html).toMatch(/fill="url\(#mrr-[a-z0-9]+-fill\)"/);
-      expect(html).toContain('class="text-accent"');
+      // No area under the line: on a non-zero baseline it would overstate the change.
+      expect(html).not.toContain('linearGradient');
+      expect(html).not.toContain('fill="url(');
       expect(count(html, 'h0.01"')).toBe(2);
       expect(count(html, 'scope="row"')).toBe(d.mrrSeries.length);
       expect(count(html, '<text ')).toBe(3);

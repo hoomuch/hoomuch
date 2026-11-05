@@ -1,7 +1,7 @@
 /** Settings: display currency, password change, account deletion. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
-import { deleteUser, updateUserCurrency } from '../db/queries';
+import { deleteUser, getCurrencySource, updateUserCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
@@ -12,8 +12,10 @@ import { chrome, formLimit, readForm } from './util';
 const PASSWORD_INPUT_MAX = 1024;
 
 export function registerSettingsRoutes(app: Hono<AppEnv>): void {
-  app.get('/settings', requireUser, (c) => {
-    return c.html(<SettingsPage chrome={chrome(c)} currency={currentUser(c).baseCurrency} />);
+  app.get('/settings', requireUser, async (c) => {
+    const user = currentUser(c);
+    const source = await getCurrencySource(c.env.DB, user.id);
+    return c.html(<SettingsPage chrome={chrome(c)} currency={user.baseCurrency} currencySource={source} />);
   });
 
   app.post('/settings/currency', requireUser, formLimit, async (c) => {
@@ -24,7 +26,7 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
       return redirectWithFlash(c, '/settings', 'error', 'Pick one of the listed currencies.');
     }
     await updateUserCurrency(c.env.DB, user.id, currency);
-    return redirectWithFlash(c, '/settings', 'success', `Display currency set to ${currency}.`);
+    return redirectWithFlash(c, '/settings', 'success', `Saved. Amounts now show in ${currency}.`);
   });
 
   app.post('/settings/password', requireUser, formLimit, async (c) => {

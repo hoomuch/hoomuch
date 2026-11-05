@@ -9,7 +9,7 @@
 import { RANGE_OPTIONS, type RangeDays } from '../../data/types';
 
 const SEGMENT =
-  'block rounded-[calc(var(--radius-field)-3px)] border border-transparent px-3 py-1 text-sm whitespace-nowrap tabular-nums text-base-content/70 hover:text-base-content aria-[current=page]:border-field aria-[current=page]:bg-base-100 aria-[current=page]:text-base-content';
+  'block rounded-[calc(var(--radius-field)-3px)] border border-transparent px-3 py-1 text-body whitespace-nowrap tabular-nums text-ink-2 hover:text-base-content aria-[current=page]:border-field aria-[current=page]:bg-base-100 aria-[current=page]:text-base-content';
 
 export function RangeTabs(props: {
   current: RangeDays;

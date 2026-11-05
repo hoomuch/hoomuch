@@ -6,7 +6,6 @@ import type { ConnectionDetail } from '../data/types';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
-import { formatNumber } from '../lib/money';
 import { getProviderMeta } from '../providers/registry';
 import { isProviderId, type ProviderMeta } from '../providers/types';
 import {
@@ -14,9 +13,13 @@ import {
   deleteConnection,
   renameConnection,
   rotateCredentials,
-  triggerSync,
+  startSync,
 } from '../services/connections';
-import { ConnectionDetailPage, type ConnectionDetailPageProps } from '../views/pages/connection-detail';
+import {
+  ConnectionDetailPage,
+  type ConnectionDetailPageProps,
+  type ManualSyncState,
+} from '../views/pages/connection-detail';
 import { ConnectionsPage, NewConnectionPage, ProviderPickerPage } from '../views/pages/connections';
 import {
   awaitingFirstSync,
@@ -53,13 +56,28 @@ function nonSecretValues(meta: ProviderMeta, raw: Record<string, string>, name?:
   return out;
 }
 
-/** Success with caveats (e.g. a full-access key) reads as info, not a green all-clear. */
-function toneFor(warnings: string[]): 'success' | 'info' {
-  return warnings.length > 0 ? 'info' : 'success';
-}
-
 function withWarnings(message: string, warnings: string[]): string {
   return [message, ...warnings].join(' ');
+}
+
+/** `?sync=` holds the moment a manual sync was requested (ms); anything else is ignored. */
+function parseRequestedAt(v: string | undefined): number | null {
+  return v && /^\d{12,14}$/.test(v) ? Number(v) : null;
+}
+
+/**
+ * A sync the user started (Sync now, Replace key) runs in the background. The page refreshes
+ * until a run that started at or after the request has finished, then shows how it went.
+ */
+function manualSyncState(c: AppContext, detail: ConnectionDetail, poll: number): ManualSyncState | null {
+  const requestedAt = parseRequestedAt(c.req.query('sync'));
+  if (requestedAt === null || awaitingFirstSync(detail)) return null;
+  const why = c.req.query('why') === 'key' ? 'key' : 'sync';
+  const run = detail.recentRuns.find((r) => r.startedAt >= requestedAt);
+  if (run && run.finishedAt !== null && detail.status !== 'syncing') return { state: 'done', why, run };
+  const keep = `sync=${requestedAt}${why === 'key' ? '&why=key' : ''}`;
+  const sync = syncState(true, poll, (n) => `/connections/${detail.id}?${keep}&poll=${n}`)!;
+  return { state: 'running', why, sync };
 }
 
 function renderDetail(
@@ -67,12 +85,21 @@ function renderDetail(
   detail: ConnectionDetail,
   opts: { rotate?: ConnectionDetailPageProps['rotate']; status?: 200 | 422 } = {},
 ) {
+  const poll = parsePoll(c.req.query('poll'));
   // Never meta-refresh a page that carries form errors: the refresh would wipe them.
   const sync = opts.rotate
     ? null
-    : syncState(awaitingFirstSync(detail), parsePoll(c.req.query('poll')), (n) => `/connections/${detail.id}?poll=${n}`);
+    : syncState(awaitingFirstSync(detail), poll, (n) => `/connections/${detail.id}?poll=${n}`);
+  const manual = opts.rotate ? null : manualSyncState(c, detail, poll);
   return c.html(
-    <ConnectionDetailPage chrome={chrome(c)} detail={detail} sync={sync} rotate={opts.rotate} />,
+    <ConnectionDetailPage
+      chrome={chrome(c)}
+      detail={detail}
+      sync={sync}
+      manual={manual}
+      manageOpen={c.req.query('manage') === 'open'}
+      rotate={opts.rotate}
+    />,
     opts.status ?? 200,
   );
 }
@@ -115,25 +142,30 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
         422,
       );
     }
-    // A first connection goes straight to the dashboard (the number is the point); later ones
-    // land on their own page, where the sync status and any permission warnings live.
-    const first = (await listConnectionSummaries(c.env, user.id)).length === 1;
-    return redirectWithFlash(
-      c,
-      first ? '/dashboard?first=1' : `/connections/${result.id}`,
-      toneFor(result.warnings),
-      withWarnings('Connected. First numbers in a few seconds.', result.warnings),
-    );
+    // A first real connection goes straight to the dashboard (the number is the point); later
+    // ones land on their own page. Either way the sync notice there confirms it, so there's no
+    // "Connected." flash on top; only caveats (a full-access key, a missing permission) get one.
+    const all = await listConnectionSummaries(c.env, user.id);
+    const real = all.filter((x) => x.provider !== 'demo');
+    const first = provider !== 'demo' && real.length === 1;
+    // The first real connection replaces demo data, so the totals are real money from here on.
+    // Demo data is one click to add back; a demo added after real connections is left alone.
+    const demos = first ? all.filter((x) => x.provider === 'demo') : [];
+    for (const d of demos) await deleteConnection(c.env, user.id, d.id);
+    const to = first ? `/dashboard?first=1${demos.length > 0 ? '&demo=removed' : ''}` : `/connections/${result.id}`;
+    return result.warnings.length > 0
+      ? redirectWithFlash(c, to, 'info', result.warnings.join(' '))
+      : c.redirect(to, 303);
   });
 
   app.post('/connections/demo', requireUser, formLimit, async (c) => {
     const userId = currentUser(c).id;
     const result = await createConnection(c.env, execCtx(c), userId, 'demo', 'Demo data', {});
     if (!result.ok) return redirectWithFlash(c, '/connections', 'error', result.error);
-    const first = (await listConnectionSummaries(c.env, userId)).length === 1;
+    // No ?first=1: the celebration is for real numbers. The flash is this event's one message.
     return redirectWithFlash(
       c,
-      first ? '/dashboard?first=1' : '/dashboard',
+      '/dashboard',
       'success',
       withWarnings('Demo data added. It’s fake money, but the math is real.', result.warnings),
     );
@@ -153,21 +185,21 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     const form = await readForm(c);
     const name = form.text('name', NAME_INPUT_MAX);
     const back = `/connections/${id}`;
-    if (!name) return redirectWithFlash(c, back, 'error', 'Enter a name.');
+    // Errors reopen the Manage section, where the form is.
+    if (!name) return redirectWithFlash(c, `${back}?manage=open`, 'error', 'Enter a name.');
     const ok = await renameConnection(c.env, currentUser(c).id, id, name);
     if (!ok) return c.notFound();
-    return redirectWithFlash(c, back, 'success', 'Renamed.');
+    return redirectWithFlash(c, back, 'success', 'Saved.');
   });
 
   app.post('/connections/:id/sync', requireUser, formLimit, async (c) => {
     const id = c.req.param('id');
     if (!isUuid(id)) return c.notFound();
     const back = `/connections/${id}`;
-    const r = await triggerSync(c.env, currentUser(c).id, id);
+    // Returns at once; the page shows the sync running and then its result (no 20 s wait).
+    const r = await startSync(c.env, execCtx(c), currentUser(c).id, id);
     if (!r.ok) return redirectWithFlash(c, back, 'error', r.error);
-    if (!r.result.ok) return redirectWithFlash(c, back, 'error', r.result.error ?? 'Sync failed. Try again in a minute.');
-    const n = r.result.events;
-    return redirectWithFlash(c, back, 'success', `Synced. ${formatNumber(n)} revenue ${n === 1 ? 'event' : 'events'} processed.`);
+    return c.redirect(`${back}?sync=${r.requestedAt}`, 303);
   });
 
   app.post('/connections/:id/rotate', requireUser, formLimit, async (c) => {
@@ -181,6 +213,7 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     if (meta.fields.length === 0) return redirectWithFlash(c, back, 'error', 'This connection has no key to replace.');
 
     const raw = collectFields(meta, await readForm(c));
+    const requestedAt = Date.now();
     const result = await rotateCredentials(c.env, execCtx(c), user.id, id, raw);
     if (!result.ok) {
       return renderDetail(c, detail, {
@@ -188,17 +221,29 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
         status: 422,
       });
     }
-    return redirectWithFlash(c, back, toneFor(result.warnings), withWarnings('Key replaced. Syncing with the new key.', result.warnings));
+    // The page's sync notice says "Key replaced." and follows the sync; a flash only for caveats.
+    const to = `${back}?sync=${requestedAt}&why=key`;
+    return result.warnings.length > 0 ? redirectWithFlash(c, to, 'info', result.warnings.join(' ')) : c.redirect(to, 303);
   });
 
   app.post('/connections/:id/delete', requireUser, formLimit, async (c) => {
     const id = c.req.param('id');
     if (!isUuid(id)) return c.notFound();
+    const user = currentUser(c);
     const form = await readForm(c);
-    if (form.text('confirm', 8) !== 'yes') {
-      return redirectWithFlash(c, `/connections/${id}`, 'error', 'Tick the confirmation box to delete this connection.');
+    const detail = await getConnectionDetail(c.env, user, id);
+    if (!detail) return c.notFound();
+    // Demo data is one click to add back, so removing it needs no confirmation: it offers an
+    // Undo instead. A real connection's key and history can't come back, so it keeps the box.
+    if (detail.provider === 'demo') {
+      await deleteConnection(c.env, user.id, id);
+      const to = form.text('back', 16) === '/dashboard' ? '/dashboard' : '/connections';
+      return redirectWithFlash(c, to, 'success', 'Demo data removed.', { label: 'Add it back', action: '/connections/demo' });
     }
-    const ok = await deleteConnection(c.env, currentUser(c).id, id);
+    if (form.text('confirm', 8) !== 'yes') {
+      return redirectWithFlash(c, `/connections/${id}?manage=open`, 'error', 'Tick the box to confirm.');
+    }
+    const ok = await deleteConnection(c.env, user.id, id);
     if (!ok) return c.notFound();
     return redirectWithFlash(c, '/connections', 'success', 'Connection deleted.');
   });

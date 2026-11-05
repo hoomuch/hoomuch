@@ -2,7 +2,7 @@
  * Page shell: doctype, <head>, top nav, flash area, main column. Owner: Experience (design).
  * CONTRACT: `LayoutProps` is used by every page — don't change it without the Experience lead.
  *
- * Zero JS. At phone widths the header is two rows: mark + "Log out" on top, the nav on its own
+ * At phone widths the header is two rows: mark + "Settings" on top, the nav on its own
  * full-width row below (scrolls sideways if it ever has to). From `sm` up it's one row.
  * `width="narrow"` centres a ~400px column; the page supplies the <Card> inside it.
  */
@@ -60,11 +60,11 @@ export const SOURCE_URL = 'https://github.com/tahabozdemir/hoomuch';
 export const DEFAULT_DESCRIPTION =
   'MRR, ARR, subscriptions and revenue from Stripe, Lemon Squeezy and RevenueCat, on one dashboard.';
 
+/** The daily places. Settings sits apart on the right; Log out lives inside Settings. */
 const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: 'dashboard', href: '/dashboard', label: 'Dashboard' },
   { key: 'connections', href: '/connections', label: 'Connections' },
   { key: 'transactions', href: '/transactions', label: 'Transactions' },
-  { key: 'settings', href: '/settings', label: 'Settings' },
 ];
 
 /** Shared horizontal frame so header, main and footer edges line up: 960px content box. */
@@ -73,14 +73,14 @@ const FRAME_NARROW = 'mx-auto w-full max-w-[28rem] px-4 sm:px-6'; // 400px card 
 
 /** Visually hidden until focused, then pinned top-left over the header (skip link + stop-refresh link). */
 const SKIP_LINK =
-  'sr-only rounded-field border border-base-300 bg-base-100 px-4 py-2 text-sm font-semibold focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50';
+  'sr-only rounded-field border border-base-300 bg-base-100 px-4 py-2 text-body font-semibold focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50';
 
 /**
  * Nav link: regular weight in both states (no width jump); the active one gets ink + a 2px accent
  * bar. focus-inset keeps the ring visible inside the scrolling phone nav.
  */
 const NAV_LINK =
-  'focus-inset flex h-11 items-center border-b-2 border-transparent text-sm whitespace-nowrap text-base-content/70 hover:text-base-content sm:h-14 aria-[current=page]:border-accent aria-[current=page]:text-base-content';
+  'focus-inset flex h-11 items-center border-b-2 border-transparent text-body whitespace-nowrap text-ink-2 hover:text-base-content sm:h-14 aria-[current=page]:border-accent aria-[current=page]:text-base-content';
 
 export function Layout(props: LayoutProps) {
   const fullTitle = props.title ? `${props.title} · ${APP_NAME}` : APP_NAME;
@@ -107,8 +107,10 @@ export function Layout(props: LayoutProps) {
           <meta name="theme-color" content="#0f1013" media="(prefers-color-scheme: dark)" />
           <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
           <link rel="stylesheet" href="/app.css" />
+          {/* Optional, same-origin (CSP script-src 'self'): submit feedback only. Every form works without it. */}
+          <script src="/app.js" defer></script>
         </head>
-        <body class="flex min-h-dvh flex-col bg-base-100 font-sans text-base-content antialiased">
+        <body class="flex min-h-dvh flex-col bg-base-100 font-sans text-body text-base-content antialiased">
           <a href="#main" class={SKIP_LINK}>
             Skip to content
           </a>
@@ -122,7 +124,7 @@ export function Layout(props: LayoutProps) {
             <div class={`${FRAME} flex flex-wrap items-center gap-x-8`}>
               <a
                 href={user ? '/dashboard' : '/'}
-                class="-ml-1 flex h-12 items-center rounded-field px-1 text-lg font-semibold tracking-tight sm:h-14"
+                class="-ml-1 flex h-12 items-center rounded-field px-1 text-title tracking-tight sm:h-14"
               >
                 <Wordmark />
               </a>
@@ -145,19 +147,19 @@ export function Layout(props: LayoutProps) {
                       ))}
                     </ul>
                   </nav>
-                  <form method="post" action="/logout" class="ml-auto">
-                    <button
-                      type="submit"
-                      class="-mr-1 flex h-12 cursor-pointer items-center rounded-field px-1 text-sm text-base-content/70 hover:text-base-content sm:h-14"
-                    >
-                      Log out
-                    </button>
-                  </form>
+                  {/* Same look and current-page marker as the nav, kept apart from the daily places. */}
+                  <a
+                    href="/settings"
+                    aria-current={props.nav === 'settings' ? 'page' : undefined}
+                    class={`${NAV_LINK} -mr-1 ml-auto px-1`}
+                  >
+                    Settings
+                  </a>
                 </>
               ) : props.marketing ? (
                 <a
                   href="/login"
-                  class="-mr-1 ml-auto flex h-12 items-center rounded-field px-1 text-sm text-base-content/70 hover:text-base-content sm:h-14"
+                  class="-mr-1 ml-auto flex h-12 items-center rounded-field px-1 text-body text-ink-2 hover:text-base-content sm:h-14"
                 >
                   Log in
                 </a>
@@ -172,7 +174,7 @@ export function Layout(props: LayoutProps) {
 
           <footer class="border-t border-base-300">
             {props.marketing ? (
-              <div class={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-8 text-sm text-base-content/70`}>
+              <div class={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-8 text-body text-ink-2`}>
                 <span class="flex items-center gap-3">
                   <Owl pose="asleep" class="opacity-70" />
                   <Wordmark class="font-semibold tracking-tight text-base-content" />
@@ -180,7 +182,7 @@ export function Layout(props: LayoutProps) {
                 {props.footerNote ? <span>{props.footerNote}</span> : null}
               </div>
             ) : (
-              <div class={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-6 text-xs text-base-content/70`}>
+              <div class={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-6 text-caption text-ink-2`}>
                 <span>{APP_NAME}</span>
                 <span>Only ever reads. Keys are encrypted at rest.</span>
               </div>

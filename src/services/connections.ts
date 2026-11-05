@@ -235,6 +235,18 @@ export async function deleteConnection(env: Bindings, userId: string, id: string
   return deleteConnectionRow(env.DB, userId, id);
 }
 
+/** Why a manual sync can't start right now, or null when it can. */
+async function manualSyncBlocker(env: Bindings, userId: string, id: string, now: number): Promise<string | null> {
+  const row = await getConnection(env.DB, userId, id);
+  if (!row) return 'Connection not found.';
+  const started = row.last_sync_started_at ?? 0;
+  if (row.status === 'syncing' && now - started < SYNC_LOCK_STALE_MS) {
+    return 'A sync is already running for this connection.';
+  }
+  if (now - started < MANUAL_SYNC_COOLDOWN_MS) return 'Synced moments ago. Try again in a minute.';
+  return null;
+}
+
 /** Runs a sync inside the request (the user is waiting for the result). Rate-limited per connection. */
 export async function triggerSync(
   env: Bindings,
@@ -242,14 +254,25 @@ export async function triggerSync(
   id: string,
   now: number = Date.now(),
 ): Promise<{ ok: true; result: SyncResult } | { ok: false; error: string }> {
-  const row = await getConnection(env.DB, userId, id);
-  if (!row) return { ok: false, error: 'Connection not found.' };
-  const started = row.last_sync_started_at ?? 0;
-  if (row.status === 'syncing' && now - started < SYNC_LOCK_STALE_MS) {
-    return { ok: false, error: 'A sync is already running for this connection.' };
-  }
-  if (now - started < MANUAL_SYNC_COOLDOWN_MS) {
-    return { ok: false, error: 'Synced moments ago. Try again in a minute.' };
-  }
+  const blocked = await manualSyncBlocker(env, userId, id, now);
+  if (blocked) return { ok: false, error: blocked };
   return { ok: true, result: await syncConnection(env, id, 'manual') };
+}
+
+/**
+ * "Sync now" without holding the request: starts the sync in the background and returns at
+ * once, with the same rate limits as triggerSync. `requestedAt` is what the page compares sync
+ * runs against: it refreshes until a run that started at or after it has finished.
+ */
+export async function startSync(
+  env: Bindings,
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
+  userId: string,
+  id: string,
+  now: number = Date.now(),
+): Promise<{ ok: true; requestedAt: number } | { ok: false; error: string }> {
+  const blocked = await manualSyncBlocker(env, userId, id, now);
+  if (blocked) return { ok: false, error: blocked };
+  ctx.waitUntil(syncConnection(env, id, 'manual'));
+  return { ok: true, requestedAt: now };
 }

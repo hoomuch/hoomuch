@@ -2,18 +2,32 @@
 
 import type { Hono } from 'hono';
 import { listConnectionSummaries } from '../data/connections';
+import { dominantMrrCurrency } from '../data/currency';
 import { getDashboardData } from '../data/dashboard';
 import { parseRange } from '../data/types';
+import { getCurrencySource, setInferredCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { DashboardPage } from '../views/pages/dashboard';
-import { syncCadence } from '../views/pages/shared';
+import { syncCadence, syncIntervalMinutes } from '../views/pages/shared';
+import { rememberedQuery } from './prefs';
 import { awaitingFirstSync, chrome, parsePoll, syncState } from './util';
 
 export function registerDashboardRoutes(app: Hono<AppEnv>): void {
   app.get('/dashboard', requireUser, async (c) => {
-    const user = currentUser(c);
-    const range = parseRange(c.req.query('range'));
+    let user = currentUser(c);
+    // Until the user picks a display currency, start with the one most of their real MRR is in
+    // (once, at the first dashboard load with numbers). Settings can change it any time.
+    let currencyInferred: string | null = null;
+    if ((await getCurrencySource(c.env.DB, user.id)) === 'default') {
+      const dominant = await dominantMrrCurrency(c.env, user.id);
+      if (dominant && (await setInferredCurrency(c.env.DB, user.id, dominant)) && dominant !== user.baseCurrency) {
+        user = { ...user, baseCurrency: dominant };
+        currencyInferred = dominant;
+      }
+    }
+    // ?range= wins and is remembered; the bare nav link brings back the last range.
+    const range = parseRange(rememberedQuery(c, 'range', 'hm_range', (v) => v === '7' || v === '30' || v === '90'));
     const poll = parsePoll(c.req.query('poll'));
 
     const [data, connections] = await Promise.all([
@@ -21,12 +35,19 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
       listConnectionSummaries(c.env, user.id),
     ]);
 
-    const sync = syncState(connections.some(awaitingFirstSync), poll, (n) => `/dashboard?range=${range}&poll=${n}`);
+    // The first real connection just replaced demo data: say so in the notice or the strip, and
+    // keep saying it across the auto-refreshes until one of them shows.
+    const demoRemoved = c.req.query('demo') === 'removed';
+    const keep = demoRemoved ? '&demo=removed' : '';
+    const sync = syncState(connections.some(awaitingFirstSync), poll, (n) => `/dashboard?range=${range}&poll=${n}${keep}`);
     // "There it is": the page was polling for a first sync (poll ≥ 1) and nothing is waiting any
     // more, or a first connection was just added and synced before this page loaded (?first=1).
-    // No stored state: dismissing is a link to the same range without the trigger.
+    // Real numbers only: demo data never earns the moment. No stored state: dismissing is a link
+    // to the same range without the trigger.
     const justSynced =
-      !sync && (poll > 0 || c.req.query('first') === '1') && connections.some((x) => x.lastSyncedAt !== null);
+      !sync &&
+      (poll > 0 || c.req.query('first') === '1') &&
+      connections.some((x) => x.provider !== 'demo' && x.lastSyncedAt !== null);
     return c.html(
       <DashboardPage
         chrome={chrome(c)}
@@ -34,7 +55,11 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
         connections={connections}
         sync={sync}
         cadence={syncCadence(c.env.SYNC_INTERVAL_MINUTES)}
+        // Stale once a connection has missed two syncs in a row.
+        staleAfterMinutes={2 * syncIntervalMinutes(c.env.SYNC_INTERVAL_MINUTES)}
         celebrate={justSynced ? { dismissHref: `/dashboard?range=${range}` } : null}
+        demoRemoved={demoRemoved}
+        currencyInferred={currencyInferred}
       />,
     );
   });

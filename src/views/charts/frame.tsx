@@ -9,7 +9,7 @@
  *    width while the text itself renders at the CSS font size (12px) at 375px and at 960px alike.
  *
  * CSP: no inline styles anywhere; colours come from theme classes or SVG presentation attributes.
- * Text tokens follow app.css: chart text is base-content/70, never below /60.
+ * Text tokens follow app.css: chart text is text-ink-2 (fill-ink-2 in SVG), never fainter than ink-3.
  */
 
 import type { Child } from 'hono/jsx';
@@ -35,8 +35,8 @@ function YLabels(props: { labels: string[] }) {
   // Each label is a zero-height row whose text overflows symmetrically around the gridline.
   const cls =
     props.labels.length > 1
-      ? 'flex h-40 flex-col justify-between text-right text-xs leading-none tabular-nums text-base-content/70'
-      : 'flex h-40 flex-col justify-end text-right text-xs leading-none tabular-nums text-base-content/70';
+      ? 'flex h-40 flex-col justify-between text-right text-caption leading-none tabular-nums text-ink-2'
+      : 'flex h-40 flex-col justify-end text-right text-caption leading-none tabular-nums text-ink-2';
   return (
     <div aria-hidden="true" class={cls}>
       {props.labels.map((label) => (
@@ -52,7 +52,7 @@ function XLabels(props: { ticks: XTick[] }) {
       aria-hidden="true"
       width="100%"
       height="20"
-      class="mt-1 block h-5 w-full overflow-visible fill-base-content/70 text-xs tabular-nums"
+      class="mt-1 block h-5 w-full overflow-visible fill-ink-2 text-caption tabular-nums"
     >
       {props.ticks.map((t) => (
         <text x={`${svgNum(t.pct)}%`} y="14" text-anchor={t.anchor}>
@@ -68,7 +68,7 @@ export function PlotMessage(props: { children?: Child }) {
   return (
     <p
       aria-hidden="true"
-      class="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-base-content/70"
+      class="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-body text-ink-2"
     >
       {props.children}
     </p>
@@ -77,7 +77,7 @@ export function PlotMessage(props: { children?: Child }) {
 
 /** Small muted note under a chart. */
 export function ChartNote(props: { children?: Child }) {
-  return <p class="mt-2 text-xs text-base-content/70">{props.children}</p>;
+  return <p class="mt-2 text-caption text-ink-2">{props.children}</p>;
 }
 
 export interface LegendItem {
@@ -92,7 +92,7 @@ export interface LegendItem {
 /** Rect swatches mirror the bar marks (including the same-colour opacity steps). */
 export function Legend(props: { items: LegendItem[] }) {
   return (
-    <ul aria-label="Legend" class="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/70">
+    <ul aria-label="Legend" class="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-caption text-ink-2">
       {props.items.map((it) => (
         <li class="flex min-w-0 items-center gap-1.5">
           <svg aria-hidden="true" width="10" height="10" viewBox="0 0 10 10" class="shrink-0">
@@ -122,13 +122,13 @@ export function DataDetails(props: { caption: string; head: Child; body: Child; 
   const captionId = props.id ? `${props.id}-caption` : undefined;
   return (
     <details class="mt-4">
-      <summary class="cursor-pointer text-sm text-base-content/70 hover:text-base-content">
+      <summary class="cursor-pointer text-body text-ink-2 hover:text-base-content">
         Show data
         {props.label ? <span class="sr-only"> for {props.label}</span> : null}
       </summary>
       {/* The real <caption> is sr-only: inside the horizontal scroller it would be as wide as the
           table and get clipped at 375px. The visible copy wraps in the card instead. */}
-      <p aria-hidden="true" class="mt-2 text-xs text-base-content/70">
+      <p aria-hidden="true" class="mt-2 text-caption text-ink-2">
         {props.caption}
       </p>
       <TableScroller labelledBy={captionId} label={props.caption} class="mt-1">
@@ -147,7 +147,7 @@ export function DataDetails(props: { caption: string; head: Child; body: Child; 
 
 /** Literal classes for amount cells (zeros are muted so the eye lands on real values). */
 export const AMOUNT_CELL = 'whitespace-nowrap text-right';
-export const AMOUNT_CELL_ZERO = 'whitespace-nowrap text-right text-base-content/60';
+export const AMOUNT_CELL_ZERO = 'whitespace-nowrap text-right text-ink-3';
 export const HEAD_CELL_RIGHT = 'whitespace-nowrap text-right';
 export const HEAD_CELL_LEFT = 'whitespace-nowrap';
 export const ROW_HEAD = 'whitespace-nowrap font-normal';

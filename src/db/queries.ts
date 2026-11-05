@@ -61,11 +61,32 @@ export async function insertUser(
     .run();
 }
 
+/** The user picked a display currency in Settings: never infer it again. */
 export async function updateUserCurrency(db: D1Database, userId: string, currency: string): Promise<void> {
   await db
-    .prepare('UPDATE users SET base_currency = ?, updated_at = ? WHERE id = ?')
+    .prepare("UPDATE users SET base_currency = ?, currency_source = 'chosen', updated_at = ? WHERE id = ?")
     .bind(currency, Date.now(), userId)
     .run();
+}
+
+export type CurrencySource = 'default' | 'inferred' | 'chosen';
+
+export async function getCurrencySource(db: D1Database, userId: string): Promise<CurrencySource> {
+  const row = await db.prepare('SELECT currency_source FROM users WHERE id = ?').bind(userId).first<{ currency_source: string }>();
+  const v = row?.currency_source;
+  return v === 'inferred' || v === 'chosen' ? v : 'default';
+}
+
+/**
+ * Sets the display currency picked from the user's numbers, once: only while it's still the
+ * untouched default, so a choice made in Settings (even mid-request) always wins.
+ */
+export async function setInferredCurrency(db: D1Database, userId: string, currency: string): Promise<boolean> {
+  const r = await db
+    .prepare("UPDATE users SET base_currency = ?, currency_source = 'inferred', updated_at = ? WHERE id = ? AND currency_source = 'default'")
+    .bind(currency, Date.now(), userId)
+    .run();
+  return (r.meta?.changes ?? 0) > 0;
 }
 
 export async function updateUserPassword(db: D1Database, userId: string, passwordHash: string): Promise<void> {

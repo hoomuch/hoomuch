@@ -26,9 +26,10 @@ const FILTER_CLASS = {
   idle: 'btn btn-sm btn-ghost',
 } as const;
 
+/** "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter. */
 function href(base: string, provider: ProviderId | null, page: number): string {
   const q = new URLSearchParams();
-  if (provider) q.set('provider', provider);
+  q.set('provider', provider ?? 'all');
   if (page > 1) q.set('page', String(page));
   const s = q.toString();
   return s ? `${base}?${s}` : base;
@@ -42,7 +43,7 @@ function AmountCell(props: { row: TransactionRow; currency: string }) {
     return (
       <td class={cls}>
         {formatMoney(row.amount, row.originalCurrency)}
-        <span class="block text-xs text-base-content/60">No rate to convert to {props.currency}</span>
+        <span class="block text-caption text-ink-3">No rate to convert to {props.currency}</span>
       </td>
     );
   }
@@ -97,7 +98,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
       </nav>
 
       {p.items.length === 0 ? (
-        <div class="rounded-box border border-dashed border-base-300 px-6 py-10 text-center text-base-content/70">
+        <div class="rounded-box border border-dashed border-base-300 px-6 py-10 text-center text-ink-2">
           {p.page > 1 ? (
             <p>
               Nothing on this page.{' '}
@@ -149,16 +150,16 @@ export function TransactionsPage(props: TransactionsPageProps) {
                         {t.connectionName}
                       </a>
                     </td>
-                    <td>{t.description ?? <span class="text-base-content/60">—</span>}</td>
+                    <td>{t.description ?? <span class="text-ink-3">—</span>}</td>
                     <td>
                       {t.type === 'refund' ? (
                         <span class="badge badge-sm badge-outline badge-error">Refund</span>
                       ) : (
-                        <span class="text-base-content/70">Charge</span>
+                        <span class="text-ink-2">Charge</span>
                       )}
                     </td>
                     <AmountCell row={t} currency={cur} />
-                    <td class="text-right whitespace-nowrap text-base-content/60 tabular-nums">
+                    <td class="text-right whitespace-nowrap text-ink-3 tabular-nums">
                       {showOriginal ? formatMoney(t.amount, t.originalCurrency) : ''}
                     </td>
                   </tr>
@@ -178,7 +179,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
               </LinkButton>
             ) : null}
           </div>
-          <span class="text-sm text-base-content/60">Page {p.page}</span>
+          <span class="text-body text-ink-3">Page {p.page}</span>
           <div>
             {p.hasMore ? (
               <LinkButton href={href(base, p.provider, p.page + 1)} variant="secondary" small>

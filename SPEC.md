@@ -43,15 +43,15 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-01 | E-posta + parola ile kayıt, giriş, çıkış. `ALLOW_SIGNUP=false` iken kayıt kapalı | P0 |
 | F-02 | Bağlantı ekleme: **Stripe** (restricted key), **Lemon Squeezy** (API key, opsiyonel Store ID), **RevenueCat** (v2 secret key + Project ID) | P0 |
 | F-03 | Kaydetmeden önce anahtarı canlı doğrulama; anlaşılır hata mesajı (yetki eksik, geçersiz anahtar, vb.) | P0 |
-| F-04 | Bağlantıları listeleme, yeniden adlandırma, anahtar yenileme, silme (onaylı) | P0 |
-| F-05 | **Demo bağlantısı**: anahtarsız, deterministik örnek veri (çoklu para birimi, 90 gün geçmiş) | P0 |
+| F-04 | Bağlantıları listeleme, yeniden adlandırma, anahtar yenileme, silme (onaylı; demo veri onaysız silinir ve flash'ta "Geri ekle" sunulur) | P0 |
+| F-05 | **Demo bağlantısı**: anahtarsız, deterministik örnek veri (çoklu para birimi, 90 gün geçmiş). İlk gerçek bağlantı demo veriyi kaldırır, böylece toplamlar gerçek paradır | P0 |
 | F-06 | Otomatik senkronizasyon (Cron) + elle "Sync now" | P0 |
 | F-07 | İlk bağlantıda 90 gün geriye dönük gelir verisi (backfill) | P0 |
 | F-08 | Dashboard KPI'ları: MRR, ARR, aktif abonelik, aktif deneme, dönem geliri; önceki döneme göre değişim | P0 |
 | F-09 | Bağlantı bazında kırılım tablosu (MRR payı %) | P0 |
 | F-10 | Günlük gelir grafiği (bağlantı bazında yığılmış çubuk) ve MRR trend grafiği | P0 |
 | F-11 | Dönem seçici: 7 / 30 / 90 gün | P0 |
-| F-12 | Görüntüleme para birimi (varsayılan USD; EUR, GBP, TRY, …) ve günlük döviz kuru | P0 |
+| F-12 | Görüntüleme para birimi (varsayılan: kullanıcı seçmediyse, gerçek bağlantıların MRR'ının çoğunun olduğu para birimi bir kez otomatik seçilir; yoksa USD. EUR, GBP, TRY, …) ve günlük döviz kuru | P0 |
 | F-13 | Bağlantı durumu: son senkronizasyon zamanı, son hata, son çalıştırmalar | P0 |
 | F-14 | Birleşik işlem listesi (ödeme/iade), sağlayıcı filtresi, sayfalama | P1 |
 | F-15 | Ayarlar: para birimi, parola değiştirme, hesabı tüm verisiyle silme | P1 |
@@ -63,7 +63,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | ID | İhtiyaç |
 |----|---------|
 | N-01 | **Altyapı:** Tek Cloudflare Worker (Hono) + Workers Static Assets + D1 + Cron Triggers. Wrangler ile geliştirme/dağıtım. Harici veritabanı yok. |
-| N-02 | **Performans:** Sunucu tarafı render (SSR) HTML; istemci JS ≈ 0; dashboard yalnızca D1'den okur (sağlayıcıya canlı çağrı yapmaz). |
+| N-02 | **Performans:** Sunucu tarafı render (SSR) HTML; istemci JS ≈ 0 (tek istisna isteğe bağlı ~1 KB `/app.js`: form gönderilirken buton geri bildirimi ve çift gönderim engeli; JS olmadan her şey çalışır); dashboard yalnızca D1'den okur (sağlayıcıya canlı çağrı yapmaz). |
 | N-03 | **Güvenlik:** API anahtarları AES-256-GCM ile şifreli; parolalar PBKDF2-SHA256 (100.000 iterasyon); HttpOnly oturum çerezi; CSRF koruması; sıkı CSP; giriş deneme sınırı; gizli bilgi asla loglanmaz. |
 | N-04 | **Gizlilik:** Son müşterilerin e-posta/isim gibi kişisel verileri **saklanmaz**. Yalnızca tutar, para birimi, zaman, harici ID, ürün/plan adı. |
 | N-05 | **Dayanıklılık:** Bir sağlayıcının hatası diğerlerini etkilemez; 429/5xx'te üstel geri çekilme; idempotent upsert; sayfalı çekim ve cursor ile kaldığı yerden devam. |
@@ -124,7 +124,7 @@ kimlik bilgisi şifrelenir → D1 → `waitUntil(syncConnection(..., 'initial'))
 **en fazla 10 bağlantı** sırayla senkronize edilir. Her bağlantı için sayfa bütçesi 20 istek.
 Günde bir kez FX kurları yenilenir.
 
-**Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir. İstek içinde çalışır, sonuç flash mesajla döner.
+**Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir. Arka planda çalışır (`waitUntil`); istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir. Anahtar yenileme de aynı yolu kullanır.
 
 **Dashboard:** Yalnızca D1'den okur → tipik yanıt < 150 ms.
 
@@ -141,7 +141,7 @@ Kaynak: [`migrations/0001_init.sql`](migrations/0001_init.sql). Özet:
 
 | Tablo | Anahtar | Amaç |
 |-------|---------|------|
-| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency` |
+| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency`, `currency_source` (`default` / `inferred` / `chosen`, migration 0002) |
 | `sessions` | `id` = sha256(token) | oturumlar; token'ın kendisi saklanmaz |
 | `login_attempts` | `key` = sha256(email\|ip) | giriş deneme sınırı |
 | `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor |
@@ -240,7 +240,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 3. **Sistem font yığını**; sayılarda `tabular-nums`. Harici font isteği yok.
 4. Sağlayıcılar küçük renkli nokta ile ayrılır: Stripe `#635BFF`, Lemon Squeezy `#FFC233`, RevenueCat `#F2545B`, Demo nötr.
 5. Açık/koyu tema `prefers-color-scheme` ile otomatik (daisyUI özel temalar `hoomuch` / `hoomuch-dark`).
-6. **Sıfır istemci JS hedefi:** formlar Post/Redirect/Get, flash mesajlar çerezle.
+6. **Sıfır istemci JS hedefi:** formlar Post/Redirect/Get, flash mesajlar çerezle. Tek istisna isteğe bağlı `/app.js` (≈1 KB, aynı köken, CSP uyumlu): gönderilen formun butonunda spinner ve çift gönderim engeli. Olmasa da her şey çalışır.
 7. **Grafikler sunucuda SVG** olarak çizilir (kütüphane yok); altında `<details>` içinde veri tablosu.
 8. İçerik genişliği ~960px. Mobilde tek sütun.
 9. Arayüz dili İngilizce (v1); metinler kısa ve sakin ("Connected.", "Last synced 4 min ago").
@@ -256,7 +256,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
 | `/connections/new` | Sağlayıcı seçimi (4 seçenek) |
 | `/connections/new?provider=…` | Dinamik form (`ProviderMeta.fields`), anahtar oluşturma adımları, gerekli izinler, uyarı |
-| `/connections/:id` | Detay: durum, son hata, son snapshot'lar, son çalıştırmalar; yeniden adlandır, anahtar yenile, Sync now, sil (onay kutusu ile) |
+| `/connections/:id` | Detay: durum, son hata, son snapshot'lar, katlanmış senkronizasyon geçmişi. Birincil eylem Sync now; son senkronizasyon hatalıysa "Replace key". Yeniden adlandır, anahtar yenile ve sil (onay kutusu ile) tek bir "Manage" bölümünde, gerekmedikçe kapalı. Demo bağlantı başlıktan tek tıkla kaldırılır |
 | `/transactions?provider=&page=` | Birleşik işlem tablosu |
 | `/settings` | Para birimi, parola değiştirme, hesabı silme (onay kutusu + parola) |
 | `/healthz` | `{"ok":true}` |

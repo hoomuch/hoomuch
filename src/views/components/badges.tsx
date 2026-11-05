@@ -31,12 +31,12 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   error: 'Error',
 };
 
-const PILL = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs leading-4 font-semibold whitespace-nowrap';
+const PILL = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-caption font-semibold whitespace-nowrap';
 
 const STATUS_CLASS: Record<ConnectionStatus, string> = {
   ok: 'border-base-300 text-base-content',
   syncing: 'border-base-300 text-base-content',
-  pending: 'border-base-300 text-base-content/70',
+  pending: 'border-base-300 text-ink-2',
   error: 'border-error/40 text-error',
 };
 

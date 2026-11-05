@@ -8,6 +8,7 @@ import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { isProviderId, PROVIDER_IDS, type ProviderId } from '../providers/types';
 import { TransactionsPage } from '../views/pages/transactions';
+import { rememberedQuery } from './prefs';
 import { chrome, parsePage } from './util';
 
 /** Filters for the providers the user actually has (plus the active one), in registry order. */
@@ -20,8 +21,9 @@ export function filterProviders(connections: ConnectionSummary[], active: Provid
 export function registerTransactionRoutes(app: Hono<AppEnv>): void {
   app.get('/transactions', requireUser, async (c) => {
     const user = currentUser(c);
-    const p = c.req.query('provider');
-    const provider = isProviderId(p) ? p : null; // junk is ignored, not an error
+    // ?provider= (an id, or "all") wins and is remembered; junk is ignored, not an error.
+    const p = rememberedQuery(c, 'provider', 'hm_provider', (v) => v === 'all' || isProviderId(v));
+    const provider = p !== undefined && isProviderId(p) ? p : null;
     const page = parsePage(c.req.query('page'));
 
     const [txns, connections] = await Promise.all([

@@ -78,7 +78,8 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
       );
     }
     await startSession(c, result.userId);
-    return redirectWithFlash(c, safeNext(next), 'success', 'Welcome to hoomuch.');
+    // No flash: the empty dashboard is the welcome (design/system.md §6).
+    return c.redirect(safeNext(next), 303);
   });
 
   // ----- log in -----

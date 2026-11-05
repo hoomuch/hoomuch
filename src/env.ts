@@ -27,6 +27,11 @@ export type FlashType = 'success' | 'error' | 'info';
 export interface Flash {
   type: FlashType;
   message: string;
+  /**
+   * An Undo for what just happened, e.g. "Add it back" after removing demo data: a button that
+   * POSTs to `action` (a same-origin path). Offered instead of asking "Are you sure?" first.
+   */
+  undo?: { label: string; action: string };
 }
 
 export type AppEnv = {

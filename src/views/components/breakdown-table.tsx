@@ -2,7 +2,8 @@
  * BreakdownTable: per-connection MRR, share, subscriptions, trials, revenue in the window.
  * Owner: Experience (design). CONTRACT: props are fixed.
  *
- * Figures are right-aligned tabular numbers. Share gets a thin neutral bar drawn as an SVG
+ * Figures are right-aligned tabular numbers, in whole units like the rest of the dashboard.
+ * Share gets a thin neutral bar drawn as an SVG
  * <rect width="NN%"> (an attribute, not style="", so it passes the CSP); the provider dot
  * carries identity, the bar only magnitude.
  */
@@ -26,7 +27,7 @@ function ShareBar(props: { pct: number }) {
   return (
     <svg width="48" height="4" viewBox="0 0 48 4" aria-hidden="true" class="hidden shrink-0 sm:block">
       <rect width="48" height="4" rx="2" class="fill-base-300" />
-      {w > 0 ? <rect width={`${w.toFixed(1)}%`} height="4" rx="2" class="fill-base-content/60" /> : null}
+      {w > 0 ? <rect width={`${w.toFixed(1)}%`} height="4" rx="2" class="fill-ink-3" /> : null}
     </svg>
   );
 }
@@ -63,7 +64,7 @@ export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; 
                   {r.testMode ? <TestModeBadge /> : null}
                 </span>
               </th>
-              <td class={NUM}>{formatMoney(r.mrr, props.currency)}</td>
+              <td class={NUM}>{formatMoney(r.mrr, props.currency, { whole: true })}</td>
               <td class={NUM}>
                 {/* Label first in the DOM so the row's text baseline comes from it; reversed visually. */}
                 <span class="inline-flex flex-row-reverse items-center gap-2.5">
@@ -73,7 +74,7 @@ export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; 
               </td>
               <td class={NUM}>{formatNumber(r.activeSubscriptions)}</td>
               <td class={NUM}>{r.activeTrials === null ? <NotAvailable /> : formatNumber(r.activeTrials)}</td>
-              <td class={NUM}>{r.revenue === null ? <NotAvailable /> : formatMoney(r.revenue, props.currency)}</td>
+              <td class={NUM}>{r.revenue === null ? <NotAvailable /> : formatMoney(r.revenue, props.currency, { whole: true })}</td>
             </tr>
           ))}
         </tbody>
