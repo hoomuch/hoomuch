@@ -31,6 +31,85 @@ npm run check                           # typecheck + tests + CSS build
 
 It must pass.
 
+## Commit messages
+
+Commit messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/).
+Pull request titles follow the same format, because a squash merge turns the title into the commit
+message.
+
+```text
+<type>[(<scope>)][!]: <description>
+
+[body]
+
+[footers]
+```
+
+**Type.** One of these:
+
+| Type       | Use it for                                                                       |
+| ---------- | -------------------------------------------------------------------------------- |
+| `feat`     | something new people can see or do: a provider, a page, a metric, a setting      |
+| `fix`      | a bug fix: wrong numbers, a broken page, a sync that fails                       |
+| `perf`     | faster or lighter, with no change in behaviour                                   |
+| `refactor` | a code change that neither fixes a bug nor adds a feature                        |
+| `test`     | tests and fixtures only                                                          |
+| `docs`     | README, SPEC, CONTRIBUTING and code comments only                                |
+| `style`    | formatting only (whitespace, import order). A visual change to the UI is `feat` or `fix` |
+| `build`    | the client and CSS builds, `wrangler.jsonc`, npm dependencies                    |
+| `ci`       | CI configuration                                                                 |
+| `chore`    | anything else that leaves `src` and `test` alone, such as repo tooling           |
+| `revert`   | undoing an earlier commit                                                        |
+
+**Scope** (optional). A lowercase noun naming the area: a provider id (`stripe`, `paddle`,
+`lemonsqueezy`, `revenuecat`, …) or one of `sync`, `dashboard`, `connections`, `transactions`,
+`settings`, `auth`, `db`, `ui`, `landing`, `security`, `deps`. Leave it out when a change cuts across
+the app.
+
+**Description.** In the imperative (`add`, not `added` or `adds`), starting lowercase unless it starts
+with a name, with no full stop at the end. The whole first line fits in 72 characters.
+
+**Body** (optional). One blank line after the first line. Say why the change was made, and anything
+a reviewer can't see in the diff.
+
+**Footers** (optional). One blank line after the body, one `Token: value` per line, such as
+`Refs: #123` or `Co-authored-by: Name <email>`.
+
+**Breaking changes.** A change is breaking when someone running their own instance has to do
+something by hand when they upgrade: a new or renamed binding or secret, a migration that needs a
+manual step, a removed route or setting. Put `!` before the colon, and say what to do in a
+`BREAKING CHANGE:` footer, in capitals.
+
+Examples, the first three rewritten from this repository's history:
+
+```text
+feat(dashboard): show what happened on any day in a calendar
+```
+
+```text
+build(deps): update recharts and wrangler to their latest releases
+```
+
+```text
+build: write the client bundle in place instead of deleting public/client
+
+Several `wrangler dev` servers can build at once. When one deleted
+public/client, another kept answering 404 for /client/entry.js until it
+was restarted.
+```
+
+```text
+feat(sync)!: read the sync schedule from wrangler.jsonc
+
+BREAKING CHANGE: move your schedule into triggers.crons in wrangler.jsonc
+before you deploy.
+```
+
+**Checked on every commit.** `npm install` points git at `.githooks/` (the `prepare` script), and
+`.githooks/commit-msg` turns down a message that breaks these rules and says why. Merge commits,
+git's own `Revert "…"` messages and `fixup!`, `squash!` and `amend!` commits pass through. If you
+cloned before the hook existed, run `npm install` once.
+
 ## Ground rules
 
 These keep the product what it is. Pull requests that break them will be asked to change.
