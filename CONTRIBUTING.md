@@ -7,12 +7,18 @@ Thanks for helping. Bug reports, fixes and new provider adapters are all welcome
 - **Small fixes:** open a pull request directly.
 - **New features, new providers or new npm dependencies:** open an issue first so we can agree on the
   approach before you write the code. The project keeps its dependency list very short on purpose.
+  The issue forms ask what's needed; a provider request asks what its API offers.
 - **Security issues:** don't open a public issue. Report them privately through GitHub's
-  **Security → Report a vulnerability** form on this repository.
+  **Security → Report a vulnerability** form on this repository, as [SECURITY.md](SECURITY.md)
+  describes.
+
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Local setup
 
-Requirements: Node 20+.
+Requirements: Node 24.14 or later. The tests run D1 on `node:sqlite` and check money formatting
+against Intl's ICU data, and older releases, Node 22 included, fail some of them. `.nvmrc` has the
+version CI and Cloudflare's builds use, so `nvm use` or `fnm use` picks it.
 
 ```bash
 npm install
@@ -23,13 +29,57 @@ npm run dev                             # http://localhost:8787
 
 Sign up locally, then click **Try demo data** to get a filled dashboard without a real API key.
 
+The cron sync doesn't fire on its own in local dev. To run it by hand:
+
+```bash
+npx wrangler dev --test-scheduled
+curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
+```
+
 Before opening a pull request, run:
 
 ```bash
-npm run check                           # typecheck + tests + CSS build
+npm run check                           # typecheck + tests + build
 ```
 
-It must pass.
+It must pass. CI runs the same check on every pull request, on Node 24.14 and on the `.nvmrc`
+version, and checks that the pull request title is a Conventional Commit (see *Commit messages*).
+
+### Scripts
+
+| Script | What it does |
+|--------|--------------|
+| `npm run dev` | `wrangler dev`. Rebuilds the CSS and the browser bundle on every reload |
+| `npm run check` | Typecheck, tests and build |
+| `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
+| `npm run build` | `css` + `js` |
+| `npm run css` | Builds `public/app.css` with the Tailwind CLI |
+| `npm run js` | Builds the browser bundle into `public/client/` with esbuild (code-split per page) |
+| `npm run deploy` | Applies remote D1 migrations, then `wrangler deploy` |
+| `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
+| `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
+| `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
+
+### Project layout
+
+```text
+src/
+  index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
+  lib/               crypto, auth, money, time, flash, rate limits, bot checks
+  db/queries.ts      users, sessions, connections
+  providers/         adapter contract, registry, one adapter per provider, Demo
+  sync/              sync engine, aggregation, FX (frankfurter.dev), repository
+  data/              read models for the dashboard, transactions and connection detail
+  services/          connection use-cases: create, rotate key, sync now, delete
+  routes/            HTTP handlers (Post/Redirect/Get); pages render with views/render.tsx
+  views/             layout, pages, hoomuch components, charts (React)
+  components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
+  client/entry.tsx   browser entry: hydrates the page the server rendered
+  styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
+migrations/          D1 schema
+scripts/             client build, the commit-msg check, the domain list refresh
+test/                Vitest suites and API fixtures
+```
 
 ## Commit messages
 
@@ -108,7 +158,8 @@ before you deploy.
 **Checked on every commit.** `npm install` points git at `.githooks/` (the `prepare` script), and
 `.githooks/commit-msg` turns down a message that breaks these rules and says why. Merge commits,
 git's own `Revert "…"` messages and `fixup!`, `squash!` and `amend!` commits pass through. If you
-cloned before the hook existed, run `npm install` once.
+cloned before the hook existed, run `npm install` once. The *PR title* check in CI applies the same
+rules to the pull request title.
 
 ## Ground rules
 

@@ -1,45 +1,52 @@
-# hoomuch
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/mascot/perched-dark.png">
+    <img src="public/mascot/perched.png" alt="The hoomuch owl" width="96" height="96">
+  </picture>
+</p>
 
-All your subscription revenue under one roof. Connect **Stripe**, **Paddle**, **Lemon Squeezy**, **Polar**,
-**RevenueCat**, **Chargebee**, **Dodo Payments**, **Gumroad**, **Adapty** and **Superwall**, and see total MRR,
-ARR, active subscriptions, trials and revenue, converted into one currency and broken down by connection.
-hoomuch only ever reads, and asks for read-only keys wherever the provider offers them.
+<h1 align="center">hoomuch</h1>
 
-- One Cloudflare Worker: Hono routes, React 19 pages rendered on the server and hydrated in the
-  browser, D1, Cron Triggers.
-- UI: [coss ui](https://coss.com/ui) on Base UI, shadcn Charts on Recharts, Lucide icons, Geist Sans and
-  Geist Mono, Tailwind CSS 4, Motion where it helps.
-- Forms are plain POST forms (Post/Redirect/Get), so every action works before the page hydrates.
-  Scripts are same-origin only (CSP `script-src 'self'`). The one exception is opt-in: with Turnstile
-  on, the log-in and sign-up pages also load Cloudflare's challenge script.
-- Provider keys are encrypted at rest (AES-256-GCM). No end-customer personal data is stored.
-- Open source under [AGPL-3.0](LICENSE). Run it on your own Cloudflare account, so your keys never leave it.
+<p align="center">
+  All your subscription revenue under one roof. Self-hosted, read-only, open source.
+</p>
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/tahabozdemir/hoomuch)
+<p align="center">
+  <a href="https://github.com/tahabozdemir/hoomuch/actions/workflows/ci.yml"><img src="https://github.com/tahabozdemir/hoomuch/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+</p>
 
-The product and technical spec (in Turkish) is in [SPEC.md](SPEC.md).
+<p align="center">
+  <a href="#deploy-to-cloudflare">Deploy</a> ·
+  <a href="#connecting-providers">Providers</a> ·
+  <a href="#known-limitations">Known limitations</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="SPEC.md">Spec</a>
+</p>
 
-## Run locally
+hoomuch connects to the billing providers you already use and puts the numbers on one dashboard:
+total MRR and ARR, active subscriptions, trials and revenue, converted into one currency and broken
+down by connection.
 
-Requirements: Node 20+.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dashboard-dark.png">
+  <img src=".github/assets/dashboard-light.png" alt="The hoomuch dashboard with demo data: MRR of $5,168 with a 30-day chart, active subscriptions, trials, revenue, and a breakdown by connection">
+</picture>
 
-```bash
-npm install
-cp .dev.vars.example .dev.vars          # then set ENCRYPTION_KEY, e.g. openssl rand -base64 32
-npm run db:migrate:local
-npm run dev                             # http://localhost:8787
-```
-
-Sign up, then click **Try demo data** to see a filled dashboard without any API key.
-
-The cron sync doesn't fire automatically in local dev. To trigger it by hand:
-
-```bash
-npx wrangler dev --test-scheduled
-curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
-```
+- **Ten providers.** Stripe, Paddle, Lemon Squeezy, Polar, RevenueCat, Chargebee, Dodo Payments,
+  Gumroad, Adapty and Superwall.
+- **Read-only.** hoomuch never writes to a provider, and asks for read-only keys wherever the provider
+  offers them.
+- **Your keys stay on your account.** It runs on your own Cloudflare account, and provider keys are
+  encrypted at rest (AES-256-GCM).
+- **No customer personal data.** It keeps amounts, currencies, timestamps, IDs and plan names, never
+  your customers' emails, names or addresses.
+- **Try it without a key.** After signing up, **Try demo data** fills the dashboard with a sample
+  business.
 
 ## Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/tahabozdemir/hoomuch)
 
 ### One click
 
@@ -53,34 +60,39 @@ Every deploy applies pending D1 migrations first, and every push to your copy re
 npx wrangler login
 npx wrangler d1 create hoomuch       # copy the printed database_id into wrangler.jsonc
 openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
-npm run deploy                          # applies D1 migrations, then deploys
+npm run deploy                       # applies D1 migrations, then deploys
 ```
 
 ### After deploying
 
 - **Back up `ENCRYPTION_KEY`.** If it's lost, every stored provider key becomes unreadable and each
   connection has to be re-keyed. Never rotate it in place.
-- **Single-user / self-hosted:** create your account, then set `"ALLOW_SIGNUP": "false"` in
-  `wrangler.jsonc` and deploy again (with the button, commit that change to your copy of the repo).
-- **Updating an existing install:** deploys apply pending D1 migrations first. Some migrations rebuild
-  a table (`0003` does, to accept new provider ids), so before updating, note a restore point with
-  `npx wrangler d1 time-travel info hoomuch`. If anything looks wrong afterwards,
-  `npx wrangler d1 time-travel restore hoomuch --timestamp=<that time>` puts the database back.
-  Revenue from merchant-of-record providers now leaves out sales tax. Lemon Squeezy history synced
-  before this change and older than about 30 days keeps tax in; delete and re-add the connection to
-  recount it.
-- **Plan:** password hashing (PBKDF2, 100k iterations) and syncs can exceed the Free plan's 10 ms CPU
-  limit. Workers Paid is recommended for production.
+- **Close sign-ups.** Create your account, then set `"ALLOW_SIGNUP": "false"` in `wrangler.jsonc` and
+  deploy again (with the button, commit that change to your copy of the repo).
+- **Use Workers Paid for production.** Password hashing (PBKDF2, 100k iterations) and syncs can exceed
+  the Free plan's 10 ms CPU limit.
+
+## Configuration
+
+| Name | Where | Default | What it does |
+|------|-------|---------|--------------|
+| `ENCRYPTION_KEY` | Secret (`wrangler secret put`) | none, required | 32 random bytes, base64. Encrypts provider keys at rest. |
+| `ALLOW_SIGNUP` | `vars` in `wrangler.jsonc` | `"true"` | Set to `"false"` once your own account exists, so nobody else can sign up. |
+| `SYNC_INTERVAL_MINUTES` | `vars` in `wrangler.jsonc` | `"60"` | How often each connection syncs, rounded up to a multiple of the 30-minute cron. |
+| `TURNSTILE_SITE_KEY` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. A [Turnstile](https://developers.cloudflare.com/turnstile/) widget's site key. With the secret below, log in and sign up require the Turnstile check. |
+| `TURNSTILE_SECRET_KEY` | Secret (`wrangler secret put`) | none | Optional. The same widget's secret key. |
+| `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
+
+The cron schedule itself is `triggers.crons` in `wrangler.jsonc`.
 
 ### Protecting a public instance
 
 If you keep sign-ups open, hoomuch defends itself in layers. Each one is cheap, and each catches what
 the one before lets through:
 
-- **Request limits** (`RL_REQUESTS`, `RL_AUTH` under `ratelimits` in `wrangler.jsonc`): Cloudflare's
-  Rate Limiting binding turns a flood away per network (IPv6 by /64) before the Worker touches D1.
-  Every request counts against 300 a minute; log-in and sign-up submissions against 10 a minute.
-  `namespace_id` only has to be unique within your Cloudflare account.
+- **Request limits** (`RL_REQUESTS`, `RL_AUTH`): Cloudflare's Rate Limiting binding turns a flood
+  away per network (IPv6 by /64) before the Worker touches D1. Every request counts against 300 a
+  minute; log-in and sign-up submissions against 10 a minute.
 - **Exact limits in D1**, each counted before the password hash: log-in attempts per email and
   network, per account, and per network across all emails (30 every 15 minutes, which stops
   credential stuffing), plus 5 new accounts per network a day.
@@ -91,10 +103,10 @@ the one before lets through:
 - **A honeypot field** on both forms that people never see, so bots that fill every input give
   themselves away. It needs no JavaScript.
 - **Turnstile**, if you set both keys. Create a widget in the Cloudflare dashboard (Managed mode,
-  your hostname), put its site key in `TURNSTILE_SITE_KEY` under `vars` in `wrangler.jsonc`, and run
-  `wrangler secret put TURNSTILE_SECRET_KEY`. Log in and sign up then need JavaScript, and only those
-  two pages allow `challenges.cloudflare.com` in their CSP. For local testing, Cloudflare's test pair
-  (`1x00000000000000000000AA` / `1x0000000000000000000000000000000AA`) passes on any host.
+  your hostname), put the site key in `vars` and `wrangler secret put TURNSTILE_SECRET_KEY`. Log in and
+  sign up then need JavaScript, and only those two pages allow `challenges.cloudflare.com` in their
+  CSP. For local testing, Cloudflare's test pair (`1x00000000000000000000AA` /
+  `1x0000000000000000000000000000000AA`) passes on any host.
 
 Cloudflare blocks network-level DDoS on its own. Its WAF and Bot Fight Mode only see traffic on your
 own domain, though, not on `*.workers.dev`. For a public instance, add a custom domain and set
@@ -115,75 +127,102 @@ own domain, though, not on `*.workers.dev`. For a public instance, add a custom 
 | Adapty | Secret API key `secret_live_…` (can't be scoped) | — |
 | Superwall | Organization API key + Organization ID | `charts:read`; `data:read` is optional and enables daily revenue, refunds and trials |
 
-Keys are checked live before they're saved. Syncs run every 30 minutes, with each connection synced at
-most once per `SYNC_INTERVAL_MINUTES` (default 60). You can also press **Sync now**. The first sync
-backfills 90 days of revenue.
+Keys are checked live before they're saved. The first sync backfills 90 days of revenue. After that,
+each connection syncs every `SYNC_INTERVAL_MINUTES` (an hour by default), and **Sync now** runs one
+straight away.
 
-## Scripts
+## Updating
 
-| Script | What it does |
-|--------|--------------|
-| `npm run dev` | `wrangler dev`. Rebuilds the CSS and the browser bundle on every reload |
-| `npm run check` | Typecheck, tests and build |
-| `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
-| `npm run build` | `css` + `js` |
-| `npm run css` | Builds `public/app.css` with the Tailwind CLI |
-| `npm run js` | Builds the browser bundle into `public/client/` with esbuild (code-split per page) |
-| `npm run deploy` | Applies remote D1 migrations, then `wrangler deploy` |
-| `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
-| `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
-| `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
+Pull the latest changes from this repository into your copy and deploy (with the button, pushing to
+your copy redeploys it). Every deploy applies pending D1 migrations first. Some migrations rebuild a
+table (`0003` does, to accept new provider ids), so note a restore point before you update:
 
-## Layout
-
-```
-src/
-  index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
-  lib/               crypto, auth, money, time, flash, rate limits, bot checks
-  db/queries.ts      users, sessions, connections
-  providers/         adapter contract, registry, one adapter per provider, Demo
-  sync/              sync engine, aggregation, FX (frankfurter.dev), repository
-  data/              read models for the dashboard, transactions and connection detail
-  services/          connection use-cases: create, rotate key, sync now, delete
-  routes/            HTTP handlers (Post/Redirect/Get); pages render with views/render.tsx
-  views/             layout, pages, hoomuch components, charts (React)
-  components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
-  client/entry.tsx   browser entry: hydrates the page the server rendered
-  styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
-migrations/          D1 schema
-test/                Vitest suites and API fixtures
+```bash
+npx wrangler d1 time-travel info hoomuch
 ```
 
-## Known limitations (v1)
+If anything looks wrong afterwards, put the database back:
 
-Each provider's section in [SPEC.md](SPEC.md) §6 lists what was checked against its docs and what wasn't.
-The ones you'd notice:
+```bash
+npx wrangler d1 time-travel restore hoomuch --timestamp=<that time>
+```
 
-- Stripe: customer-level discounts aren't applied, and with Stripe Tax, tax-inclusive prices stay
+Changes that affect data you've already synced:
+
+- **Sales tax.** Revenue from merchant-of-record providers now leaves out sales tax. Lemon Squeezy
+  history synced before this change and older than about 30 days keeps tax in; delete and re-add the
+  connection to recount it.
+- **Currency units.** Amounts follow ISO 4217 minor units, so HUF, IDR, COP and PKR count in
+  hundredths. They used to show 100× too large; rows already stored now read correctly without a
+  resync. Stripe sends ISK, UGX and MGA in its own units, which are now converted on sync. Rows synced
+  before that read 100× off (ISK and UGX too large, MGA too small) until the connection is removed and
+  added again.
+
+## Known limitations
+
+Each provider's section in [SPEC.md](SPEC.md) §6 lists what was checked against its docs and what
+wasn't. The ones you'd notice:
+
+- **Stripe:** customer-level discounts aren't applied, and with Stripe Tax, tax-inclusive prices stay
   tax-inclusive in MRR.
-- Lemon Squeezy: refunds issued more than about 30 days after purchase are missed, and several partial
-  refunds on one order show as one refund.
-- Paddle and Polar: MRR is the provider's own figure, in one currency (Paddle: your balance currency;
-  Polar: USD). Polar's version pin (`2026-10`) has to be updated before April 2027.
-- RevenueCat, Adapty, Superwall: daily history is in USD only, revenue is the stores' gross (tax and
-  store fees included), and test mode can't be detected.
-- Dodo Payments: revenue comes from the balance ledger, so it's daily totals with no transaction list.
-- Gumroad: MRR is an estimate. The API doesn't say what each subscriber pays, so hoomuch prices them
-  at their latest charge, or the tier's list price when it can't find one. Refunds land on the sale's
-  day, because Gumroad doesn't date them.
-- Creem isn't supported yet: its API has no date filter on transactions and no dated refunds (SPEC §6.9).
-- Past revenue is converted at today's FX rate. Day boundaries are UTC.
+- **Lemon Squeezy:** refunds issued more than about 30 days after purchase are missed, and several
+  partial refunds on one order show as one refund. Its docs don't say which units it uses for
+  currencies without two decimals; hoomuch assumes ISO 4217.
+- **Paddle and Polar:** MRR is the provider's own figure, in one currency (Paddle: your balance
+  currency; Polar: USD). Polar's version pin (`2026-10`) has to be updated before April 2027.
+- **RevenueCat, Adapty, Superwall:** daily history is in USD only, revenue is the stores' gross (tax
+  and store fees included), and test mode can't be detected.
+- **Dodo Payments:** revenue comes from the balance ledger, so it's daily totals with no transaction
+  list.
+- **Gumroad:** MRR is an estimate. The API doesn't say what each subscriber pays, so hoomuch prices
+  them at their latest charge, or the tier's list price when it can't find one. Refunds land on the
+  sale's day, because Gumroad doesn't date them.
+- **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
+  (SPEC §6.9).
+- **Everywhere:** past revenue is converted at today's FX rate, and day boundaries are UTC.
 - Provider webhooks and Queue-based fan-out are planned for v1.1 (SPEC §12.1).
+
+## How it's built
+
+- One Cloudflare Worker: Hono routes, React 19 pages rendered on the server and hydrated in the
+  browser, D1, Cron Triggers.
+- UI: [coss ui](https://coss.com/ui) on Base UI, shadcn Charts on Recharts, Lucide icons, Geist Sans
+  and Geist Mono, Tailwind CSS 4, Motion where it helps.
+- Forms are plain POST forms (Post/Redirect/Get), so every action works before the page hydrates.
+  Scripts are same-origin only (CSP `script-src 'self'`). The one exception is opt-in: with Turnstile
+  on, the log-in and sign-up pages also load Cloudflare's challenge script.
+- Metric definitions and the full product and technical spec are in [SPEC.md](SPEC.md) (in Turkish).
+
+## Development
+
+Requirements: Node 24.14 or later (`.nvmrc` has the version CI and Cloudflare's builds use).
+
+```bash
+npm install
+cp .dev.vars.example .dev.vars          # then set ENCRYPTION_KEY, e.g. openssl rand -base64 32
+npm run db:migrate:local
+npm run dev                             # http://localhost:8787
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rest: running a sync by hand, the npm scripts, the project
+layout, the ground rules for pull requests and how to add a provider.
+
+## Security
+
+Please don't open a public issue for a vulnerability. Report it privately through GitHub's
+**Security → Report a vulnerability** form on this repository. [SECURITY.md](SECURITY.md) says
+what's in scope and what happens next.
 
 ## Contributing
 
-Bug reports, fixes and new provider adapters (Paddle, Polar, Gumroad, …) are welcome. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md).
+Bug reports, fixes and new provider adapters are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); new providers and new dependencies begin with an issue. Everyone
+taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
 hoomuch is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
 
-You can use, self-host and modify it freely. If you run a **modified** version as a service other people
-use, the AGPL requires you to offer those users your modified source code. The footer of every page
-links to the source; point it at your fork (`SOURCE_URL` in `src/views/layout.tsx`).
+You can use, self-host and modify it freely. If you run a **modified** version as a service other
+people use, the AGPL requires you to offer those users your modified source code. The footer of every
+page links to the source; point it at your fork (`SOURCE_URL` in `src/views/layout.tsx`).
