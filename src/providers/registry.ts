@@ -40,9 +40,18 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Create the key and paste it here.',
     ],
     keyUrl: 'https://dashboard.stripe.com/apikeys/create',
-    permissions: ['Subscriptions: Read', 'Prices: Read', 'Coupons: Read', 'Balance: Read'],
+    permissions: [
+      'Subscriptions: Read',
+      'Prices: Read',
+      'Balance: Read',
+      'Coupons: Read — optional, takes discounts off MRR',
+      'Products: Read — optional, splits MRR by product',
+    ],
     revenueHistory: 'transactions',
+    // Charges carry no product name: reaching one means reading invoices, which needs a key that can
+    // read customer data (SPEC §6.1). The product split comes from subscriptions instead (mrrByProduct).
     productNames: false,
+    mrrByProduct: true,
   },
   {
     id: 'paddle',
@@ -81,6 +90,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Paddle API keys usually expire (90 days by default, one year at most), and an expired key can’t be renewed. When this one lapses, hoomuch shows an error on the connection and you can paste a new key there.',
     revenueHistory: 'transactions',
     productNames: true,
+    mrrByProduct: false,
   },
   {
     id: 'lemonsqueezy',
@@ -121,6 +131,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Lemon Squeezy API keys can’t be limited, so this key has full access to your account. hoomuch only reads your stores, subscriptions, prices, discounts, orders and invoices, and stores the key encrypted. Treat it like a password.',
     revenueHistory: 'transactions',
     productNames: true,
+    mrrByProduct: false,
   },
   {
     id: 'polar',
@@ -152,6 +163,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Polar access tokens stop working on their expiration date (the form defaults to 30 days). When this one lapses, hoomuch shows an error on the connection and you can paste a new token there.',
     revenueHistory: 'transactions',
     productNames: true,
+    mrrByProduct: false,
   },
   {
     id: 'revenuecat',
@@ -191,6 +203,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     ],
     revenueHistory: 'daily',
     productNames: false,
+    mrrByProduct: false,
   },
   {
     id: 'chargebee',
@@ -227,6 +240,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     permissions: ['Allow read-only access to transactional data'],
     revenueHistory: 'transactions',
     productNames: false,
+    mrrByProduct: false,
   },
   {
     id: 'dodo',
@@ -255,6 +269,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     permissions: ['Subscriptions: Read', 'Balances: Read'],
     revenueHistory: 'daily',
     productNames: false,
+    mrrByProduct: false,
   },
   {
     id: 'gumroad',
@@ -287,6 +302,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Gumroad access tokens made in Settings can’t be limited, so this token has full access to your account, including refunds. hoomuch only reads your profile name, products, subscribers and sales, and stores the token encrypted. Treat it like a password; deleting the application revokes it.',
     revenueHistory: 'transactions',
     productNames: true,
+    mrrByProduct: false,
   },
   {
     id: 'adapty',
@@ -316,6 +332,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Adapty has no read-only keys: the Secret API key also opens Adapty’s server-side API (profiles, access levels, paywalls). hoomuch only uses it to read analytics, and stores it encrypted.',
     revenueHistory: 'daily',
     productNames: false,
+    mrrByProduct: false,
   },
   {
     id: 'superwall',
@@ -358,6 +375,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'Superwall’s data:read scope can query all of your organization’s analytics data. hoomuch only runs aggregate revenue queries, but treat this key as sensitive and give it no other scopes.',
     revenueHistory: 'daily',
     productNames: false,
+    mrrByProduct: false,
   },
   {
     id: 'demo',
@@ -371,6 +389,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     permissions: [],
     revenueHistory: 'transactions',
     productNames: true,
+    mrrByProduct: false,
   },
 ];
 

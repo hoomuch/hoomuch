@@ -81,6 +81,11 @@ export interface ProviderMeta {
    * can split revenue by product. False for providers that report daily totals only.
    */
   productNames: boolean;
+  /**
+   * Its snapshots can split MRR by product (`MetricsSnapshot.mrrByProduct`), when the key allows
+   * reading product names. The dashboard's "By product" card shows that split.
+   */
+  mrrByProduct: boolean;
 }
 
 // ---------- runtime ----------
@@ -133,6 +138,21 @@ export interface MetricsSnapshot {
   /** Window of `revenuePeriod` in days (30; RevenueCat reports 28). */
   revenuePeriodDays: number | null;
   newCustomers: number | null;
+  /**
+   * `mrr` split by product, for providers whose meta sets `mrrByProduct`. Absent or null when the
+   * provider doesn't split it or couldn't this time (e.g. the key can't read product names).
+   */
+  mrrByProduct?: ProductMrr[] | null;
+}
+
+/** One product's part of a snapshot's MRR. */
+export interface ProductMrr {
+  /** Product or plan name as the provider shows it. Never customer PII. Null if it couldn't be read. */
+  name: string | null;
+  /** Same rules as `MetricsSnapshot.mrr`. Across a snapshot's entries these add up to it. */
+  mrr: MoneyMap;
+  /** Subscriptions counted in `activeSubscriptions` that include this product. */
+  subscriptions: number;
 }
 
 export interface RevenueEvent {

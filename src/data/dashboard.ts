@@ -12,7 +12,7 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { BACKFILL_DAYS } from '../sync/aggregate';
+import { BACKFILL_DAYS, cleanProductMrr } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
 import { toSummary } from './connections';
 import type {
@@ -21,6 +21,8 @@ import type {
   Kpi,
   MrrDay,
   ProductBreakdown,
+  ProductMrrBreakdown,
+  ProductMrrRow,
   ProductRow,
   RangeDays,
   RevenueDay,
@@ -34,6 +36,8 @@ interface SnapRow {
   active_trials: number | null;
   revenue_period?: string | null;
   revenue_period_days?: number | null;
+  /** Latest snapshots only: ProductMrr[] JSON, or null. */
+  mrr_by_product?: string | null;
 }
 
 interface RevRow {
@@ -82,7 +86,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       .bind(user.id, start),
     db
       .prepare(
-        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days FROM snapshots s
+        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
           WHERE c.user_id = ? AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id)`,
       )
@@ -258,6 +262,8 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     cv,
   );
 
+  const productMrr = productMrrBreakdown(latestSnaps, conns, cv);
+
   // Reported through fx.missing; the dashboard says it next to the MRR it leaves out.
   const missing = [...cv.missing].sort();
 
@@ -276,6 +282,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     },
     breakdown,
     products,
+    productMrr,
     revenueSeries,
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, missing },
@@ -361,5 +368,99 @@ export function productBreakdown(
       .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name))
       .map((p) => p.name),
     named: conns.some((c) => getProviderMeta(c.provider).productNames),
+  };
+}
+
+/** The split stored with a snapshot, or null when there is none (or it can't be read). */
+function parseProductMrr(raw: string | null | undefined): ReturnType<typeof cleanProductMrr> {
+  if (!raw) return null;
+  try {
+    return cleanProductMrr(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+/** Below half a minor unit, a remainder is FX rounding, not MRR. */
+const ROUNDING = 0.5;
+
+/**
+ * MRR now by product, from each connection's latest snapshot (the same one the MRR KPI uses). A
+ * connection whose snapshot has no split, and products without a name, go to `unnamed`: each
+ * connection adds its MRR minus its named products, so the whole adds up to the MRR KPI.
+ */
+export function productMrrBreakdown(
+  latest: readonly SnapRow[],
+  conns: readonly ConnectionRow[],
+  cv: FxConverter,
+): ProductMrrBreakdown {
+  const latestBy = new Map(latest.map((s) => [s.connection_id, s]));
+  const products = new Map<string, ProductMrrRow>();
+  const byProvider = new Map<ProviderId, number>();
+  const needsPermission: string[] = [];
+  let unnamed = 0;
+  let total = 0;
+  let split = false;
+
+  for (const conn of conns) {
+    const snap = latestBy.get(conn.id);
+    if (!snap) continue;
+    const meta = getProviderMeta(conn.provider);
+    const connMrr = cv.map(parseMoneyMap(snap.mrr));
+    total += connMrr;
+    const parts = parseProductMrr(snap.mrr_by_product);
+    if (!parts) {
+      unnamed += connMrr;
+      if (connMrr > 0 && meta.mrrByProduct) needsPermission.push(conn.name);
+      else if (connMrr > 0) byProvider.set(conn.provider, (byProvider.get(conn.provider) ?? 0) + connMrr);
+      continue;
+    }
+    split = true;
+    let named = 0;
+    for (const p of parts.products) {
+      if (p.name === null) continue;
+      const v = cv.map(p.mrr);
+      named += v;
+      const key = `${conn.id}\u0000${p.name}`;
+      let row = products.get(key);
+      if (!row) {
+        row = { name: p.name, connectionId: conn.id, connectionName: conn.name, dotClass: meta.dotClass, mrr: 0, subscriptions: 0, sharePct: 0 };
+        products.set(key, row);
+      }
+      row.mrr += v;
+      row.subscriptions += p.subscriptions;
+    }
+    const rest = connMrr - named;
+    if (Math.abs(rest) >= ROUNDING) unnamed += rest;
+  }
+
+  const all = [...products.values()].sort(
+    (a, b) =>
+      b.mrr - a.mrr ||
+      b.subscriptions - a.subscriptions ||
+      a.name.localeCompare(b.name) ||
+      a.connectionName.localeCompare(b.connectionName),
+  );
+  const share = (v: number) => (v > 0 && total > 0 ? Math.round((v / total) * 1000) / 10 : 0);
+  for (const p of all) p.sharePct = share(p.mrr);
+
+  // An 11th row reads better than "1 more product".
+  const shown = all.length <= PRODUCT_ROWS + 1 ? all : all.slice(0, PRODUCT_ROWS);
+  const rest = all.slice(shown.length);
+  const moreMrr = rest.reduce((s, p) => s + p.mrr, 0);
+
+  return {
+    rows: shown,
+    more:
+      rest.length > 0
+        ? { count: rest.length, mrr: moreMrr, subscriptions: rest.reduce((s, p) => s + p.subscriptions, 0), sharePct: share(moreMrr) }
+        : null,
+    unnamed: { mrr: Math.abs(unnamed) < ROUNDING ? 0 : unnamed, sharePct: share(unnamed) },
+    unnamedProviders: [...byProvider.entries()]
+      .map(([id, v]) => ({ name: getProviderMeta(id).name, v }))
+      .sort((a, b) => b.v - a.v || a.name.localeCompare(b.name))
+      .map((p) => p.name),
+    needsPermission,
+    split,
   };
 }

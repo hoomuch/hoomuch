@@ -11,6 +11,7 @@ import type {
   DashboardData,
   MrrDay,
   ProductBreakdown,
+  ProductMrrBreakdown,
   RangeDays,
   RevenueDay,
   TransactionPage,
@@ -166,6 +167,59 @@ function fixtureProducts(breakdown: BreakdownRow[]): ProductBreakdown {
   };
 }
 
+/** Acme Analytics' Stripe products: share of its MRR, and its subscriptions on each (131 in all). */
+const ACME_PLANS = [
+  { name: 'Acme Pro', weight: 0.55, subs: 54 },
+  { name: 'Acme Team', weight: 0.3, subs: 8 },
+  { name: 'Acme Starter', weight: 0.15, subs: 69 },
+] as const;
+
+/**
+ * The MRR split of a fixture breakdown: the Stripe connection with MRR (Acme Analytics) by product,
+ * the rest (RevenueCat and Lemon Squeezy don't split MRR) under "No product name".
+ */
+function fixtureProductMrr(breakdown: BreakdownRow[]): ProductMrrBreakdown {
+  const rows: ProductMrrBreakdown['rows'] = [];
+  const unnamedBy: Array<{ name: string; mrr: number }> = [];
+  const PROVIDER_NAMES: Partial<Record<BreakdownRow['provider'], string>> = { revenuecat: 'RevenueCat', lemonsqueezy: 'Lemon Squeezy' };
+  let unnamed = 0;
+  let total = 0;
+  for (const b of breakdown) {
+    total += b.mrr;
+    if (b.provider !== 'stripe') {
+      unnamed += b.mrr;
+      if (b.mrr > 0) unnamedBy.push({ name: PROVIDER_NAMES[b.provider] ?? b.provider, mrr: b.mrr });
+      continue;
+    }
+    let left = b.mrr;
+    ACME_PLANS.forEach((plan, i) => {
+      const mrr = i === ACME_PLANS.length - 1 ? left : Math.round(b.mrr * plan.weight);
+      left -= mrr;
+      rows.push({ name: plan.name, connectionId: b.id, connectionName: b.name, dotClass: b.dotClass, mrr, subscriptions: plan.subs, sharePct: 0 });
+    });
+  }
+  rows.sort((a, b) => b.mrr - a.mrr);
+  const share = (v: number) => (v > 0 && total > 0 ? Math.round((v / total) * 1000) / 10 : 0);
+  for (const r of rows) r.sharePct = share(r.mrr);
+  return {
+    rows,
+    more: null,
+    unnamed: { mrr: unnamed, sharePct: share(unnamed) },
+    unnamedProviders: unnamedBy.sort((a, b) => b.mrr - a.mrr).map((u) => u.name),
+    needsPermission: [],
+    split: rows.length > 0,
+  };
+}
+
+const NO_PRODUCT_MRR: ProductMrrBreakdown = {
+  rows: [],
+  more: null,
+  unnamed: { mrr: 0, sharePct: 0 },
+  unnamedProviders: [],
+  needsPermission: [],
+  split: false,
+};
+
 const NO_PRODUCTS: ProductBreakdown = {
   rows: [],
   more: null,
@@ -189,6 +243,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       kpis: { mrr: zeroKpi, arr: zeroKpi, activeSubscriptions: zeroKpi, activeTrials: zeroKpi, revenue: zeroKpi },
       breakdown: [],
       products: NO_PRODUCTS,
+      productMrr: NO_PRODUCT_MRR,
       revenueSeries: days.map((day) => ({ day, total: 0, byConnection: {} })),
       mrrSeries: [],
       fx: { asOf: null, missing: [] },
@@ -267,6 +322,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     },
     breakdown,
     products: fixtureProducts(breakdown),
+    productMrr: fixtureProductMrr(breakdown),
     revenueSeries,
     mrrSeries,
     fx: { asOf: '2026-11-04', missing: state === 'warnings' ? ['ARS'] : [] },

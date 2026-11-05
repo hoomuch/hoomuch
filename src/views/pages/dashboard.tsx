@@ -25,7 +25,7 @@ import { CalendarCard } from '../components/calendar-card';
 import { EmptyState } from '../components/empty-state';
 import { FLAT, KpiStat } from '../components/kpi';
 import { Owl, type OwlPose } from '../components/mascot';
-import { ProductTable } from '../components/product-table';
+import { ProductMrrTable, ProductTable } from '../components/product-table';
 import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
 import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
@@ -432,31 +432,67 @@ export function RevenueCard(props: { data: DashboardData; className?: string }) 
 }
 
 /**
- * Revenue by product, the card. Only some providers name what was sold: when none of the user's
- * do, it says so instead of a table that's all "No product name".
+ * By product, the card: MRR now per product from the providers whose snapshots split it (Stripe),
+ * then revenue in the window per product from those that name what was sold. Each part shows only
+ * when there's something to split; a sentence says why the rest isn't. Headings only when both show.
  */
 export function ProductCard(props: { data: DashboardData }) {
   const { data } = props;
-  const { products } = data;
+  const { products, productMrr } = data;
   const notes = revenueNotes(data, 'split by product here');
   const text = 'px-3 text-body text-muted-foreground';
   const names = listNames(products.unnamedProviders);
-  let body: ReactNode;
+
+  let mrr: ReactNode = null;
+  if (productMrr.split) {
+    const empty = productMrr.rows.length === 0 && productMrr.unnamed.mrr === 0;
+    mrr = empty ? <p className={text}>No MRR to split by product.</p> : <ProductMrrTable products={productMrr} currency={data.currency} />;
+  }
+
+  let revenue: ReactNode = null;
   if (!products.named && products.unnamedProviders.length > 0) {
-    body = <p className={text}>Revenue from {names} comes without product names, so it can’t be split by product.</p>;
+    if (mrr) notes.unshift({ tone: 'info', text: `Revenue from ${names} comes without product names, so only MRR is split here.` });
+    else revenue = <p className={text}>Revenue from {names} comes without product names, so it can’t be split by product.</p>;
   } else if (products.rows.length === 0 && products.unnamed.revenue === 0) {
     // With nothing counted at all (28-day totals only), the notes below say why.
     const counted = data.breakdown.some((b) => b.revenue !== null);
-    body = <p className={text}>{counted ? `No sales in the last ${data.rangeDays} days.` : 'No revenue to split by product.'}</p>;
+    revenue = <p className={text}>{counted ? `No sales in the last ${data.rangeDays} days.` : 'No revenue to split by product.'}</p>;
   } else {
-    body = <ProductTable products={products} currency={data.currency} rangeDays={data.rangeDays} />;
+    revenue = <ProductTable products={products} currency={data.currency} rangeDays={data.rangeDays} />;
     if (products.unnamedProviders.length > 0) {
       notes.unshift({ tone: 'info', text: `Revenue from ${names} comes without product names, so it’s under “No product name”.` });
     }
   }
+
+  if (mrr && productMrr.unnamedProviders.length > 0) {
+    notes.push({
+      tone: 'info',
+      text: `MRR from ${listNames(productMrr.unnamedProviders)} isn’t split by product, so it’s under “No product name”.`,
+    });
+  }
+  const waiting = productMrr.needsPermission;
+  if (waiting.length > 0) {
+    notes.push({
+      tone: 'info',
+      text: `${listNames(waiting)} can split MRR by product once ${waiting.length > 1 ? 'their Stripe keys have' : 'its Stripe key has'} Products: Read.`,
+    });
+  }
+
+  const both = Boolean(mrr && revenue);
   return (
     <Card title="By product" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
-      {body}
+      {mrr ? (
+        <div>
+          {both ? <h3 className="px-3 pb-2 font-semibold">MRR now</h3> : null}
+          {mrr}
+        </div>
+      ) : null}
+      {revenue ? (
+        <div className={both ? 'mt-6' : undefined}>
+          {both ? <h3 className="px-3 pb-2 font-semibold">{`Revenue, last ${data.rangeDays} days`}</h3> : null}
+          {revenue}
+        </div>
+      ) : null}
       {notes.length > 0 ? (
         <div className="px-3">
           <NoteList notes={notes} />

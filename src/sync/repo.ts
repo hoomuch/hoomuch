@@ -143,6 +143,7 @@ function snapshotColumns(s: MetricsSnapshot) {
     period: s.revenuePeriod ? JSON.stringify(s.revenuePeriod) : null,
     periodDays: s.revenuePeriodDays,
     newCustomers: s.newCustomers,
+    byProduct: s.mrrByProduct ? JSON.stringify(s.mrrByProduct) : null,
   };
 }
 
@@ -158,15 +159,15 @@ export function upsertSnapshot(
   return db
     .prepare(
       `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, revenue_period,
-                              revenue_period_days, new_customers, captured_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              revenue_period_days, new_customers, mrr_by_product, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(connection_id, day) DO UPDATE SET
          mrr = excluded.mrr, active_subscriptions = excluded.active_subscriptions,
          active_trials = excluded.active_trials, revenue_period = excluded.revenue_period,
          revenue_period_days = excluded.revenue_period_days, new_customers = excluded.new_customers,
-         captured_at = excluded.captured_at`,
+         mrr_by_product = excluded.mrr_by_product, captured_at = excluded.captured_at`,
     )
-    .bind(connectionId, day, c.mrr, c.subs, c.trials, c.period, c.periodDays, c.newCustomers, capturedAt);
+    .bind(connectionId, day, c.mrr, c.subs, c.trials, c.period, c.periodDays, c.newCustomers, c.byProduct, capturedAt);
 }
 
 /** Historical snapshots (demo trend). Never overwrites a day that already has a row. */
@@ -181,10 +182,10 @@ export function insertSnapshotHistory(
     db
       .prepare(
         `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, revenue_period,
-                                revenue_period_days, new_customers, captured_at)
+                                revenue_period_days, new_customers, mrr_by_product, captured_at)
          SELECT ?1, json_extract(value, '$.day'), json_extract(value, '$.mrr'), json_extract(value, '$.subs'),
                 json_extract(value, '$.trials'), json_extract(value, '$.period'), json_extract(value, '$.periodDays'),
-                json_extract(value, '$.newCustomers'), ?2
+                json_extract(value, '$.newCustomers'), json_extract(value, '$.byProduct'), ?2
            FROM json_each(?3) WHERE true
          ON CONFLICT(connection_id, day) DO NOTHING`,
       )

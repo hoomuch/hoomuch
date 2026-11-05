@@ -36,11 +36,17 @@
  *                 subscription made of free trial offers counts each of those items), plus every item of
  *                 an active / past_due subscription whose trial offer is still running. Stripe counts
  *                 trial offers per subscription item.
+ *   By product    each subscription's MRR split over its items' products (`price.product`), after the same
+ *                 discounts and tax, in whole minor units that add up to the subscription's MRR (largest
+ *                 remainder). A subscription counts once under each product it pays for. Names come from
+ *                 the products themselves (Products: Read, optional): without it the split is null and MRR
+ *                 is unchanged. Product and plan names only, never customer data (SPEC N-04).
  *
  * Request plan:
- *   verify        4 requests, limit=1 each: subscriptions, prices, balance_transactions, coupons. A 403 on
- *                 one of the first three names the missing registry permission and fails. A 403 on coupons
- *                 only adds a warning: MRR is then shown before discounts.
+ *   verify        5 requests, limit=1 each: subscriptions, prices, balance_transactions, coupons, products. A
+ *                 403 on one of the first three names the missing registry permission and fails. A 403 on
+ *                 coupons or products only adds a warning: MRR is then shown before discounts, or not split
+ *                 by product.
  *   fetchSnapshot status=active and status=past_due (limit=100, expand[]=data.discounts and
  *                 data.items.data.discounts), then status=trialing (no expansion). Plus cached lookups,
  *                 one per distinct:
@@ -52,6 +58,9 @@
  *                                                           currency_options.<cur>.tiers in another currency
  *                 and /v1/subscription_items pages for a subscription with more items than the embedded list.
  *                 Running out of budget throws BudgetExhaustedError: a partial MRR would be wrong.
+ *                 Then GET /v1/products?ids[]=… (limit=100) per 100 products in the MRR, for their names.
+ *                 That lookup never fails the snapshot: a 403, a spent budget or an upstream error leaves
+ *                 the split null (logged).
  *   fetchRevenue  balance_transactions newest to oldest between a fixed [since, startedAt] window, resumable.
  *
  * Amount units: Stripe's integers match ISO 4217 minor units (hoomuch's `currencyExponent`) except for MGA,
@@ -109,11 +118,15 @@ const PERM_BALANCE = 'Balance: Read';
 // Listed in the registry, but optional: without it MRR degrades to "before discounts" instead of failing
 // the sync (see `CouponResolver`), and verify only warns.
 const PERM_COUPONS = 'Coupons: Read';
+// Optional too: without it the snapshot's MRR isn't split by product (see `productNames`), and verify only warns.
+const PERM_PRODUCTS = 'Products: Read';
 
 export const SECRET_KEY_WARNING =
   'This is a full-access secret key. A restricted key (rk_…) with read access is safer. You can replace the key on this page.';
 export const COUPONS_PERMISSION_WARNING =
   'This key can’t read coupons, so MRR is shown before discounts. Add Coupons: Read to fix it.';
+export const PRODUCTS_PERMISSION_WARNING =
+  'This key can’t read product names, so MRR isn’t split by product. Add Products: Read to fix it.';
 
 // ---------- key handling ----------
 
@@ -277,6 +290,11 @@ interface StripeSubscription {
   automatic_tax?: { enabled: boolean } | null;
   default_tax_rates?: StripeTaxRate[] | null;
   items: { data: StripeSubscriptionItem[]; has_more: boolean };
+}
+
+interface StripeProduct {
+  id: string;
+  name: string;
 }
 
 interface StripeBalanceTransaction {
@@ -705,15 +723,45 @@ async function subscriptionItems(sub: StripeSubscription, env: MrrEnv): Promise<
 }
 
 /**
+ * Whole numbers that add up to `total`, each as close to its share in `parts` as rounding allows
+ * (largest remainder). `total` is the rounded sum of `parts`.
+ */
+export function splitRounded(parts: ReadonlyMap<string, number>, total: number): Map<string, number> {
+  const out = new Map<string, number>();
+  const rest: Array<{ key: string; frac: number }> = [];
+  let left = total;
+  for (const [key, v] of parts) {
+    const whole = Math.floor(v);
+    out.set(key, whole);
+    left -= whole;
+    rest.push({ key, frac: v - whole });
+  }
+  // Biggest remainders first; ties in insertion order (sort is stable).
+  rest.sort((a, b) => b.frac - a.frac);
+  for (let i = 0; left > 0 && rest.length > 0; i = (i + 1) % rest.length, left--) {
+    const k = rest[i]!.key;
+    out.set(k, out.get(k)! + 1);
+  }
+  return out;
+}
+
+interface SubscriptionMrr {
+  /** Rounded minor units. */
+  amount: number;
+  /** `amount` by product ID ('' for a price without one), whole minor units adding up to `amount`. */
+  byProduct: Map<string, number>;
+}
+
+/**
  * Monthly recurring amount of one subscription (rounded minor units): item discounts first, then
- * subscription discounts, then inclusive tax backed out of what's left.
+ * subscription discounts, then inclusive tax backed out of what's left. Also split by product.
  */
 async function subscriptionMrr(
   sub: StripeSubscription,
   items: StripeSubscriptionItem[],
   currency: string,
   env: MrrEnv,
-): Promise<number> {
+): Promise<SubscriptionMrr> {
   const lines: Line[] = [];
   for (const item of items) {
     const line = await itemLine(item, sub, currency, env);
@@ -722,7 +770,51 @@ async function subscriptionMrr(
     lines.push(line);
   }
   await applyDiscounts(lines, sub.discounts, currency, env);
-  return Math.round(lines.reduce((s, l) => s + Math.max(0, l.monthly) / l.taxDivisor, 0));
+  const net = (l: Line) => Math.max(0, l.monthly) / l.taxDivisor;
+  const amount = Math.round(lines.reduce((s, l) => s + net(l), 0));
+  const parts = new Map<string, number>();
+  for (const l of lines) parts.set(l.product ?? '', (parts.get(l.product ?? '') ?? 0) + net(l));
+  return { amount, byProduct: splitRounded(parts, amount) };
+}
+
+/** Product IDs per `GET /v1/products?ids[]=…` request (the list's maximum `limit`). */
+const PRODUCT_IDS_PER_REQUEST = 100;
+
+/**
+ * Names of the products in the MRR, by ID. Null when they can't all be read: the key lacks Products:
+ * Read (a 403), the snapshot's budget is spent, or Stripe fails after its retries. Each is logged and
+ * leaves MRR as it is: the split by product is extra, so it never fails the snapshot. A product the
+ * list doesn't return (or one without a name) is simply missing from the map.
+ */
+async function productNames(ids: readonly string[], ctx: ProviderContext, key: string): Promise<Map<string, string> | null> {
+  const names = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += PRODUCT_IDS_PER_REQUEST) {
+    if (!hasBudget(ctx)) {
+      ctx.log('stripe_product_names_skipped', { reason: 'budget', products: ids.length });
+      return null;
+    }
+    const chunk = ids.slice(i, i + PRODUCT_IDS_PER_REQUEST);
+    let page: StripeList<unknown>;
+    try {
+      page = asList<unknown>(
+        await stripeGet<unknown>(ctx, key, '/products', { 'ids[]': chunk, limit: PRODUCT_IDS_PER_REQUEST }, PERM_PRODUCTS),
+      );
+    } catch (err) {
+      if (!(err instanceof ProviderError)) throw err;
+      ctx.log(err.kind === 'permission' ? 'stripe_product_permission_missing' : 'stripe_product_names_skipped', {
+        reason: err.kind,
+        effect: 'mrr_not_split_by_product',
+      });
+      return null;
+    }
+    for (const raw of page.data) {
+      if (!isObject(raw)) continue;
+      const p = raw as Partial<StripeProduct>;
+      const name = typeof p.name === 'string' ? p.name.trim() : '';
+      if (typeof p.id === 'string' && name) names.set(p.id, name);
+    }
+  }
+  return names;
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
@@ -737,6 +829,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   };
 
   const mrr: MoneyMap = {};
+  const byProduct = new Map<string, { mrr: MoneyMap; subscriptions: number }>();
   let activeSubscriptions = 0;
   let activeTrials = 0;
   for (const status of ['active', 'past_due'] as const) {
@@ -750,11 +843,20 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       const items = await subscriptionItems(sub, env);
       activeTrials += items.filter((i) => inTrialOffer(i, env.now)).length; // trial offers count per item
       const currency = typeof sub.currency === 'string' ? sub.currency.toLowerCase() : '';
-      const amount = currency ? await subscriptionMrr(sub, items, currency, env) : 0;
+      const { amount, byProduct: split } = currency
+        ? await subscriptionMrr(sub, items, currency, env)
+        : { amount: 0, byProduct: new Map<string, number>() };
       // Stripe: "Active subscribers only includes subscribers with positive MRR".
       if (amount > 0) {
         activeSubscriptions += 1;
         addToMoney(mrr, currency, amount);
+        for (const [product, part] of split) {
+          if (part <= 0) continue;
+          const entry = byProduct.get(product) ?? { mrr: {}, subscriptions: 0 };
+          addToMoney(entry.mrr, currency, part);
+          entry.subscriptions += 1;
+          byProduct.set(product, entry);
+        }
       } else {
         env.stats.zeroMrrSubscriptions += 1;
       }
@@ -772,11 +874,20 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   if (unresolvedDiscounts > 0) ctx.log('stripe_discounts_unresolved', { discounts: unresolvedDiscounts });
   if (unpricedItems > 0) ctx.log('stripe_items_unpriced', { items: unpricedItems });
   if (inclusiveTaxUnknown > 0) ctx.log('stripe_inclusive_tax_unknown', { items: inclusiveTaxUnknown });
+  // Names last, so a missing permission or a spent budget can only cost the split, never the MRR.
+  const ids = [...byProduct.keys()].filter((id) => id !== '');
+  const names = ids.length > 0 ? await productNames(ids, ctx, key) : new Map<string, string>();
+  const mrrByProduct =
+    names === null
+      ? null
+      : [...byProduct].map(([id, p]) => ({ name: names.get(id) ?? null, mrr: p.mrr, subscriptions: p.subscriptions }));
+
   ctx.log('stripe_snapshot', {
     subscriptions: activeSubscriptions,
     zeroMrr: zeroMrrSubscriptions,
     trials: activeTrials,
     currencies: Object.keys(mrr),
+    products: mrrByProduct?.length ?? null,
   });
 
   return {
@@ -786,6 +897,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine; Stripe has no cheap trailing total
     revenuePeriodDays: null,
     newCustomers: null,
+    mrrByProduct,
   };
 }
 
@@ -822,8 +934,11 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
  *   transaction), and any type Stripe adds later.
  *
  * `description` is always null. The balance transaction's description is free text (merchant- or
- * integration-set, often containing customer emails), and a product name is several expansions away
- * (source → invoice → lines → price → product) behind permissions we don't hold.
+ * integration-set, often containing customer emails). Since API version 2025-03-31.basil neither a
+ * Charge nor a PaymentIntent points to its invoice: the only way from a payment to its products is an
+ * Invoice Payment lookup, per payment or by date, which needs Invoices: Read and Charges (balance
+ * transaction sources) Read. Both open customer personal data to the key, and a lookup per payment
+ * doesn't fit the revenue budget. Stripe's product split is the snapshot's `mrrByProduct` instead.
  */
 const REVENUE_TYPES: ReadonlySet<string> = new Set([
   'charge',
@@ -944,12 +1059,19 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
     await stripeGet(ctx, key, '/subscriptions', { limit: 1 }, PERM_SUBSCRIPTIONS);
     await stripeGet(ctx, key, '/prices', { limit: 1 }, PERM_PRICES);
     await stripeGet(ctx, key, '/balance_transactions', { limit: 1 }, PERM_BALANCE);
-    // Coupons are optional (SPEC §6.1): without them MRR is shown before discounts, so only warn.
+    // Coupons and products are optional (SPEC §6.1): without them MRR is shown before discounts, or
+    // isn't split by product, so only warn.
     try {
       await stripeGet(ctx, key, '/coupons', { limit: 1 }, PERM_COUPONS);
     } catch (err) {
       if (!(err instanceof ProviderError && err.kind === 'permission')) throw err;
       warnings.push(COUPONS_PERMISSION_WARNING);
+    }
+    try {
+      await stripeGet(ctx, key, '/products', { limit: 1 }, PERM_PRODUCTS);
+    } catch (err) {
+      if (!(err instanceof ProviderError && err.kind === 'permission')) throw err;
+      warnings.push(PRODUCTS_PERMISSION_WARNING);
     }
   } catch (err) {
     if (err instanceof ProviderError && err.kind === 'auth') {

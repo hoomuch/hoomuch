@@ -10,7 +10,7 @@
 
 import { normalizeCurrency, type MoneyMap } from '../lib/money';
 import { DAY, addDays, dayKey, dayStart } from '../lib/time';
-import type { DailyRevenuePoint, MetricsSnapshot, RevenueEvent } from '../providers/types';
+import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent } from '../providers/types';
 
 /**
  * The first sync covers this many UTC days INCLUDING today (SPEC F-07): exactly the dashboard's
@@ -26,6 +26,8 @@ export const MIN_PLAUSIBLE_TIME = Date.UTC(2000, 0, 1);
 export const MAX_FUTURE_SKEW_MS = DAY;
 export const MAX_EXTERNAL_ID_LENGTH = 255;
 export const MAX_DESCRIPTION_LENGTH = 200;
+/** Products kept per snapshot split; MRR beyond them shows as "No product name". */
+export const MAX_SNAPSHOT_PRODUCTS = 500;
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -179,6 +181,36 @@ export function cleanMoneyMap(input: unknown): { map: MoneyMap; dropped: number 
   return { map, dropped };
 }
 
+/** A product or plan name as stored: one line, trimmed, capped; null when there's nothing left. */
+export function cleanProductName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  return v.replace(/\s+/g, ' ').trim().slice(0, MAX_DESCRIPTION_LENGTH) || null;
+}
+
+/**
+ * A snapshot's MRR split by product: entries with a money map and positive MRR, biggest first (minor
+ * units summed across currencies, which is only for the order and the cap), at most MAX_SNAPSHOT_PRODUCTS. Null when the adapter sent none (or not a list). What's dropped stays out of
+ * the split only: the dashboard shows a connection's MRR minus its named products as "No product name".
+ */
+export function cleanProductMrr(input: unknown): { products: ProductMrr[]; dropped: number } | null {
+  if (!Array.isArray(input)) return null;
+  const products: ProductMrr[] = [];
+  let dropped = 0;
+  for (const raw of input) {
+    const mrr = isRecord(raw) ? cleanMoneyMap(raw['mrr']) : null;
+    if (!isRecord(raw) || !mrr || Object.values(mrr.map).every((v) => v <= 0)) {
+      dropped++;
+      continue;
+    }
+    dropped += mrr.dropped;
+    products.push({ name: cleanProductName(raw['name']), mrr: mrr.map, subscriptions: nonNegativeInt(raw['subscriptions']) ?? 0 });
+  }
+  const total = (p: ProductMrr) => Object.values(p.mrr).reduce((s, v) => s + v, 0);
+  products.sort((a, b) => total(b) - total(a) || (a.name ?? '').localeCompare(b.name ?? ''));
+  dropped += Math.max(0, products.length - MAX_SNAPSHOT_PRODUCTS);
+  return { products: products.slice(0, MAX_SNAPSHOT_PRODUCTS), dropped };
+}
+
 /**
  * Normalises a snapshot for storage. Throws when it can't be stored at all (no MRR map,
  * no subscription count): writing a zero there would put a false dip in the MRR trend.
@@ -191,6 +223,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
   if (subs === null) throw new Error('snapshot: activeSubscriptions is not a count');
   const period = input['revenuePeriod'] == null ? null : cleanMoneyMap(input['revenuePeriod']);
   const days = nonNegativeInt(input['revenuePeriodDays']);
+  const byProduct = cleanProductMrr(input['mrrByProduct']);
   return {
     snapshot: {
       mrr: mrr.map,
@@ -199,8 +232,9 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
       revenuePeriod: period ? period.map : null,
       revenuePeriodDays: period && days ? days : null,
       newCustomers: nonNegativeInt(input['newCustomers']),
+      mrrByProduct: byProduct ? byProduct.products : null,
     },
-    dropped: mrr.dropped + (period?.dropped ?? 0),
+    dropped: mrr.dropped + (period?.dropped ?? 0) + (byProduct?.dropped ?? 0),
   };
 }
 

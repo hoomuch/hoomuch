@@ -304,25 +304,58 @@ describe('ProductTable', () => {
 });
 
 describe('ProductCard', () => {
-  it('splits what it can and says where the rest went', async () => {
+  const NO_SPLIT = { rows: [], more: null, unnamed: { mrr: 0, sharePct: 0 }, unnamedProviders: [], needsPermission: [], split: false };
+  const headings = (out: string) => [...out.matchAll(/<h3[^>]*>([^<]*)<\/h3>/g)].map((m) => m[1]);
+
+  it('splits MRR and revenue by product under their own headings, and says where the rest went', async () => {
     const out = await render('product-card', h(ProductCard, { data: fixtureDashboard(30, 'full', FIXTURE_NOW) }));
     expect(out).toContain('>By product<');
-    expect(out).toContain('<table');
+    expect(headings(out)).toEqual(['MRR now', 'Revenue, last 30 days']);
+    expect(tags(out, 'table')).toHaveLength(2);
+    // MRR first: Stripe's products, then the providers that don't split MRR.
+    expect(out.indexOf('MRR by product, highest first')).toBeLessThan(out.indexOf('Revenue by product, highest first'));
+    expect(out).toContain('>Subscriptions<');
+    expect(out).toContain('title="Acme Pro"');
+    expect(out).toContain('MRR from RevenueCat and Lemon Squeezy isn’t split by product, so it’s under “No product name”.');
     expect(out).toContain('Revenue from Stripe and RevenueCat comes without product names, so it’s under “No product name”.');
   });
 
-  it('says why there’s no table when no provider names products', async () => {
+  it('shows only the MRR split when no provider names what was sold', async () => {
     const data = fixtureDashboard(30, 'single', FIXTURE_NOW); // Stripe only
+    const out = await render('product-card-mrr-only', h(ProductCard, { data }));
+    expect(tags(out, 'table')).toHaveLength(1);
+    expect(headings(out)).toEqual([]);
+    expect(out).toContain('MRR by product, highest first');
+    expect(out).not.toContain('No product name<');
+    expect(out).toContain('Revenue from Stripe comes without product names, so only MRR is split here.');
+  });
+
+  it('says why there’s no table when nothing can be split, and how to split Stripe MRR', async () => {
+    const data = fixtureDashboard(30, 'single', FIXTURE_NOW);
+    data.productMrr = { ...NO_SPLIT, unnamed: { mrr: data.kpis.mrr.value, sharePct: 100 }, needsPermission: ['Acme Analytics'] };
     const out = await render('product-card-unnamed', h(ProductCard, { data }));
     expect(out).toContain('Revenue from Stripe comes without product names, so it can’t be split by product.');
+    expect(out).toContain('Acme Analytics can split MRR by product once its Stripe key has Products: Read.');
     expect(out).not.toContain('<table');
+
+    data.productMrr.needsPermission = ['Acme Analytics', 'Acme EU'];
+    expect(await html(h(ProductCard, { data }))).toContain('Acme Analytics and Acme EU can split MRR by product once their Stripe keys have Products: Read.');
   });
 
   it('says so when nothing sold in the window', async () => {
     const data = fixtureDashboard(7, 'full', FIXTURE_NOW);
     data.products = { rows: [], more: null, unnamed: { revenue: 0, sharePct: 0 }, unnamedProviders: [], named: true };
+    data.productMrr = NO_SPLIT;
     const out = await render('product-card-empty', h(ProductCard, { data }));
     expect(out).toContain('No sales in the last 7 days.');
+    expect(out).not.toContain('<table');
+  });
+
+  it('says so when the split has no MRR in it', async () => {
+    const data = fixtureDashboard(30, 'single', FIXTURE_NOW);
+    data.productMrr = { ...NO_SPLIT, split: true };
+    const out = await render('product-card-mrr-empty', h(ProductCard, { data }));
+    expect(out).toContain('No MRR to split by product.');
     expect(out).not.toContain('<table');
   });
 });

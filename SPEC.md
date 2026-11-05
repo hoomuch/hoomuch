@@ -57,7 +57,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-15 | Ayarlar: para birimi, parola değiştirme, hesabı tüm verisiyle silme | P1 |
 | F-16 | Günlük gelir CSV dışa aktarma | P2 |
 | F-17 | Webhook ile gerçek zamanlı güncelleme | v1.1 |
-| F-18 | Ürün bazında gelir kırılımı: seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına). Ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall) ve adsız işlemler "No product name" satırında toplanır; tablo gelir KPI'ına eşittir | P1 |
+| F-18 | Ürün bazında kırılım ("By product" kartı), iki tablo: **MRR** — bağlantının son snapshot'ındaki MRR, ürüne göre (yalnızca Stripe böler; `ProviderMeta.mrrByProduct`); bölmeyen bağlantılar ve adsız ürünler "No product name" satırında, tablo MRR KPI'ına eşittir. **Gelir** — seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına); ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall) ve adsız işlemler "No product name" satırında, tablo gelir KPI'ına eşittir. Bölünecek bir şeyi olmayan tablo gösterilmez; neden gösterilmediği notta söylenir. MRR'ı bölebilecekken bölemeyen (anahtarında Products: Read olmayan) Stripe bağlantıları notta adıyla anılır | P1 |
 
 ### 3.2 Fonksiyonel olmayan ihtiyaçlar
 
@@ -157,7 +157,7 @@ Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kayna�
 | `sessions` | `id` = sha256(token) | oturumlar; token'ın kendisi saklanmaz |
 | `login_attempts` | `key` = sha256(email\|ip) | giriş deneme sınırı |
 | `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor |
-| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`) |
+| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0004): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL |
 | `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok) |
 | `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir; dashboard grafiği buradan okur |
 | `fx_rates` | `day` | USD bazlı günlük kurlar (JSON) |
@@ -210,8 +210,8 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
 
 - **Kimlik:** Restricted key (`rk_live_…`) önerilir; `sk_…` kabul edilir ama uyarı gösterilir. `*_test_*` anahtarlar test modu olarak etiketlenir.
 - **Sürüm:** `Stripe-Version: 2026-10-28.endive` sabitlenir.
-- **Gerekli izinler (read):** Subscriptions, Prices, Coupons, Balance (balance transactions). Coupons izni yoksa MRR indirimsiz hesaplanır ve doğrulamada uyarı gösterilir. Tax Rates izni gerekmez: vergi oranları aboneliğin içinde gelir.
-- **Doğrulama:** `GET /v1/subscriptions`, `/v1/prices`, `/v1/balance_transactions` ve `/v1/coupons` (hepsi `limit=1`). İlk üçünden 403 gelirse eksik izin adıyla hata verilir; coupons'tan 403 gelirse anahtar kabul edilir ve uyarı gösterilir.
+- **Gerekli izinler (read):** Subscriptions, Prices, Balance (balance transactions). İsteğe bağlı: Coupons (yoksa MRR indirimsiz hesaplanır) ve Products (yoksa MRR ürüne göre bölünmez); ikisinde de doğrulamada uyarı gösterilir, senkronizasyon başarısız olmaz. Tax Rates izni gerekmez: vergi oranları aboneliğin içinde gelir.
+- **Doğrulama:** `GET /v1/subscriptions`, `/v1/prices`, `/v1/balance_transactions`, `/v1/coupons` ve `/v1/products` (hepsi `limit=1`; doğrulama bütçesi 5). İlk üçünden 403 gelirse eksik izin adıyla hata verilir; coupons ya da products'tan 403 gelirse anahtar kabul edilir ve uyarı gösterilir.
 - **MRR:** `GET /v1/subscriptions?status=active` ve `status=past_due` (sayfalı, `limit=100`, `expand[]=data.discounts` ve `data.items.data.discounts`).
   Her item: `price.recurring.{interval, interval_count}`, `price.unit_amount` (yoksa `unit_amount_decimal`), `quantity`. `usage_type=metered` olanlar ve deneme teklifi
   süren (`current_trial`) item'lar hariç. Kademeli (tiered) fiyatlar `GET /v1/prices/{id}?expand[]=tiers` ile (çalışma başına önbellek) hesaplanır: `volume`: tüm adet,
@@ -220,6 +220,11 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
   `percent_off`/`amount_off` uygulanır. Vergi hariçtir: item'ın `tax_rates`'i (yoksa aboneliğin `default_tax_rates`'i) içindeki `inclusive` oranlar, indirimlerden sonra
   `tutar / (1 + Σ oran)` ile çıkarılır. Stripe Tax (`automatic_tax`) açıksa oran bilinmez; vergi dahil fiyat olduğu gibi kalır ve loglanır. Müşteri düzeyindeki
   indirimler uygulanmaz (Customers izni müşteri kişisel verisini açar). Para birimi: `subscription.currency`. Sayfa bütçesiyle ~7.000 aktif aboneliğe kadar okunur.
+- **Ürüne göre MRR (`mrrByProduct`):** her aboneliğin MRR'ı, indirim ve vergiden sonra, item'larının ürününe (`price.product`) bölünür;
+  tam minor unit'e en büyük kalan yöntemiyle yuvarlanır, toplamı aboneliğin MRR'ına eşittir. Bir abonelik ödediği her ürünün altında bir kez sayılır;
+  %100 indirimli item'ın ürünü sayılmaz. Adlar abonelikler okunduktan sonra `GET /v1/products?ids[]=…&limit=100` ile (100 ürün başına bir istek,
+  snapshot bütçesinden) okunur. Bu okuma snapshot'ı asla düşürmez: 403 (Products: Read yok), biten bütçe ya da Stripe hatası → bölüm `null`, MRR aynen
+  yazılır ve loglanır. Listede dönmeyen ürün adsız kalır ("No product name"). Yalnızca ürün/plan adı okunur; müşteri verisi yok (N-04).
 - **Aktif abonelik:** MRR'ı 0'dan büyük `active` + `past_due` abonelikler (Stripe'ın tanımı). Ücretsiz plan, %100 indirimli, yalnızca metered ya da yalnızca deneme
   teklifli abonelikler sayılmaz. Stripe müşteri sayar, hoomuch abonelik sayar.
 - **Deneme:** `status=trialing` abonelikler (eski `trial_end` denemesi 1 sayılır; ücretsiz deneme tekliflerinden oluşan abonelikte her teklifli item ayrı sayılır) +
@@ -228,6 +233,10 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
   `refund`/`payment_refund` → refund (negatif). Para birimi: bakiye (settlement) para birimi. Tutar tahsil edildiği gibidir (vergi dahil; §6).
   Kısmi capture'da tam yetkilendirme `charge`, yakalanmayan kısım `refund` (`partial_capture_reversal`) olarak gelir; brüt ve iadeler biraz yüksek, net doğrudur.
   Test clock'a bağlı abonelikler listelenmez.
+  **Ürün adı yok** (`description = null`, `productNames: false`): balance transaction açıklaması serbest metindir (çoğu zaman müşteri e-postası
+  içerir). `2025-03-31.basil`'den beri Charge ve PaymentIntent faturasını göstermez; ödemeden ürüne tek yol Invoice Payment aramasıdır
+  (`/v1/invoice_payments`, ödeme başına ya da tarihe göre). Bu, müşteri kişisel verisini açan Invoices ve Charges (balance transaction sources)
+  okuma izni ister ve ödeme başına bir istek gelir bütçesine (20/senk., 2 gün örtüşme) sığmaz. Stripe'ın ürün kırılımı bu yüzden MRR'dandır.
 - **Tutar birimi** ([currencies](https://docs.stripe.com/currencies#zero-decimal)): Stripe tamsayıları ISO minor unit ile
   aynıdır, üç istisna `fromStripeAmount` ile çevrilir: MGA Stripe'ın sıfır ondalıklı listesinde (ISO 2 → ×100); ISK ve UGX
   "geriye uyumluluk için" iki ondalıklı gönderilir, 5 ISK = `500` (ISO 0 → ÷100). UGX sıfır ondalıklı listede de geçiyor;

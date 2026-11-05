@@ -94,6 +94,43 @@ export interface ProductBreakdown {
   named: boolean;
 }
 
+export interface ProductMrrRow {
+  /** As the provider names it. The same name in two connections is two rows. */
+  name: string;
+  connectionId: string;
+  connectionName: string;
+  /** Literal Tailwind class for the connection's dot. */
+  dotClass: string;
+  /** MRR now (each connection's latest snapshot), in the display currency. */
+  mrr: number;
+  /** Active subscriptions that include the product; one subscription can count under several. */
+  subscriptions: number;
+  /** Share of the MRR KPI, 0–100. */
+  sharePct: number;
+}
+
+/** MRR now by product (SPEC F-18), from the providers whose snapshots split it. Adds up to the MRR KPI. */
+export interface ProductMrrBreakdown {
+  /** Highest MRR first, at most PRODUCT_ROWS (one more rather than a "1 more product" row). */
+  rows: ProductMrrRow[];
+  /** The products after `rows`, added up; null when there are none. */
+  more: { count: number; mrr: number; subscriptions: number; sharePct: number } | null;
+  /** MRR not split by product: connections whose snapshot has no split, and products without a name. */
+  unnamed: { mrr: number; sharePct: number };
+  /**
+   * Providers whose MRR is in `unnamed` because they don't split MRR by product ("Paddle"), biggest
+   * first. Connections that could but didn't are in `needsPermission` instead.
+   */
+  unnamedProviders: string[];
+  /**
+   * Connections (by name) whose provider splits MRR by product but whose latest snapshot didn't, so
+   * their key most likely can't read product names (Stripe: Products: Read). Only those with MRR.
+   */
+  needsPermission: string[];
+  /** At least one connection's latest snapshot split its MRR by product. */
+  split: boolean;
+}
+
 export interface RevenueDay {
   day: string;
   /** Net (gross − refunds) across connections. */
@@ -123,6 +160,7 @@ export interface DashboardData {
   /** Sorted by MRR, descending. */
   breakdown: BreakdownRow[];
   products: ProductBreakdown;
+  productMrr: ProductMrrBreakdown;
   /** Exactly `rangeDays` entries, oldest → newest, zero-filled. */
   revenueSeries: RevenueDay[];
   /** Days in the window that have snapshots, oldest → newest (may be sparse early on). */

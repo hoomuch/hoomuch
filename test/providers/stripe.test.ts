@@ -4,13 +4,24 @@ import { formatMoney } from '../../src/lib/money';
 import {
   COUPONS_PERMISSION_WARNING,
   fromStripeAmount,
+  PRODUCTS_PERMISSION_WARNING,
   SECRET_KEY_WARNING,
+  splitRounded,
   STRIPE_API_VERSION,
   stripeAdapter,
   stripeDigits,
 } from '../../src/providers/stripe';
-import { ProviderError } from '../../src/providers/types';
-import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type Route } from '../fixtures/harness';
+import { ProviderError, type MetricsSnapshot } from '../../src/providers/types';
+import {
+  expectNoSecretsInLogs,
+  fakeFetch,
+  makeCtx,
+  NOW,
+  route,
+  type FakeResponse,
+  type RecordedCall,
+  type Route,
+} from '../fixtures/harness';
 // Verbatim example objects from https://docs.stripe.com/api for Stripe-Version 2026-10-28.endive.
 import subscriptionFx from '../fixtures/stripe/subscription.json';
 import discountFx from '../fixtures/stripe/discount.json';
@@ -18,6 +29,7 @@ import couponFx from '../fixtures/stripe/coupon.json';
 import priceFx from '../fixtures/stripe/price.json';
 import taxRateFx from '../fixtures/stripe/tax_rate.json';
 import balanceTransactionFx from '../fixtures/stripe/balance_transaction.json';
+import productFx from '../fixtures/stripe/product.json';
 import listFx from '../fixtures/stripe/list.json';
 import errorInvalidKeyFx from '../fixtures/stripe/error_invalid_key.json';
 import errorPermissionFx from '../fixtures/stripe/error_permission.json';
@@ -222,6 +234,7 @@ describe('stripe verify', () => {
     route('/v1/prices', { json: list([clone(priceFx)], false, '/v1/prices') }, { query: { limit: '1' } }),
     route('/v1/balance_transactions', { json: list([clone(balanceTransactionFx)], false, '/v1/balance_transactions') }, { query: { limit: '1' } }),
     route('/v1/coupons', { json: list([clone(couponFx)], false, '/v1/coupons') }, { query: { limit: '1' } }),
+    route('/v1/products', { json: list([clone(productFx)], false, '/v1/products') }, { query: { limit: '1' } }),
   ];
   const forbidden = (scope: string): Json => {
     const err = clone(errorPermissionFx);
@@ -254,14 +267,44 @@ describe('stripe verify', () => {
     expect(!res.ok && res.error).toMatch(/publishable/);
   });
 
-  it('accepts a restricted test key with 4 pinned, authenticated reads', async () => {
+  const PROBES = ['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions', '/v1/coupons', '/v1/products'];
+
+  it('accepts a restricted test key with 5 pinned, authenticated reads, within the verify budget', async () => {
     const { fetch, calls } = fakeFetch(okRoutes());
-    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    const ctx = makeCtx(fetch, { pageBudget: 5 }); // services/connections.ts gives verify 5
     const res = await stripeAdapter.verify(input(`  ${RK_TEST}  `), ctx);
     expect(res).toEqual({ ok: true, accountLabel: 'Stripe (test mode)', config: {}, testMode: true, warnings: [] });
-    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions', '/v1/coupons']);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(PROBES);
     expectStripeHeaders(calls);
-    expect(ctx.pageBudget).toBe(1);
+    expect(ctx.pageBudget).toBe(0);
+  });
+
+  it('accepts a key without Products: Read, with a warning that MRR isn’t split by product', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/products'));
+    const { fetch, calls } = fakeFetch([route('/v1/products', { status: 403, json: forbidden('rak_product_read') }), ...routes]);
+    const ctx = makeCtx(fetch);
+    const res = await stripeAdapter.verify(input(RK_LIVE), ctx);
+    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [PRODUCTS_PERMISSION_WARNING] });
+    expect(PRODUCTS_PERMISSION_WARNING).toMatch(/isn’t split by product.*Products: Read/);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(PROBES);
+    expectNoSecretsInLogs(ctx, [RK_LIVE, RK_TEST.slice(8)]);
+  });
+
+  it('lists both optional permissions when a key has neither', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/coupons') && !r.label.startsWith('/v1/products'));
+    const { fetch } = fakeFetch([
+      route('/v1/coupons', { status: 403, json: forbidden('rak_coupon_read') }),
+      route('/v1/products', { status: 403, json: forbidden('rak_product_read') }),
+      ...routes,
+    ]);
+    const res = await stripeAdapter.verify(input(SK_TEST), makeCtx(fetch));
+    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, COUPONS_PERMISSION_WARNING, PRODUCTS_PERMISSION_WARNING] });
+  });
+
+  it('treats other failures of the products probe like any other request', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/products'));
+    const down = fakeFetch([route('/v1/products', { status: 503, json: { error: { message: 'down' } } }), ...routes]);
+    expect((await catchErr(stripeAdapter.verify(input(), makeCtx(down.fetch)))).kind).toBe('upstream');
   });
 
   it('accepts a key without Coupons: Read, with a warning that MRR is before discounts', async () => {
@@ -271,7 +314,7 @@ describe('stripe verify', () => {
     const res = await stripeAdapter.verify(input(RK_LIVE), ctx);
     expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [COUPONS_PERMISSION_WARNING] });
     expect(COUPONS_PERMISSION_WARNING).toMatch(/before discounts.*Coupons: Read/);
-    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions', '/v1/coupons']);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(PROBES);
     expectNoSecretsInLogs(ctx, [RK_LIVE, RK_TEST.slice(8)]);
   });
 
@@ -358,9 +401,21 @@ interface SnapshotSetup {
   trialing?: Json[];
   coupons?: Json[];
   prices?: Json[];
+  /** Product names by ID. Products not listed are named after their ID ("prod_FakeMain" → "FakeMain"). */
+  products?: Record<string, string>;
   /** Matched before the defaults. */
   extra?: Route[];
   budget?: number;
+}
+
+/** GET /v1/products?ids[]=…: the docs' Product object for each requested ID. */
+function productsFor(names: Record<string, string> = {}) {
+  return (url: URL): FakeResponse => {
+    const data = url.searchParams
+      .getAll('ids[]')
+      .map((id) => ({ ...clone(productFx), id, name: names[id] ?? id.replace(/^prod_/, '') }));
+    return { json: list(data, false, '/v1/products') };
+  };
 }
 
 function snapshotRoutes(s: SnapshotSetup): Route[] {
@@ -371,6 +426,7 @@ function snapshotRoutes(s: SnapshotSetup): Route[] {
     route('/v1/subscriptions', { json: list(s.trialing ?? []) }, { query: { status: 'trialing' } }),
     ...(s.coupons ?? []).map((c) => route(`/v1/coupons/${c['id']}`, { json: c })),
     ...(s.prices ?? []).map((p) => route(`/v1/prices/${p['id']}`, { json: p })),
+    route('/v1/products', productsFor(s.products)),
   ];
 }
 
@@ -404,8 +460,11 @@ describe('stripe fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      // Every fixture price is prod_FakeMain; its name is read once.
+      mrrByProduct: [{ name: 'FakeMain', mrr: { USD: 1000 + 1000 + 1000 + 2167 + 3042 + 2700 + 1250 + 2000 }, subscriptions: 8 }],
     });
     expectStripeHeaders(calls);
+    expect(calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(1);
   });
 
   // The docs' examples (https://docs.stripe.com/subscriptions/pricing-models/tiered-pricing).
@@ -520,7 +579,7 @@ describe('stripe fetchSnapshot', () => {
     expect(snap.mrr).toEqual({ USD: 1500 });
     expect(snap.activeSubscriptions).toBe(2);
     expect(snap.activeTrials).toBe(1);
-    expect(ctx.logs.find((l) => l.event === 'stripe_snapshot')?.data).toEqual({ subscriptions: 2, zeroMrr: 5, trials: 1, currencies: ['USD'] });
+    expect(ctx.logs.find((l) => l.event === 'stripe_snapshot')?.data).toEqual({ subscriptions: 2, zeroMrr: 5, trials: 1, currencies: ['USD'], products: 1 });
   });
 
   it('counts trial offers per item on active, past_due and trialing subscriptions, legacy trials once', async () => {
@@ -569,7 +628,8 @@ describe('stripe fetchSnapshot', () => {
     expect(ctx.logs.filter((l) => l.event === 'stripe_inclusive_tax_unknown')).toEqual([
       { event: 'stripe_inclusive_tax_unknown', data: { items: 1 } },
     ]);
-    expect(calls.map(pathOf).filter((p) => !p.startsWith('/v1/subscriptions') && !p.startsWith('/v1/coupons/'))).toEqual([]); // tax rates are embedded
+    // Tax rates are embedded: nothing but the product names on top.
+    expect(calls.map(pathOf).filter((p) => !p.startsWith('/v1/subscriptions') && !p.startsWith('/v1/coupons/'))).toEqual(['/v1/products']);
   });
 
   it('applies percent_off and amount_off discounts per coupon duration, order, scope and end date', async () => {
@@ -671,7 +731,7 @@ describe('stripe fetchSnapshot', () => {
     });
     expect(snap.mrr).toEqual({ USD: 6000 });
     expect(snap.activeSubscriptions).toBe(3);
-    const statuses = calls.map((c) => new URL(c.url).searchParams.get('status'));
+    const statuses = calls.filter((c) => pathOf(c) === '/v1/subscriptions').map((c) => new URL(c.url).searchParams.get('status'));
     expect(statuses).toEqual(['active', 'active', 'past_due', 'trialing']);
     const trialingCall = new URL(calls[3]!.url);
     expect(trialingCall.searchParams.getAll('expand[]')).toEqual([]);
@@ -846,6 +906,107 @@ describe('stripe fetchSnapshot', () => {
 
 const SINCE = NOW - 90 * DAY_S * 1000;
 const SINCE_S = Math.floor(SINCE / 1000);
+
+describe('stripe fetchSnapshot: MRR by product', () => {
+  const byName = (snap: MetricsSnapshot) => [...(snap.mrrByProduct ?? [])].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+
+  it('splits each subscription’s MRR over its products after discounts and tax, adding up to MRR', async () => {
+    const { snap, calls } = await snapshot({
+      products: { prod_Pro: 'Pro', prod_Seat: 'Extra seats', prod_Team: 'Team', prod_Addon: 'Add-on' },
+      coupons: [coupon('PCT10', { percent_off: 10 }), coupon('ADDONFREE', { percent_off: 100, applies_to: { products: ['prod_Addon'] } })],
+      active: [
+        // 3000 + 3 × 1000, then 10% off the subscription → 2700 each.
+        sub([item(price({ amount: 3000, product: 'prod_Pro' })), item(price({ amount: 1000, product: 'prod_Seat' }), { quantity: 3 })], {
+          discounts: [discount('PCT10')],
+        }),
+        sub([item(price({ amount: 12000, interval: 'year', product: 'prod_Pro' }))]), // → 1000
+        sub([item(price({ amount: 2500, product: 'prod_Team' }), { taxRates: [taxRate(25, true)] })]), // 2500 / 1.25 → 2000
+        // The add-on is free forever: it isn't in the split and doesn't count the subscription under it.
+        sub([item(price({ amount: 500, product: 'prod_Addon' })), item(price({ amount: 1000, product: 'prod_Pro' }))], {
+          discounts: [discount('ADDONFREE')],
+        }),
+        sub([item(price({ amount: 900, currency: 'eur', product: 'prod_Pro' }))], { currency: 'eur' }),
+      ],
+    });
+    expect(snap.mrr).toEqual({ USD: 5400 + 1000 + 2000 + 1000, EUR: 900 });
+    expect(byName(snap)).toEqual([
+      { name: 'Extra seats', mrr: { USD: 2700 }, subscriptions: 1 },
+      { name: 'Pro', mrr: { USD: 2700 + 1000 + 1000, EUR: 900 }, subscriptions: 4 },
+      { name: 'Team', mrr: { USD: 2000 }, subscriptions: 1 },
+    ]);
+    const lookups = calls.filter((c) => pathOf(c) === '/v1/products').map((c) => new URL(c.url).searchParams);
+    expect(lookups).toHaveLength(1);
+    expect(lookups[0]!.getAll('ids[]')).toEqual(['prod_Pro', 'prod_Seat', 'prod_Team']);
+    expect(lookups[0]!.get('limit')).toBe('100');
+  });
+
+  it('rounds each subscription’s split to whole minor units that add up to its MRR', async () => {
+    // 1000 with 7% inclusive tax is 934.58…: three of them make 2803.74…, so MRR is 2804.
+    const taxed = (product: string) => item(price({ amount: 1000, product }), { taxRates: [taxRate(7, true)] });
+    const { snap } = await snapshot({ active: [sub([taxed('prod_A'), taxed('prod_B'), taxed('prod_C')])] });
+    expect(snap.mrr).toEqual({ USD: 2804 });
+    expect(byName(snap).map((p) => p.mrr['USD'])).toEqual([935, 935, 934]);
+  });
+
+  it('splitRounded hands out the rounding by largest remainder', () => {
+    const split = splitRounded(new Map([['a', 1.6], ['b', 1.6], ['c', 0.8]]), 4);
+    expect(Object.fromEntries(split)).toEqual({ a: 2, b: 1, c: 1 });
+    expect(Object.fromEntries(splitRounded(new Map([['a', 2.5]]), 3))).toEqual({ a: 3 });
+    expect(Object.fromEntries(splitRounded(new Map(), 0))).toEqual({});
+  });
+
+  it('reads names 100 products per request, and leaves a product the list doesn’t return without one', async () => {
+    const subs = Array.from({ length: 101 }, (_, i) => sub([item(price({ amount: 100 + i, product: `prod_P${i}` }))]));
+    const allBut = (url: URL): FakeResponse => {
+      const ids = url.searchParams.getAll('ids[]').filter((id) => id !== 'prod_P7');
+      return { json: list(ids.map((id) => ({ ...clone(productFx), id, name: `Plan ${id.slice(6)}` })), false, '/v1/products') };
+    };
+    const { snap, calls } = await snapshot({ active: subs, extra: [route('/v1/products', allBut)] });
+    const lookups = calls.filter((c) => pathOf(c) === '/v1/products').map((c) => new URL(c.url).searchParams.getAll('ids[]'));
+    expect(lookups.map((ids) => ids.length)).toEqual([100, 1]);
+    expect(snap.mrrByProduct).toHaveLength(101);
+    expect(snap.mrrByProduct?.find((p) => p.mrr['USD'] === 107)?.name).toBeNull();
+    expect(snap.mrrByProduct?.find((p) => p.mrr['USD'] === 100)?.name).toBe('Plan 0');
+  });
+
+  it('leaves the split null, and MRR as it is, when the key lacks Products: Read', async () => {
+    const forbidden = clone(errorPermissionFx);
+    forbidden.error.message = forbidden.error.message.replace('rak_subscription_read', 'rak_product_read');
+    const { snap, calls, ctx } = await snapshot({
+      extra: [route('/v1/products', { status: 403, json: forbidden })],
+      active: [simple(4000), simple(1000)],
+    });
+    expect(snap.mrr).toEqual({ USD: 5000 });
+    expect(snap.activeSubscriptions).toBe(2);
+    expect(snap.mrrByProduct).toBeNull();
+    expect(calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(1);
+    expect(ctx.logs.find((l) => l.event === 'stripe_product_permission_missing')?.data).toEqual({
+      reason: 'permission',
+      effect: 'mrr_not_split_by_product',
+    });
+    expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
+  });
+
+  it('skips the names instead of failing the snapshot when the budget is spent or Stripe fails', async () => {
+    // 3 requests read the subscriptions (active, past_due, trialing); none is left for names.
+    const spent = await snapshot({ active: [simple(4000)], budget: 3 });
+    expect(spent.snap.mrr).toEqual({ USD: 4000 });
+    expect(spent.snap.mrrByProduct).toBeNull();
+    expect(spent.calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(0);
+    expect(spent.ctx.logs.find((l) => l.event === 'stripe_product_names_skipped')?.data).toEqual({ reason: 'budget', products: 1 });
+
+    const down = await snapshot({ active: [simple(4000)], extra: [route('/v1/products', { status: 503, json: { error: { message: 'down' } } })] });
+    expect(down.snap.mrr).toEqual({ USD: 4000 });
+    expect(down.snap.mrrByProduct).toBeNull();
+    expect(down.ctx.logs.find((l) => l.event === 'stripe_product_names_skipped')?.data).toMatchObject({ reason: 'upstream' });
+  });
+
+  it('has nothing to split, and asks for no names, without MRR', async () => {
+    const { snap, calls } = await snapshot({ active: [simple(0)], trialing: [simple(1000, { status: 'trialing' })] });
+    expect(snap.mrrByProduct).toEqual([]);
+    expect(calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(0);
+  });
+});
 
 describe('stripe fetchRevenue', () => {
   it('maps balance transaction types to charges/refunds in the settlement currency and drops the rest', async () => {

@@ -3,6 +3,7 @@ import {
   BACKFILL_DAYS,
   MAX_DESCRIPTION_LENGTH,
   MAX_FUTURE_SKEW_MS,
+  MAX_SNAPSHOT_PRODUCTS,
   MIN_PLAUSIBLE_TIME,
   REVENUE_OVERLAP_MS,
   advanceRevenue,
@@ -169,7 +170,40 @@ describe('cleanSnapshot', () => {
       revenuePeriod: { USD: 5000 },
       revenuePeriodDays: 28,
       newCustomers: null,
+      mrrByProduct: null,
     });
+    expect(dropped).toBe(2);
+  });
+
+  it('keeps an MRR split by product: names on one line and capped, money cleaned, biggest first', () => {
+    const { snapshot, dropped } = cleanSnapshot({
+      mrr: { USD: 9000 },
+      activeSubscriptions: 3,
+      mrrByProduct: [
+        { name: '  Starter\n plan ', mrr: { usd: 1000.4 }, subscriptions: 1 },
+        { name: 'P'.repeat(MAX_DESCRIPTION_LENGTH + 50), mrr: { USD: 5000 }, subscriptions: 2.2 },
+        { name: '   ', mrr: { USD: 3000 } }, // no name left: kept, without one
+        { name: 'Free', mrr: { USD: 0 }, subscriptions: 4 }, // no MRR
+        { name: 'Broken', mrr: 'x' },
+        'not an entry',
+      ],
+    });
+    expect(snapshot.mrrByProduct).toEqual([
+      { name: 'P'.repeat(MAX_DESCRIPTION_LENGTH), mrr: { USD: 5000 }, subscriptions: 2 },
+      { name: null, mrr: { USD: 3000 }, subscriptions: 0 },
+      { name: 'Starter plan', mrr: { USD: 1000 }, subscriptions: 1 },
+    ]);
+    expect(dropped).toBe(3);
+    expect(cleanSnapshot({ mrr: {}, activeSubscriptions: 0, mrrByProduct: {} }).snapshot.mrrByProduct).toBeNull();
+    expect(cleanSnapshot({ mrr: {}, activeSubscriptions: 0, mrrByProduct: [] }).snapshot.mrrByProduct).toEqual([]);
+  });
+
+  it('keeps at most MAX_SNAPSHOT_PRODUCTS products, the biggest', () => {
+    const many = Array.from({ length: MAX_SNAPSHOT_PRODUCTS + 2 }, (_, i) => ({ name: `P${i}`, mrr: { USD: i + 1 }, subscriptions: 1 }));
+    const { snapshot, dropped } = cleanSnapshot({ mrr: { USD: 1 }, activeSubscriptions: 1, mrrByProduct: many });
+    expect(snapshot.mrrByProduct).toHaveLength(MAX_SNAPSHOT_PRODUCTS);
+    expect(snapshot.mrrByProduct?.[0]?.name).toBe(`P${MAX_SNAPSHOT_PRODUCTS + 1}`);
+    expect(snapshot.mrrByProduct?.some((p) => p.name === 'P0' || p.name === 'P1')).toBe(false);
     expect(dropped).toBe(2);
   });
 

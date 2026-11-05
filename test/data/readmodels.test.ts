@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
-import { recomputeDailyRevenue } from '../../src/sync/repo';
+import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
+import { cleanSnapshot } from '../../src/sync/aggregate';
 import { listTransactions } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
@@ -360,6 +361,91 @@ describe('getDashboardData products', () => {
     expect(d.products.rows.map((r) => r.name)).toEqual(['Pro']);
     expect(d.products.unnamed.revenue).toBe(8_00);
     expect(d.products.rows[0]!.revenue + d.products.unnamed.revenue).toBe(d.kpis.revenue.value);
+  });
+});
+
+describe('getDashboardData MRR by product', () => {
+  type Split = Array<{ name: string | null; mrr: Record<string, number>; subscriptions: number }> | null;
+  function snapSplit(conn: string, day: string, mrr: Record<string, number>, split: Split) {
+    t.exec(
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, mrr_by_product, captured_at)
+       VALUES (?, ?, ?, 1, NULL, ?, 0)`,
+      conn, day, JSON.stringify(mrr), split === null ? null : JSON.stringify(split),
+    );
+  }
+
+  it('splits the latest MRR by product per connection, the rest under no product name, adding up to the KPI', async () => {
+    fx({ EUR: 0.5 }); // 1 EUR = 2 USD
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    seedConnection(t, { id: 'st2', userId: 'u1', provider: 'stripe', name: 'Acme EU' });
+    seedConnection(t, { id: 'st3', userId: 'u1', provider: 'stripe', name: 'Dormant' });
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    seedConnection(t, { id: 'x', userId: 'u2', provider: 'stripe', name: 'Theirs' });
+    snapSplit('st', '2026-11-01', { USD: 10_00 }, [{ name: 'Old plan', mrr: { USD: 10_00 }, subscriptions: 1 }]); // not the latest
+    snapSplit('st', TODAY, { USD: 100_00, EUR: 10_00 }, [
+      { name: 'Pro', mrr: { USD: 60_00, EUR: 10_00 }, subscriptions: 5 },
+      { name: 'Team', mrr: { USD: 30_00 }, subscriptions: 2 },
+      { name: null, mrr: { USD: 10_00 }, subscriptions: 1 },
+    ]);
+    snapSplit('st2', TODAY, { USD: 40_00 }, null); // its key can't read product names
+    snapSplit('st3', TODAY, {}, null); // no MRR: nothing to ask for
+    snapSplit('ls', TODAY, { USD: 50_00 }, null); // Lemon Squeezy doesn't split MRR
+    snapSplit('x', TODAY, { USD: 999_00 }, [{ name: 'Secret', mrr: { USD: 999_00 }, subscriptions: 9 }]);
+
+    const roundTrips = t.roundTrips();
+    const d = await getDashboardData(testEnv(t.db), user, 30);
+    expect(t.roundTrips() - roundTrips).toBe(1);
+    const m = d.productMrr;
+    expect(m.split).toBe(true);
+    expect(m.rows.map((r) => [r.name, r.connectionName, r.mrr, r.subscriptions, r.sharePct])).toEqual([
+      ['Pro', 'Acme', 80_00, 5, 38.1],
+      ['Team', 'Acme', 30_00, 2, 14.3],
+    ]);
+    expect(m.rows[0]).toMatchObject({ connectionId: 'st', dotClass: 'bg-[#635BFF]' });
+    // Acme's unnamed 10, Acme EU's 40, Pagekit's 50.
+    expect(m.unnamed).toEqual({ mrr: 100_00, sharePct: 47.6 });
+    expect(m.rows.reduce((s, r) => s + r.mrr, 0) + m.unnamed.mrr).toBe(d.kpis.mrr.value);
+    expect(m.needsPermission).toEqual(['Acme EU']);
+    expect(m.unnamedProviders).toEqual(['Lemon Squeezy']);
+    expect(m.more).toBeNull();
+  });
+
+  it(`merges one name within a connection and folds products past ${PRODUCT_ROWS} into one row`, async () => {
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    const split = Array.from({ length: PRODUCT_ROWS + 2 }, (_, i) => ({ name: `Plan ${i + 1}`, mrr: { USD: (i + 1) * 100 }, subscriptions: 1 }));
+    split.push({ name: 'Plan 1', mrr: { USD: 5_000 }, subscriptions: 2 }); // archived product, same name
+    snapSplit('st', TODAY, { USD: split.reduce((s, p) => s + p.mrr.USD, 0) }, split);
+    const m = (await getDashboardData(testEnv(t.db), user, 7)).productMrr;
+    expect(m.rows).toHaveLength(PRODUCT_ROWS);
+    expect(m.rows[0]).toMatchObject({ name: 'Plan 1', mrr: 5_100, subscriptions: 3 });
+    expect(m.more).toMatchObject({ count: 2, mrr: 200 + 300, subscriptions: 2 });
+    expect(m.unnamed.mrr).toBe(0);
+  });
+
+  it('has nothing to split when no snapshot carries a split', async () => {
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    snap('ls', TODAY, { USD: 50_00 }, 3);
+    const m = (await getDashboardData(testEnv(t.db), user, 7)).productMrr;
+    expect(m).toMatchObject({ split: false, rows: [], unnamed: { mrr: 50_00 }, needsPermission: [], unnamedProviders: ['Lemon Squeezy'] });
+  });
+
+  it('stores the split with the snapshot, and a later snapshot without one clears it', async () => {
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    const raw = {
+      mrr: { USD: 30_00 },
+      activeSubscriptions: 2,
+      activeTrials: 0,
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+      mrrByProduct: [{ name: 'Pro', mrr: { USD: 30_00 }, subscriptions: 2 }],
+    };
+    await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot(raw).snapshot, NOW)]);
+    expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr.rows.map((r) => [r.name, r.mrr])).toEqual([['Pro', 30_00]]);
+
+    await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot({ ...raw, mrrByProduct: null }).snapshot, NOW)]);
+    expect(t.rows('SELECT mrr_by_product FROM snapshots')).toEqual([{ mrr_by_product: null }]);
+    expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr).toMatchObject({ split: false, needsPermission: ['Acme'] });
   });
 });
 
