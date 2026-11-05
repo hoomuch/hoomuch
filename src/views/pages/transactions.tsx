@@ -1,12 +1,23 @@
 /** Unified transactions (GET /transactions?provider=&page=). Owner: Experience (pages). */
 
+import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
+import { Card as CossCard } from '@/components/ui/card';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { TransactionPage, TransactionRow } from '../../data/types';
 import { formatMoney, normalizeCurrency } from '../../lib/money';
 import { getProviderMeta } from '../../providers/registry';
 import type { ProviderId } from '../../providers/types';
 import { ProviderDot } from '../components/badges';
 import { EmptyState } from '../components/empty-state';
-import { BOX_TAB, LinkButton, PageHeader, TableScroller } from '../components/ui';
+import { LinkButton, PageHeader, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 import { formatDateTime } from './shared';
 
@@ -33,16 +44,16 @@ function href(base: string, provider: ProviderId | null, page: number): string {
 function AmountCell(props: { row: TransactionRow; currency: string }) {
   const { row } = props;
   const refund = row.type === 'refund';
-  const cls = refund ? 'text-right whitespace-nowrap tabular-nums text-error' : 'text-right whitespace-nowrap tabular-nums';
+  const cls = refund ? 'text-right tabular-nums text-destructive-foreground' : 'text-right tabular-nums';
   if (row.displayAmount === null) {
     return (
-      <td class={cls}>
+      <TableCell className={cls}>
         {formatMoney(row.amount, row.originalCurrency)}
-        <span class="block text-caption text-ink-3">No rate to convert to {props.currency}</span>
-      </td>
+        <span className="mt-1 block text-caption text-faint">No rate to convert to {props.currency}</span>
+      </TableCell>
     );
   }
-  return <td class={cls}>{formatMoney(row.displayAmount, props.currency)}</td>;
+  return <TableCell className={cls}>{formatMoney(row.displayAmount, props.currency)}</TableCell>;
 }
 
 export function TransactionsPage(props: TransactionsPageProps) {
@@ -77,23 +88,18 @@ export function TransactionsPage(props: TransactionsPageProps) {
     <Layout {...props.chrome} title={pageTitle} nav="transactions" noindex>
       <PageHeader title="Transactions" description={`Charges and refunds, newest first. Amounts in ${cur}.`} />
 
-      {/* The same daisyUI segmented control as the dashboard's range tabs: one choice of several. */}
-      <nav aria-label="Filter by provider" class="tabs tabs-box tabs-sm mb-6 w-fit border border-base-300">
-        {filters.map((f) => (
-          <a href={href(base, f.id, 1)} aria-current={f.id === p.provider ? 'page' : undefined} class={BOX_TAB}>
-            {f.label}
-          </a>
-        ))}
-      </nav>
+      {/* The same coss segmented control as the dashboard's range tabs: one choice of several. */}
+      <SegmentedLinks
+        label="Filter by provider"
+        className="mb-6"
+        items={filters.map((f) => ({ key: f.id ?? 'all', href: href(base, f.id, 1), current: f.id === p.provider, label: f.label }))}
+      />
 
       {p.items.length === 0 ? (
-        <div class="card card-dash border-base-300 px-6 py-10 text-center text-ink-2">
+        <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-muted-foreground">
           {p.page > 1 ? (
             <p>
-              Nothing on this page.{' '}
-              <a href={href(base, p.provider, 1)} class="link link-accent">
-                Back to the first page
-              </a>
+              Nothing on this page. <TextLink href={href(base, p.provider, 1)}>Back to the first page</TextLink>
             </p>
           ) : p.provider ? (
             getProviderMeta(p.provider).revenueHistory === 'daily' ? (
@@ -109,75 +115,77 @@ export function TransactionsPage(props: TransactionsPageProps) {
           )}
         </div>
       ) : (
-        <TableScroller labelledBy="transactions-caption" class="rounded-box border border-base-300">
-          <table class="table">
-            <caption id="transactions-caption" class="sr-only">
+        <CossCard className="overflow-hidden">
+          <ScrollTable labelledBy="transactions-caption" className="px-2 py-1 sm:px-3">
+            <caption id="transactions-caption" className="sr-only">
               Transactions, newest first, page {p.page}
             </caption>
-            <thead>
-              <tr>
-                <th scope="col">Date (UTC)</th>
-                <th scope="col">Connection</th>
-                <th scope="col">Description</th>
-                <th scope="col">Type</th>
-                <th scope="col" class="text-right">Amount</th>
-                <th scope="col" class="text-right">Original</th>
-              </tr>
-            </thead>
-            <tbody>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Date (UTC)</TableHead>
+                <TableHead scope="col">Connection</TableHead>
+                <TableHead scope="col">Description</TableHead>
+                <TableHead scope="col">Type</TableHead>
+                <TableHead scope="col" className="text-right">
+                  Amount
+                </TableHead>
+                <TableHead scope="col" className="text-right">
+                  Original
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {p.items.map((t) => {
                 const showOriginal = t.displayAmount !== null && normalizeCurrency(t.originalCurrency) !== normalizeCurrency(cur);
                 return (
-                  <tr>
+                  <TableRow key={`${t.connectionId}:${t.externalId}`}>
                     {/* The date is the row header: it's what each row is read against. */}
-                    <th scope="row" class="font-normal whitespace-nowrap tabular-nums">
-                      <time datetime={new Date(t.occurredAt).toISOString()}>{formatDateTime(t.occurredAt)}</time>
-                    </th>
-                    <td>
-                      <a href={`/connections/${t.connectionId}`} class="link link-hover inline-flex items-center gap-2">
+                    <TableRowHeader className="tabular-nums text-muted-foreground">
+                      <time dateTime={new Date(t.occurredAt).toISOString()}>{formatDateTime(t.occurredAt)}</time>
+                    </TableRowHeader>
+                    <TableCell>
+                      <a href={`/connections/${t.connectionId}`} className="inline-flex items-center gap-2 hover:underline">
                         <ProviderDot dotClass={t.dotClass} />
                         {t.connectionName}
                       </a>
-                    </td>
-                    <td>{t.description ?? <span class="text-ink-3">—</span>}</td>
-                    <td>
-                      {t.type === 'refund' ? (
-                        <span class="badge badge-soft badge-sm badge-error">Refund</span>
-                      ) : (
-                        <span class="text-ink-2">Charge</span>
-                      )}
-                    </td>
+                    </TableCell>
+                    <TableCell className="whitespace-normal leading-5">{t.description ?? <span className="text-faint">—</span>}</TableCell>
+                    <TableCell>
+                      {t.type === 'refund' ? <Badge variant="error">Refund</Badge> : <span className="text-muted-foreground">Charge</span>}
+                    </TableCell>
                     <AmountCell row={t} currency={cur} />
-                    <td class="text-right whitespace-nowrap text-ink-3 tabular-nums">
+                    <TableCell className="text-right text-faint tabular-nums">
                       {showOriginal ? formatMoney(t.amount, t.originalCurrency) : ''}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </TableScroller>
+            </TableBody>
+          </ScrollTable>
+        </CossCard>
       )}
 
-      {/* daisyUI pagination: a join of buttons. Missing ends are left out, not disabled. */}
+      {/* coss pagination. Missing ends are left out, not disabled. */}
       {p.page > 1 || p.hasMore ? (
-        <nav aria-label="Pagination" class="mt-6 flex justify-center">
-          <div class="join">
+        <Pagination aria-label="Pagination" className="mt-6">
+          <PaginationContent>
             {p.page > 1 ? (
-              <LinkButton href={href(base, p.provider, p.page - 1)} variant="secondary" small class="join-item">
-                <span aria-hidden="true">←</span> Previous<span class="sr-only"> page</span>
-              </LinkButton>
+              <PaginationItem>
+                <PaginationPrevious href={href(base, p.provider, p.page - 1)} aria-label="Previous page" />
+              </PaginationItem>
             ) : null}
-            <span aria-current="page" class="join-item btn btn-sm btn-outline pointer-events-none border-base-300">
-              Page {p.page}
-            </span>
+            <PaginationItem>
+              <span aria-current="page" className={buttonVariants({ variant: 'outline', className: 'pointer-events-none' })}>
+                Page {p.page}
+              </span>
+            </PaginationItem>
             {p.hasMore ? (
-              <LinkButton href={href(base, p.provider, p.page + 1)} variant="secondary" small class="join-item">
-                Next<span class="sr-only"> page</span> <span aria-hidden="true">→</span>
-              </LinkButton>
+              <PaginationItem>
+                <PaginationNext href={href(base, p.provider, p.page + 1)} aria-label="Next page" />
+              </PaginationItem>
             ) : null}
-          </div>
-        </nav>
+          </PaginationContent>
+        </Pagination>
       ) : null}
     </Layout>
   );

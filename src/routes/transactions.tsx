@@ -7,9 +7,9 @@ import type { ConnectionSummary } from '../data/types';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { isProviderId, PROVIDER_IDS, type ProviderId } from '../providers/types';
-import { TransactionsPage } from '../views/pages/transactions';
 import { rememberedQuery } from './prefs';
 import { chrome, parsePage } from './util';
+import { renderPage } from '../views/render';
 
 /** Filters for the providers the user actually has (plus the active one), in registry order. */
 export function filterProviders(connections: ConnectionSummary[], active: ProviderId | null): ProviderId[] {
@@ -31,13 +31,11 @@ export function registerTransactionRoutes(app: Hono<AppEnv>): void {
       listConnectionSummaries(c.env, user.id),
     ]);
 
-    return c.html(
-      <TransactionsPage
-        chrome={chrome(c)}
-        page={txns}
-        hasConnections={connections.length > 0}
-        filterProviders={filterProviders(connections, provider)}
-      />,
-    );
+    return renderPage(c, 'transactions', {
+        chrome: chrome(c),
+        page: txns,
+        hasConnections: connections.length > 0,
+        filterProviders: filterProviders(connections, provider),
+      });
   });
 }

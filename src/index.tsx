@@ -22,8 +22,12 @@ app.use(
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
-      styleSrc: ["'self'"],
+      // Recharts, Base UI and Motion set inline styles (positions, sizes, chart colours), and the
+      // chart component writes a small <style> block. Scripts stay same-origin only: the page
+      // payload is a JSON data block, which is never executed.
+      styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
+      fontSrc: ["'self'"],
       formAction: ["'self'"],
       frameAncestors: ["'none'"],
       baseUri: ["'none'"],

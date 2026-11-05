@@ -3,11 +3,11 @@
 import type { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { AppEnv } from '../env';
-import { NotFoundPage, ServerErrorPage } from '../views/pages/errors';
+import { renderPage } from '../views/render';
 
 export function registerErrorHandlers(app: Hono<AppEnv>): void {
   app.notFound((c) =>
-    c.html(<NotFoundPage chrome={{ user: c.get('user') ?? null, flash: c.get('flash') ?? null }} />, 404),
+    renderPage(c, 'notFound', { chrome: { user: c.get('user') ?? null, flash: c.get('flash') ?? null } }, 404),
   );
 
   app.onError((err, c) => {
@@ -16,6 +16,6 @@ export function registerErrorHandlers(app: Hono<AppEnv>): void {
     console.error(
       JSON.stringify({ event: 'unhandled_error', path: new URL(c.req.url).pathname, message: String(err) }),
     );
-    return c.html(<ServerErrorPage chrome={{ user: c.get('user') ?? null, flash: null }} />, 500);
+    return renderPage(c, 'serverError', { chrome: { user: c.get('user') ?? null, flash: null } }, 500);
   });
 }

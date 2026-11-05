@@ -8,10 +8,10 @@ import { parseRange } from '../data/types';
 import { getCurrencySource, setInferredCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
-import { DashboardPage } from '../views/pages/dashboard';
 import { syncCadence, syncIntervalMinutes } from '../views/pages/shared';
 import { rememberedQuery } from './prefs';
 import { awaitingFirstSync, chrome, parsePoll, syncState } from './util';
+import { renderPage } from '../views/render';
 
 export function registerDashboardRoutes(app: Hono<AppEnv>): void {
   app.get('/dashboard', requireUser, async (c) => {
@@ -48,19 +48,17 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
       !sync &&
       (poll > 0 || c.req.query('first') === '1') &&
       connections.some((x) => x.provider !== 'demo' && x.lastSyncedAt !== null);
-    return c.html(
-      <DashboardPage
-        chrome={chrome(c)}
-        data={data}
-        connections={connections}
-        sync={sync}
-        cadence={syncCadence(c.env.SYNC_INTERVAL_MINUTES)}
+    return renderPage(c, 'dashboard', {
+        chrome: chrome(c),
+        data,
+        connections,
+        sync,
+        cadence: syncCadence(c.env.SYNC_INTERVAL_MINUTES),
         // Stale once a connection has missed two syncs in a row.
-        staleAfterMinutes={2 * syncIntervalMinutes(c.env.SYNC_INTERVAL_MINUTES)}
-        celebrate={justSynced ? { dismissHref: `/dashboard?range=${range}` } : null}
-        demoRemoved={demoRemoved}
-        currencyInferred={currencyInferred}
-      />,
-    );
+        staleAfterMinutes: 2 * syncIntervalMinutes(c.env.SYNC_INTERVAL_MINUTES),
+        celebrate: justSynced ? { dismissHref: `/dashboard?range=${range}` } : null,
+        demoRemoved,
+        currencyInferred,
+      });
   });
 }

@@ -1,18 +1,20 @@
 /**
- * Pure scale / tick / label helpers shared by the server-rendered charts.
- * Owner: Experience (data-viz). No DOM, no JSX — unit-tested in test/views/charts.test.ts.
+ * Pure scale / tick / label helpers shared by the charts. Owner: Experience (data-viz).
+ * No DOM, no JSX — unit-tested in test/views/charts.test.ts.
  *
- * Geometry convention used by both charts:
- *  - The plot is an SVG with preserveAspectRatio="none" and a FIXED CSS height of PLOT_HEIGHT px whose
- *    viewBox height is also PLOT_HEIGHT. So y units are real CSS pixels (crisp 1px gaps, exact label
- *    alignment) and only x stretches with the container.
- *  - Every text label lives outside that stretched SVG (HTML, or an SVG without a viewBox), so text is
- *    always 12px whatever the container width.
+ * The charts draw with Recharts (see frame.tsx); these helpers decide what it draws, so the
+ * numbers are ours and identical on the server and in the browser:
+ *  - niceScale / revenueScale / mrrScale give the y domain and its ticks (min and max are ticks),
+ *    tickLabels their labels; xLabelIndices the sparse x labels (first, middle, last).
+ *  - bandGapRatio sets the space between daily bars, sameColorOpacities and isHexColor the colours,
+ *    chartId the deterministic ids, money / shortDay / longDay / dayRangeLabel the text.
+ *  - yMapper, xTicks (pct + anchor) and svgNum describe the same geometry for code that lays out
+ *    SVG by hand; Recharts doesn't need them.
  */
 
 import { currencyExponent, formatMoney, type FormatMoneyOptions } from '../../lib/money';
 
-/** Plot height in CSS px; must match the literal `h-40` class on the plot. */
+/** Plot area height in CSS px (frame.tsx: the h-48 chart box = top margin + this + the x axis). */
 export const PLOT_HEIGHT = 160;
 
 // ---------- number hygiene ----------

@@ -4,8 +4,12 @@ All your subscription revenue under one roof. Connect **Stripe**, **Lemon Squeez
 read-only keys, and see total MRR, ARR, active subscriptions, trials and revenue, converted into one currency
 and broken down by connection.
 
-- One Cloudflare Worker: Hono + server-rendered JSX, Tailwind CSS 4 + daisyUI 5, D1, Cron Triggers.
-- Nearly zero client JavaScript, a strict CSP, and SVG charts drawn on the server.
+- One Cloudflare Worker: Hono routes, React 19 pages rendered on the server and hydrated in the
+  browser, D1, Cron Triggers.
+- UI: [coss ui](https://coss.com/ui) on Base UI, shadcn Charts on Recharts, Lucide icons, Geist Sans and
+  Geist Mono, Tailwind CSS 4, Motion where it helps.
+- Forms are plain POST forms (Post/Redirect/Get), so every action works before the page hydrates.
+  Scripts are same-origin only (CSP `script-src 'self'`).
 - Provider keys are encrypted at rest (AES-256-GCM). No end-customer personal data is stored.
 - Open source under [AGPL-3.0](LICENSE). Run it on your own Cloudflare account, so your keys never leave it.
 
@@ -75,10 +79,12 @@ backfills 90 days of revenue.
 
 | Script | What it does |
 |--------|--------------|
-| `npm run dev` | `wrangler dev`. Rebuilds the CSS on every reload |
-| `npm run check` | Typecheck, tests and CSS build |
+| `npm run dev` | `wrangler dev`. Rebuilds the CSS and the browser bundle on every reload |
+| `npm run check` | Typecheck, tests and build |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
+| `npm run build` | `css` + `js` |
 | `npm run css` | Builds `public/app.css` with the Tailwind CLI |
+| `npm run js` | Builds the browser bundle into `public/client/` with esbuild (code-split per page) |
 | `npm run deploy` | Applies remote D1 migrations, then `wrangler deploy` |
 | `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
 | `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
@@ -94,9 +100,11 @@ src/
   sync/              sync engine, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
   services/          connection use-cases: create, rotate key, sync now, delete
-  routes/            HTTP handlers (Post/Redirect/Get)
-  views/             layout, pages, components, SVG charts
-  styles/app.css     Tailwind + daisyUI themes
+  routes/            HTTP handlers (Post/Redirect/Get); pages render with views/render.tsx
+  views/             layout, pages, hoomuch components, charts (React)
+  components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
+  client/entry.tsx   browser entry: hydrates the page the server rendered
+  styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
 migrations/          D1 schema
 test/                Vitest suites and API fixtures
 ```

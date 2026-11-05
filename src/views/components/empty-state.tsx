@@ -1,30 +1,41 @@
 /**
- * EmptyState: the dozing owl, a short message, primary actions. Owner: Experience (design).
- * CONTRACT: existing props are fixed; new ones must be optional.
+ * EmptyState: the dozing owl, a short message, primary actions (coss Empty inside a Card).
+ * Owner: Experience (design). CONTRACT: existing props are fixed; new ones must be optional.
  * Empty states are a personality zone (design/brief.md): one light line at most, the owl keeps
  * one eye open. Pass `plain` where an owl would be too much (small cards, secondary pages).
  */
 
-import type { Child } from 'hono/jsx';
+import type { ReactNode } from 'react';
+import { Card } from '@/components/ui/card';
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia } from '@/components/ui/empty';
+import { cn } from '../../lib/utils';
 import { Owl } from './mascot';
-import { cx } from './ui';
 
 export function EmptyState(props: {
   title: string;
-  children?: Child;
-  actions?: Child;
+  children?: ReactNode;
+  actions?: ReactNode;
   /** Hide the owl (e.g. inside a small card). */
   plain?: boolean;
-  class?: string;
+  className?: string;
 }) {
   return (
-    <section class={cx('card card-border border-base-300', props.class)}>
-      <div class="card-body items-center py-12 text-center sm:py-16">
-        {props.plain ? null : <Owl pose="dozing" class="mb-3" />}
-        <h2 class="text-title">{props.title}</h2>
-        {props.children ? <div class="max-w-md text-pretty text-ink-2">{props.children}</div> : null}
-        {props.actions ? <div class="card-actions mt-4 justify-center gap-3">{props.actions}</div> : null}
-      </div>
-    </section>
+    <Card render={<section />} className={cn('overflow-hidden', props.className)}>
+      <Empty className="py-12 sm:py-16">
+        <EmptyHeader className="max-w-md">
+          {props.plain ? null : (
+            <EmptyMedia className="mb-3">
+              <Owl pose="dozing" />
+            </EmptyMedia>
+          )}
+          {/* coss EmptyTitle's look, as a real heading. */}
+          <h2 data-slot="empty-title" className="font-heading text-title font-semibold">
+            {props.title}
+          </h2>
+          {props.children ? <EmptyDescription className="mt-2 text-body text-pretty">{props.children}</EmptyDescription> : null}
+        </EmptyHeader>
+        {props.actions ? <EmptyContent className="flex-row flex-wrap justify-center gap-3">{props.actions}</EmptyContent> : null}
+      </Empty>
+    </Card>
   );
 }

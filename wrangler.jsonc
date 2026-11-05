@@ -4,9 +4,9 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-11-01",
 
-  // Tailwind is compiled before every dev reload and deploy.
+  // Tailwind and the browser bundle (public/client) are built before every dev reload and deploy.
   "build": {
-    "command": "npm run css",
+    "command": "npm run build",
     "watch_dir": "src"
   },
 

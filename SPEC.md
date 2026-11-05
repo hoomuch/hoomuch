@@ -63,7 +63,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | ID | İhtiyaç |
 |----|---------|
 | N-01 | **Altyapı:** Tek Cloudflare Worker (Hono) + Workers Static Assets + D1 + Cron Triggers. Wrangler ile geliştirme/dağıtım. Harici veritabanı yok. |
-| N-02 | **Performans:** Sunucu tarafı render (SSR) HTML; istemci JS ≈ 0 (tek istisna isteğe bağlı ~1 KB `/app.js`: form gönderilirken buton geri bildirimi ve çift gönderim engeli; JS olmadan her şey çalışır); dashboard yalnızca D1'den okur (sağlayıcıya canlı çağrı yapmaz). |
+| N-02 | **Performans:** Sunucu tarafı render (React SSR) HTML, tarayıcıda hydrate edilir; istemci paketi sayfa başına bölünür (grafiksiz sayfalar Recharts indirmez). Formlar düz POST formu olduğu için hydrate olmadan da çalışır; dashboard yalnızca D1'den okur (sağlayıcıya canlı çağrı yapmaz). |
 | N-03 | **Güvenlik:** API anahtarları AES-256-GCM ile şifreli; parolalar PBKDF2-SHA256 (100.000 iterasyon); HttpOnly oturum çerezi; CSRF koruması; sıkı CSP; giriş deneme sınırı; gizli bilgi asla loglanmaz. |
 | N-04 | **Gizlilik:** Son müşterilerin e-posta/isim gibi kişisel verileri **saklanmaz**. Yalnızca tutar, para birimi, zaman, harici ID, ürün/plan adı. |
 | N-05 | **Dayanıklılık:** Bir sağlayıcının hatası diğerlerini etkilemez; 429/5xx'te üstel geri çekilme; idempotent upsert; sayfalı çekim ve cursor ile kaldığı yerden devam. |
@@ -85,8 +85,8 @@ OAuth (Stripe Connect) ile bağlama · tarihsel döviz kuru ile geriye dönük �
 
 ```
 Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
-                    ├─ Static Assets ─ /app.css, /favicon.svg   (Worker'ı çağırmadan servis edilir)
-                    ├─ Hono router + hono/jsx SSR sayfaları
+                    ├─ Static Assets ─ /app.css, /client/*.js, /fonts, /favicon.svg   (Worker'ı çağırmadan servis edilir)
+                    ├─ Hono router + React SSR sayfaları (tarayıcıda hydrate)
                     ├─ D1 (SQLite) ─ users, sessions, connections, snapshots,
                     │                transactions, daily_revenue, fx_rates, sync_runs
                     └─ scheduled()  ──▶ sync engine ──▶ Stripe API
@@ -98,8 +98,11 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
 | Katman | Seçim |
 |--------|-------|
 | Runtime | Cloudflare Workers (`compatibility_date` 2026-11-01) |
-| Router / SSR | Hono 4 + `hono/jsx` |
-| Stil | Tailwind CSS 4 + daisyUI 5, Tailwind CLI ile `public/app.css`'e derlenir (Wrangler `build` adımı) |
+| Router / SSR | Hono 4 (route'lar) + React 19 (`renderToString`, tarayıcıda `hydrateRoot`) |
+| UI | coss ui (Base UI üzerine, `src/components/ui`), Lucide ikonlar, Motion (gerektiğinde) |
+| Grafik | shadcn Charts / Recharts |
+| Font | Geist Sans + Geist Mono (kendi sunucumuzdan, `public/fonts`) |
+| Stil | Tailwind CSS 4 (+ radial-gradient), Tailwind CLI ile `public/app.css`'e; istemci paketi esbuild ile `public/client/`'a derlenir (Wrangler `build` adımı) |
 | Veritabanı | Cloudflare D1, `migrations/` |
 | Zamanlama | Cron Triggers `*/30 * * * *` |
 | Test | Vitest (Node ortamı; adaptörler ve saf fonksiyonlar) |
@@ -236,15 +239,15 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 ### 7.1 İndie minimalizm ilkeleri
 
 1. **Cevap önce:** Dashboard'ın ilk satırı toplam MRR. Süs yok.
-2. **Tek vurgu rengi**, geri kalan nötr gri tonları. Gölge yok; 1px ince kenarlık, bol boşluk.
-3. **Sistem font yığını**; sayılarda `tabular-nums`. Harici font isteği yok.
+2. **Tek vurgu rengi** (marka mavisi), geri kalan nötr gri tonları. coss ui'nin ince gölgeleri ve 1px kenarlıkları, bol boşluk.
+3. **Geist Sans + Geist Mono**, aynı kökenden; sayılarda `tabular-nums`. Harici font isteği yok.
 4. Sağlayıcılar küçük renkli nokta ile ayrılır: Stripe `#635BFF`, Lemon Squeezy `#FFC233`, RevenueCat `#F2545B`, Demo nötr.
-5. Açık/koyu tema `prefers-color-scheme` ile otomatik (daisyUI özel temalar `hoomuch` / `hoomuch-dark`).
-6. **Sıfır istemci JS hedefi:** formlar Post/Redirect/Get, flash mesajlar çerezle. Tek istisna isteğe bağlı `/app.js` (≈1 KB, aynı köken, CSP uyumlu): gönderilen formun butonunda spinner ve çift gönderim engeli. Olmasa da her şey çalışır.
-7. **Grafikler sunucuda SVG** olarak çizilir (kütüphane yok); altında `<details>` içinde veri tablosu.
+5. Açık/koyu tema `prefers-color-scheme` ile otomatik (coss token'ları, hoomuch'un AA ölçülmüş paleti; `src/styles/app.css`).
+6. **Formlar hydrate olmadan da çalışır:** Post/Redirect/Get, flash mesajlar çerezle. Hydrate olduktan sonra gönderilen formun butonunda spinner ve çift gönderim engeli, flash ve ilk-sayı şeridi Motion ile kapanır.
+7. **Grafikler shadcn Charts / Recharts** ile tarayıcıda çizilir; sunucu HTML'inde metin açıklaması ve "Show data" altında veri tablosu bulunur.
 8. İçerik genişliği ~960px. Mobilde tek sütun.
 9. Arayüz dili İngilizce (v1); metinler kısa ve sakin ("Connected.", "Last synced 4 min ago").
-10. **CSP uyumu:** inline `style` ve inline `<script>` yok. Renkler sınıflarla veya SVG `fill`/`stroke` öznitelikleriyle.
+10. **CSP uyumu:** inline `<script>` yok (`script-src 'self'`; sayfa verisi çalıştırılmayan bir JSON bloğu). Inline `style`'a Base UI, Recharts ve Motion için izin var (`style-src 'self' 'unsafe-inline'`).
 
 ### 7.2 Sayfalar
 
@@ -277,7 +280,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | Parola | PBKDF2-SHA256, 100.000 iterasyon (Workers üst sınırı), 16 bayt tuz, sabit zamanlı karşılaştırma. Min. 10 karakter |
 | Oturum | 32 bayt rastgele token → `__Host-hm_session` çerezi (HttpOnly, SameSite=Lax, Secure, Path=/; yalnızca düz HTTP localhost'ta önek ve Secure yok). 30 gün kayan yenileme, **90 gün mutlak üst sınır**. D1'de yalnızca SHA-256 hash. Girişte eski oturum iptal edilir; parola değişince **tüm** oturumlar (mevcut dahil) iptal edilip yeni token verilir |
 | CSRF | Hono `csrf()` (Origin kontrolü) + SameSite=Lax |
-| HTTP başlıkları | CSP: `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'` + HSTS, nosniff, Referrer-Policy |
+| HTTP başlıkları | CSP: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'` + HSTS, nosniff, Referrer-Policy |
 | Deneme sınırı | Sayaç, pahalı PBKDF2'den **önce** tek bir `INSERT … ON CONFLICT … RETURNING` ile atomik artırılır (paralel isteklerle aşılamaz). Giriş: e-posta + ağ başına 15 dk'da 10 (aşılınca 429). Parola teyidi (parola değiştirme, hesap silme): kullanıcı başına aynı sınır. Kayıt: ağ başına 15 dk'da 10 (hesap üretimini ve e-posta yoklamasını sınırlar). IPv6 adresleri /64 olarak gruplanır. Süresi geçen satırları cron siler |
 | Yetkilendirme | Her sorgu `user_id` ile kapsamlı; bağlantı ID'leri UUID |
 | Açık yönlendirme | `?next=` izin listesiyle: `/` ile başlar, `//` ile başlamaz, yalnızca yazdırılabilir ASCII, ters eğik çizgi yok (tarayıcıların sildiği tab/CR/LF ile `//evil.com` üretilemez) |
@@ -331,7 +334,7 @@ hoomuch/
 |-----|------------|
 | **Lead** (ana session) | Spec, iskelet, kontratlar, entegrasyon, uçtan uca doğrulama, güvenlik incelemesi, deploy |
 | **Data Plane** (alt session) | Sağlayıcı adaptörleri, HTTP/retry, sync engine, FX, okuma modelleri, servisler, testler |
-| **Experience** (alt session) | Tasarım sistemi (daisyUI tema), layout, sayfalar, route'lar, SVG grafikler, erişilebilirlik |
+| **Experience** (alt session) | Tasarım sistemi (coss ui + tema token'ları), layout, sayfalar, route'lar, grafikler, erişilebilirlik |
 
 Kurallar:
 1. Her ekip **yalnızca kendi dosyalarına** yazar. Kontrat değişikliği gerekiyorsa Lead'e mesaj atılır.
@@ -357,7 +360,7 @@ Kurallar:
 - Geçersiz Stripe/LS/RC anahtarı kaydedilmez; kullanıcı sebebi görür.
 - Dashboard 7/30/90 gün arasında geçiş yapar; para birimi değişince tüm tutarlar çevrilir.
 - Bir bağlantının hatası dashboard'ı bozmaz; hata bağlantı satırında görünür.
-- Hiçbir sayfada inline script/style yok; CSP ihlali konsolda görünmez.
+- Hiçbir sayfada inline script yok; CSP ihlali konsolda görünmez.
 - `npm run check` (typecheck + test + css) yeşil.
 
 ---

@@ -1,24 +1,38 @@
 /**
- * MrrChart — MRR trend as a line (no area fill). Server-rendered SVG, no JS.
+ * MrrChart — MRR trend as a line (no area fill). shadcn Charts on Recharts 3.
  * Owner: Experience (data-viz). CONTRACT: props are fixed.
  *
- * - x domain = windowDays (edge to edge), so a sparse history sits honestly at the right end.
+ * - Line only, stroke var(--brand), with a dot on the last value. No area: the y axis rarely
+ *   starts at zero, and a filled area would overstate the change.
+ * - x domain = windowDays, edge to edge (a numeric index axis), so a sparse history sits honestly
+ *   at the right end instead of being stretched across the plot.
  * - y domain = a padded nice domain around the data (see mrrScale in scale.ts); the bottom tick is
- *   always labelled, and it falls back to zero-based when the data spans most of its own magnitude.
+ *   always labelled, and it falls back to zero-based (with a baseline) when the data spans most of
+ *   its own magnitude.
  * - 0 points → calm empty message; 1 point → a dot + a note; 2+ → line and a last-value dot.
+ * - The server renders the description, notes and "Show data" table; the plot paints after hydration.
  */
 
+import { CartesianGrid, Line, LineChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts';
+import { ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import type { MrrDay } from '../../data/types';
 import { formatPercent } from '../../lib/money';
 import {
-  AMOUNT_CELL,
-  ChartGrid,
+  AmountCell,
+  AXIS_TEXT_FILL,
+  ChartFrame,
   ChartNote,
   DataDetails,
-  HEAD_CELL_LEFT,
-  HEAD_CELL_RIGHT,
-  PlotMessage,
-  ROW_HEAD,
+  DayCell,
+  HeadCell,
+  MARGIN_TOP,
+  Swatch,
+  TableRow,
+  TICK_MARGIN,
+  TooltipRow,
+  X_AXIS_HEIGHT,
+  xTick,
+  yAxisWidth,
 } from './frame';
 import {
   chartId,
@@ -27,12 +41,9 @@ import {
   longDay,
   money,
   mrrScale,
-  PLOT_HEIGHT,
   shortDay,
-  svgNum,
   tickLabels,
-  xTicks,
-  yMapper,
+  xLabelIndices,
   type NiceScale,
 } from './scale';
 
@@ -45,9 +56,6 @@ export interface MrrChartProps {
   /** Accessible title; defaults to "MRR trend". */
   title?: string;
 }
-
-/** viewBox units between two consecutive days. */
-const STEP = 10;
 
 export interface MrrPoint {
   day: string;
@@ -109,122 +117,37 @@ function describe(domain: string[], points: MrrPoint[], scale: NiceScale, curren
   ].join(' ');
 }
 
+/** Room right of the last point for its dot (r 4 + a 2px ring). */
+const DOT_ROOM = 6;
+
 export function MrrChart(props: MrrChartProps) {
   const title = props.title ?? 'MRR trend';
   const currency = props.currency;
   const { domain, points } = mrrPoints(props.series, props.windowDays);
   const n = domain.length;
-  const H = PLOT_HEIGHT;
-  const W = Math.max(n - 1, 1) * STEP;
-  const xAt = (i: number) => (n > 1 ? i * STEP : W / 2);
+  const empty = points.length === 0;
 
   const scale = mrrScale(
     points.map((p) => p.value),
     currency,
   );
-  const y = yMapper(scale, H);
-  const empty = points.length === 0;
-  const yLabels = empty ? [] : tickLabels(scale.ticks, currency).reverse();
+  const zeroBased = scale.min === 0;
+  const labels = tickLabels(scale.ticks, currency);
+  const labelOf = new Map(scale.ticks.map((t, k) => [t, labels[k]!] as const));
 
   const id = chartId('mrr', `${title}|${currency}|${domain[0] ?? ''}|${n}|${points.map((p) => `${p.i}:${p.value}`).join(',')}`);
-  const titleId = `${id}-title`;
-  const descId = `${id}-desc`;
   const desc = describe(domain, points, scale, currency);
 
-  const xy = points.map((p) => ({ x: xAt(p.i), y: y(p.value), p }));
-  const line = xy.map((q, k) => `${k === 0 ? 'M' : 'L'}${svgNum(q.x)} ${svgNum(q.y)}`).join('');
-  // Line only, no area: the y-axis rarely starts at zero, and a filled area would overstate change.
-  const lastQ = xy[xy.length - 1];
-  // A zero-length round-capped stroke is a perfect circle even though the plot stretches in x.
-  const dot = lastQ ? `M${svgNum(lastQ.x)} ${svgNum(lastQ.y)}h0.01` : '';
-
-  const zeroBased = scale.min === 0;
-  const gridTicks = empty ? [] : zeroBased ? scale.ticks.filter((t) => t !== 0) : scale.ticks;
-
-  const plot = (
-    <svg
-      role="img"
-      aria-labelledby={titleId}
-      aria-describedby={descId}
-      viewBox={`0 0 ${svgNum(W)} ${H}`}
-      preserveAspectRatio="none"
-      width="100%"
-      height={String(H)}
-      class="block h-40 w-full overflow-visible"
-    >
-      <title id={titleId}>{title}</title>
-      <desc id={descId}>{desc}</desc>
-      {gridTicks.map((t) => (
-        <line
-          x1="0"
-          x2={svgNum(W)}
-          y1={svgNum(y(t))}
-          y2={svgNum(y(t))}
-          class="stroke-base-300"
-          vector-effect="non-scaling-stroke"
-          shape-rendering="crispEdges"
-        />
-      ))}
-      {empty || zeroBased ? (
-        <line
-          x1="0"
-          x2={svgNum(W)}
-          y1={String(H)}
-          y2={String(H)}
-          class={empty ? 'stroke-base-300' : 'stroke-field'}
-          vector-effect="non-scaling-stroke"
-          shape-rendering="crispEdges"
-        />
-      ) : null}
-      {xy.length > 1 ? (
-        <path
-          d={line}
-          fill="none"
-          class="stroke-accent"
-          stroke-width="2"
-          stroke-linejoin="round"
-          stroke-linecap="round"
-          vector-effect="non-scaling-stroke"
-        />
-      ) : null}
-      {dot ? (
-        <path
-          d={dot}
-          fill="none"
-          class="stroke-base-100"
-          stroke-width="12"
-          stroke-linecap="round"
-          vector-effect="non-scaling-stroke"
-        />
-      ) : null}
-      {dot ? (
-        <path d={dot} fill="none" class="stroke-accent" stroke-width="8" stroke-linecap="round" vector-effect="non-scaling-stroke" />
-      ) : null}
-      {/* Hover targets with native <title> tooltips, mouse only. aria-hidden because Chromium
-          exposes titled children of role="img" to screen readers; <desc> + the table cover AT. */}
-      {xy.length > 0 ? (
-        <g aria-hidden="true">
-          {xy.map((q, k) => {
-            const prev = xy[k - 1];
-            const next = xy[k + 1];
-            const left = prev ? (prev.x + q.x) / 2 : Math.max(0, q.x - STEP / 2);
-            const right = next ? (q.x + next.x) / 2 : Math.min(W, q.x + STEP / 2);
-            return (
-              <rect
-                x={svgNum(left)}
-                y="0"
-                width={svgNum(Math.max(0, right - left))}
-                height={String(H)}
-                class="fill-transparent hover:fill-base-200"
-              >
-                <title>{`${longDay(q.p.day)}: MRR ${money(q.p.value, currency)}`}</title>
-              </rect>
-            );
-          })}
-        </g>
-      ) : null}
-    </svg>
-  );
+  // One window day: centre it. Otherwise the window runs edge to edge.
+  const xDomain: [number, number] = n > 1 ? [0, n - 1] : [-1, 1];
+  // Gridlines at every tick; on a zero-based scale the bottom one is the (stronger) baseline instead.
+  const gridValues = empty ? [] : zeroBased ? scale.ticks.filter((t) => t !== 0) : scale.ticks;
+  const last = points[points.length - 1];
+  // Recharts only draws axes for a chart with a series, so an empty window still gets one: the
+  // window days with no values (no line, no tooltip), which keeps the dates and the baseline.
+  const data: { i: number; day: string; value: number | null }[] = empty
+    ? domain.map((day, i) => ({ i, day, value: null }))
+    : points.map((p) => ({ i: p.i, day: p.day, value: p.value }));
 
   const firstPoint = points[0];
   const note =
@@ -235,15 +158,93 @@ export function MrrChart(props: MrrChartProps) {
         : null;
 
   return (
-    // block: daisyUI lays out a <figure> inside a .card as a centred flex row (it is meant for card images).
-    <figure class="block w-full">
-      <ChartGrid
-        yLabels={yLabels}
-        xTicks={xTicks(domain, 'point')}
-        overlay={empty ? <PlotMessage>MRR history appears after the first sync.</PlotMessage> : null}
-      >
-        {plot}
-      </ChartGrid>
+    <figure className="w-full min-w-0">
+      <ChartFrame id={id} title={title} description={desc} message={empty ? 'MRR history appears after the first sync.' : null}>
+        <LineChart
+          data={data}
+          accessibilityLayer={false}
+          margin={{ top: MARGIN_TOP, right: DOT_ROOM, bottom: 0, left: 0 }}
+        >
+          {gridValues.length > 0 ? (
+            <CartesianGrid vertical={false} horizontalValues={gridValues} stroke="var(--border)" />
+          ) : null}
+          <XAxis
+            type="number"
+            dataKey="i"
+            domain={xDomain}
+            ticks={xLabelIndices(n)}
+            interval={0}
+            allowDecimals={false}
+            axisLine={false}
+            tickLine={false}
+            tickSize={0}
+            tickMargin={TICK_MARGIN}
+            height={X_AXIS_HEIGHT}
+            tick={xTick({ count: n, label: (i) => (domain[i] ? shortDay(domain[i]) : '') })}
+          />
+          <YAxis
+            type="number"
+            domain={[scale.min, scale.max]}
+            // With no values Recharts has no data domain and would drop the axis (and the baseline);
+            // otherwise the scale already covers the data, and overflow would only clip the line.
+            allowDataOverflow={empty}
+            ticks={scale.ticks}
+            interval={0}
+            hide={empty}
+            axisLine={false}
+            tickLine={false}
+            tickSize={0}
+            tickMargin={TICK_MARGIN}
+            width={yAxisWidth(labels)}
+            tick={{ fill: AXIS_TEXT_FILL }}
+            tickFormatter={(v: number) => labelOf.get(v) ?? money(v, currency, { compact: true })}
+          />
+          {empty || zeroBased ? (
+            <ReferenceLine y={scale.min} stroke={empty ? 'var(--border)' : 'var(--input)'} ifOverflow="visible" />
+          ) : null}
+          {empty ? null : (
+            <ChartTooltip
+              cursor={{ stroke: 'var(--border)' }}
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(_label, payload) => {
+                    const day = (payload?.[0]?.payload as { day?: string } | undefined)?.day;
+                    return day ? longDay(day) : null;
+                  }}
+                  formatter={(value) => (
+                    <TooltipRow name="MRR" value={money(Number(value), currency)} swatch={<Swatch fill="var(--brand)" />} />
+                  )}
+                />
+              }
+            />
+          )}
+          {/* With one snapshot the path has no length; the ReferenceDot below is what shows. */}
+          <Line
+            type="linear"
+            dataKey="value"
+            name="MRR"
+            stroke="var(--brand)"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            fill="none"
+            dot={false}
+            activeDot={empty ? false : { r: 4, fill: 'var(--brand)', stroke: 'var(--background)', strokeWidth: 2 }}
+            isAnimationActive={false}
+          />
+          {last ? (
+            <ReferenceDot
+              x={last.i}
+              y={last.value}
+              r={4}
+              fill="var(--brand)"
+              stroke="var(--background)"
+              strokeWidth={2}
+              ifOverflow="visible"
+            />
+          ) : null}
+        </LineChart>
+      </ChartFrame>
       {note ? <ChartNote>{note}</ChartNote> : null}
       {empty ? null : <MrrTable domain={domain} points={points} currency={currency} id={`${id}-data`} label={title} />}
     </figure>
@@ -262,22 +263,16 @@ function MrrTable(props: { domain: string[]; points: MrrPoint[]; currency: strin
       label={props.label}
       caption={caption}
       head={
-        <tr>
-          <th scope="col" class={HEAD_CELL_LEFT}>
-            Date
-          </th>
-          <th scope="col" class={HEAD_CELL_RIGHT}>
-            MRR
-          </th>
-        </tr>
+        <TableRow>
+          <HeadCell>Date</HeadCell>
+          <HeadCell numeric>MRR</HeadCell>
+        </TableRow>
       }
       body={points.map((p) => (
-        <tr>
-          <th scope="row" class={ROW_HEAD}>
-            <time datetime={p.day}>{shortDay(p.day)}</time>
-          </th>
-          <td class={AMOUNT_CELL}>{money(p.value, currency)}</td>
-        </tr>
+        <TableRow key={p.day}>
+          <DayCell day={p.day} label={shortDay(p.day)} />
+          <AmountCell value={p.value} text={money(p.value, currency)} keepZero />
+        </TableRow>
       ))}
     />
   );

@@ -6,8 +6,8 @@ import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { isSupportedCurrency, normalizeCurrency } from '../lib/money';
-import { SettingsPage } from '../views/pages/settings';
 import { chrome, formLimit, readForm } from './util';
+import { renderPage } from '../views/render';
 
 const PASSWORD_INPUT_MAX = 1024;
 
@@ -15,7 +15,11 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
   app.get('/settings', requireUser, async (c) => {
     const user = currentUser(c);
     const source = await getCurrencySource(c.env.DB, user.id);
-    return c.html(<SettingsPage chrome={chrome(c)} currency={user.baseCurrency} currencySource={source} />);
+    return renderPage(c, 'settings', {
+        chrome: chrome(c),
+        currency: user.baseCurrency,
+        currencySource: source,
+      });
   });
 
   app.post('/settings/currency', requireUser, formLimit, async (c) => {
@@ -37,14 +41,11 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
 
     const result = await changePassword(c, current, next);
     if (!result.ok) {
-      return c.html(
-        <SettingsPage
-          chrome={chrome(c)}
-          currency={user.baseCurrency}
-          password={{ error: result.error, fieldErrors: { [result.field]: result.error } }}
-        />,
-        422,
-      );
+      return renderPage(c, 'settings', {
+          chrome: chrome(c),
+          currency: user.baseCurrency,
+          password: { error: result.error, fieldErrors: { [result.field]: result.error } },
+        }, 422);
     }
     return redirectWithFlash(c, '/settings', 'success', 'Password changed. Your other devices were logged out.');
   });
@@ -64,14 +65,11 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
     }
 
     if (fieldErrors.password || fieldErrors.confirm) {
-      return c.html(
-        <SettingsPage
-          chrome={chrome(c)}
-          currency={user.baseCurrency}
-          deleteAccount={{ error: 'Your account was not deleted.', fieldErrors }}
-        />,
-        422,
-      );
+      return renderPage(c, 'settings', {
+          chrome: chrome(c),
+          currency: user.baseCurrency,
+          deleteAccount: { error: 'Your account was not deleted.', fieldErrors },
+        }, 422);
     }
 
     await deleteUser(c.env.DB, user.id);

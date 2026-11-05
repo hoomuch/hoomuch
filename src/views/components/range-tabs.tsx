@@ -1,12 +1,12 @@
 /**
- * RangeTabs: 7 / 30 / 90 day links (`?range=`), zero JS. Owner: Experience (design).
+ * RangeTabs: 7 / 30 / 90 day links (`?range=`). Owner: Experience (design).
  * CONTRACT: existing props are fixed; new ones must be optional.
  *
- * daisyUI boxed tabs made of links (BOX_TAB in ui.tsx explains the active state).
+ * A coss segmented control made of links (SegmentedLinks in ui.tsx explains the active state).
  */
 
 import { RANGE_OPTIONS, type RangeDays } from '../../data/types';
-import { BOX_TAB } from './ui';
+import { SegmentedLinks } from './ui';
 
 export function RangeTabs(props: {
   current: RangeDays;
@@ -17,13 +17,19 @@ export function RangeTabs(props: {
   const base = props.basePath ?? '/dashboard';
   const hash = props.anchor ? `#${props.anchor}` : '';
   return (
-    <nav aria-label="Date range" class="tabs tabs-box tabs-sm flex-nowrap border border-base-300">
-      {RANGE_OPTIONS.map((r) => (
-        <a href={`${base}?range=${r}${hash}`} aria-current={r === props.current ? 'page' : undefined} class={BOX_TAB}>
-          <span class="sr-only">Last </span>
-          {r} days
-        </a>
-      ))}
-    </nav>
+    <SegmentedLinks
+      label="Date range"
+      items={RANGE_OPTIONS.map((r) => ({
+        key: String(r),
+        href: `${base}?range=${r}${hash}`,
+        current: r === props.current,
+        label: (
+          <>
+            <span className="sr-only">Last </span>
+            {r} days
+          </>
+        ),
+      }))}
+    />
   );
 }

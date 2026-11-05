@@ -42,8 +42,15 @@ These keep the product what it is. Pull requests that break them will be asked t
 - **Never log secrets.** No API keys, tokens, passwords or encrypted blobs in logs or error messages.
 - **Money is integer minor units** (cents, kuruş) with an uppercase ISO 4217 code. No floats.
   Zero-decimal currencies (JPY, KRW, …) must come out right.
-- **Nearly zero client JavaScript and a strict CSP.** No inline `<script>` or `style` attributes. Use
-  Tailwind classes, or SVG `fill` / `stroke` attributes for colours. Forms use Post/Redirect/Get.
+- **Forms work before hydration, scripts stay same-origin.** Pages are React, rendered on the server and
+  hydrated in the browser, but every action is a plain POST form (Post/Redirect/Get). No inline
+  `<script>` (the CSP is `script-src 'self'`; the page payload is a JSON data block). Inline styles are
+  allowed for Base UI, Recharts and Motion; for colours of your own, use Tailwind classes.
+- **Render the same thing on the server and in the browser.** No `Date.now()`, `Math.random()` or
+  `window` checks while rendering; use `useNow()` (views/page-root.tsx) for the request's clock, and
+  keep page props plain JSON.
+- **UI comes from coss ui.** Add components with `npx shadcn@latest add @coss/<name>` (they land in
+  `src/components/ui`), and wrap them in `src/views/components/ui.tsx` only to add hoomuch's rules.
 - **The dashboard reads only from D1.** Provider APIs are called from the sync engine, never while
   rendering a page.
 

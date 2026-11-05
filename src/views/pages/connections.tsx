@@ -3,6 +3,9 @@
  * add-connection form (GET /connections/new?provider=). Owner: Experience (pages).
  */
 
+import { ArrowRight } from 'lucide-react';
+import { Card as CossCard } from '@/components/ui/card';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { ConnectionSummary } from '../../data/types';
 import { getProviderMeta, PROVIDERS } from '../../providers/registry';
 import type { ProviderMeta } from '../../providers/types';
@@ -10,7 +13,7 @@ import { ProviderDot, StatusBadge, TestModeBadge } from '../components/badges';
 import { ConnectionForm } from '../components/connection-form';
 import { EmptyState } from '../components/empty-state';
 import { RelativeTime } from '../components/relative-time';
-import { Button, Card, FormError, LinkButton, PageHeader, TableScroller } from '../components/ui';
+import { Button, Card, FormError, LinkButton, PageHeader, ScrollTable, TableRowHeader } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 import { ConnectActions } from './dashboard';
 import { BackLink } from './shared';
@@ -34,44 +37,44 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
         actions={hasAny ? <LinkButton href="/connections/new">Add connection</LinkButton> : undefined}
       />
       {hasAny ? (
-        <TableScroller labelledBy="connections-caption" class="rounded-box border border-base-300">
-          <table class="table">
-            <caption id="connections-caption" class="sr-only">
+        <CossCard className="overflow-hidden">
+          <ScrollTable labelledBy="connections-caption" className="px-2 py-1 sm:px-3">
+            <caption id="connections-caption" className="sr-only">
               Your connections
             </caption>
-            <thead>
-              <tr>
-                <th scope="col">Connection</th>
-                <th scope="col">Provider</th>
-                <th scope="col">Status</th>
-                <th scope="col">Last synced</th>
-              </tr>
-            </thead>
-            <tbody>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Connection</TableHead>
+                <TableHead scope="col">Provider</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Last synced</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {props.connections.map((c) => (
-                <tr>
-                  <th scope="row" class="font-normal">
-                    <a href={`/connections/${c.id}`} class="link link-hover inline-flex items-center gap-2 font-semibold">
+                <TableRow key={c.id}>
+                  <TableRowHeader className="py-3 whitespace-normal">
+                    <a href={`/connections/${c.id}`} className="inline-flex items-center gap-2 font-medium leading-5 hover:underline">
                       <ProviderDot dotClass={c.dotClass} />
                       {c.name}
                     </a>
-                    {c.lastError ? <p class="mt-1 max-w-md text-error">{c.lastError}</p> : null}
-                  </th>
-                  <td class="whitespace-nowrap">{getProviderMeta(c.provider).name}</td>
-                  <td>
-                    <span class="inline-flex flex-wrap gap-1">
+                    {c.lastError ? <p className="mt-1 max-w-md leading-5 text-destructive-foreground">{c.lastError}</p> : null}
+                  </TableRowHeader>
+                  <TableCell>{getProviderMeta(c.provider).name}</TableCell>
+                  <TableCell>
+                    <span className="inline-flex flex-wrap gap-1">
                       <StatusBadge status={c.status} />
                       {c.testMode ? <TestModeBadge /> : null}
                     </span>
-                  </td>
-                  <td class="whitespace-nowrap">
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
                     <RelativeTime ms={c.lastSyncedAt} now={props.now} />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </TableScroller>
+            </TableBody>
+          </ScrollTable>
+        </CossCard>
       ) : (
         <EmptyState title="No connections yet." actions={<ConnectActions />}>
           Add one and hoomuch starts counting.
@@ -90,30 +93,30 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
     <Layout {...props.chrome} title="Add a connection" nav="connections" noindex>
       <BackLink href="/connections" label="Connections" />
       <PageHeader title="Add a connection" description="Pick where your subscriptions live. hoomuch only ever reads." />
-      <ul class="grid gap-4 sm:grid-cols-3">
+      <ul className="grid gap-4 sm:grid-cols-3">
         {real.map((p) => (
-          <li>
-            <a href={`/connections/new?provider=${p.id}`} class="card card-border h-full border-base-300 hover:border-field">
-              <span class="card-body">
-                <span class="card-title">
-                  <ProviderDot dotClass={p.dotClass} size="md" />
-                  {p.name}
-                </span>
-                <span class="text-ink-2">{p.tagline}</span>
+          <li key={p.id}>
+            <CossCard
+              render={<a href={`/connections/new?provider=${p.id}`} />}
+              className="group h-full p-5 transition-[border-color,box-shadow] hover:border-input hover:shadow-sm/5"
+            >
+              <span className="flex items-center gap-2 font-semibold">
+                <ProviderDot dotClass={p.dotClass} size="md" />
+                {p.name}
+                <ArrowRight className="ml-auto size-4 shrink-0 text-faint transition-transform group-hover:translate-x-0.5" />
               </span>
-            </a>
+              <span className="mt-1.5 text-muted-foreground">{p.tagline}</span>
+            </CossCard>
           </li>
         ))}
       </ul>
       <a
         href="/connections/new?provider=demo"
-        class="card card-dash mt-4 border-base-300 text-ink-2 hover:text-base-content"
+        className="mt-4 flex items-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-muted-foreground transition-colors hover:border-input hover:text-foreground"
       >
-        <span class="card-body flex-row items-center py-3">
-          <ProviderDot dotClass={demo.dotClass} />
-          <span>
-            <span class="font-semibold">{demo.name}</span> · {demo.tagline}
-          </span>
+        <ProviderDot dotClass={demo.dotClass} />
+        <span>
+          <span className="font-semibold">{demo.name}</span> · {demo.tagline}
         </span>
       </a>
     </Layout>
@@ -142,7 +145,7 @@ export function NewConnectionPage(props: NewConnectionPageProps) {
       <PageHeader
         title={heading}
         description={
-          <span class="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-2">
             <ProviderDot dotClass={meta.dotClass} />
             {meta.tagline}
           </span>
@@ -150,11 +153,11 @@ export function NewConnectionPage(props: NewConnectionPageProps) {
       />
       {isDemo ? (
         <Card>
-          <FormError message={props.error} autofocus />
-          <p class="text-ink-2">
+          <FormError message={props.error} autoFocus />
+          <p className="text-muted-foreground">
             Adds a connection with sample data in 3 currencies and 90 days of history. You can delete it any time.
           </p>
-          <form method="post" action="/connections/demo" class="mt-2">
+          <form method="post" action="/connections/demo" className="mt-4">
             <Button>Add demo data</Button>
           </form>
         </Card>

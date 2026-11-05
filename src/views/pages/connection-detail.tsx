@@ -7,6 +7,10 @@
  * page follows them, so no button ever holds the page.
  */
 
+import { ChevronDown } from 'lucide-react';
+import { Card as CossCard } from '@/components/ui/card';
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { ConnectionDetail, SyncRunRow } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { getProviderMeta } from '../../providers/registry';
@@ -19,13 +23,17 @@ import {
   Button,
   Card,
   ConfirmCheckbox,
+  Disclosure,
   Field,
   LinkButton,
   NotAvailable,
   PageHeader,
-  TableScroller,
+  ScrollTable,
+  TableRowHeader,
+  TextLink,
 } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
+import { Fragment } from 'react';
 import { BackLink, describeConfig, formatDay, formatDuration, SyncNotice, type SyncState } from './shared';
 
 /** A sync the user started from this page: still running (the page refreshes), or finished. */
@@ -55,8 +63,8 @@ const RUN_KIND: Record<SyncRunRow['kind'], string> = {
 };
 
 function runResult(run: SyncRunRow) {
-  if (run.ok === null) return <span class="text-ink-2">Running</span>;
-  return run.ok ? <span>OK</span> : <span class="text-error">Failed</span>;
+  if (run.ok === null) return <span className="text-muted-foreground">Running</span>;
+  return run.ok ? <span>OK</span> : <span className="text-destructive-foreground">Failed</span>;
 }
 
 /** The running notice, or the result once the run is done (a failure shows as "Last sync failed"). */
@@ -74,9 +82,7 @@ function ManualSyncNotice(props: { manual: ManualSyncState; hasError: boolean })
             {refresh.stopUrl ? (
               <>
                 {' '}
-                <a href={refresh.stopUrl} class="link link-accent">
-                  Stop refreshing
-                </a>
+                <TextLink href={refresh.stopUrl}>Stop refreshing</TextLink>
               </>
             ) : null}
           </>
@@ -92,7 +98,7 @@ function ManualSyncNotice(props: { manual: ManualSyncState; hasError: boolean })
   const events = `${formatNumber(n)} revenue ${n === 1 ? 'event' : 'events'} processed.`;
   if (m.run.ok) {
     return (
-      <Alert tone="success" role="status" class="fade-in">
+      <Alert tone="success" role="status" className="fade-in">
         {key ? 'Key replaced and synced.' : 'Synced.'} {events}
       </Alert>
     );
@@ -152,7 +158,7 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
       <PageHeader
         title={d.name}
         description={
-          <span class="inline-flex flex-wrap items-center gap-2">
+          <span className="inline-flex flex-wrap items-center gap-2">
             <ProviderDot dotClass={d.dotClass} size="md" />
             {meta.name}
             <StatusBadge status={d.status} />
@@ -162,7 +168,7 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
         actions={actions}
       />
 
-      <div class="grid gap-6">
+      <div className="grid gap-6">
         {props.sync ? <SyncNotice sync={props.sync} connected={[d.name]} /> : null}
         {props.manual ? <ManualSyncNotice manual={props.manual} hasError={Boolean(d.lastError)} /> : null}
 
@@ -173,26 +179,26 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
         ) : null}
 
         <Card title="Details">
-          <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-body">
-            <dt class="text-ink-3">Last synced</dt>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-body">
+            <dt className="text-faint">Last synced</dt>
             <dd>
               <RelativeTime ms={d.lastSyncedAt} now={props.now} />
             </dd>
-            <dt class="text-ink-3">Connected</dt>
+            <dt className="text-faint">Connected</dt>
             <dd>
               <RelativeTime ms={d.createdAt} now={props.now} />
             </dd>
             {d.keyHint ? (
               <>
-                <dt class="text-ink-3">Key</dt>
-                <dd class="font-mono">{d.keyHint}</dd>
+                <dt className="text-faint">Key</dt>
+                <dd className="font-mono">{d.keyHint}</dd>
               </>
             ) : null}
             {config.map((row) => (
-              <>
-                <dt class="text-ink-3">{row.label}</dt>
-                <dd class="break-all">{row.value}</dd>
-              </>
+              <Fragment key={row.label}>
+                <dt className="text-faint">{row.label}</dt>
+                <dd className="break-all">{row.value}</dd>
+              </Fragment>
             ))}
           </dl>
         </Card>
@@ -207,83 +213,86 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
                 caption="Recent daily snapshots, newest first"
               />
               {d.snapshots.length > RECENT_SNAPSHOTS ? (
-                <details class="mt-3">
-                  <summary class="cursor-pointer text-body text-ink-2">
-                    Show {d.snapshots.length - RECENT_SNAPSHOTS} earlier days
-                  </summary>
+                <Disclosure summary={`Show ${d.snapshots.length - RECENT_SNAPSHOTS} earlier days`} className="mt-3">
                   <SnapshotTable
                     id="earlier-snapshots"
                     rows={d.snapshots.slice(RECENT_SNAPSHOTS)}
                     currency={d.currency}
                     caption="Earlier daily snapshots, newest first"
                   />
-                </details>
+                </Disclosure>
               ) : null}
             </>
           ) : (
-            <p class="text-body text-ink-2">No snapshots yet. The first one is taken on the first sync.</p>
+            <p className="text-body text-muted-foreground">No snapshots yet. The first one is taken on the first sync.</p>
           )}
         </Card>
 
         <Card title="Sync history">
           {d.recentRuns.length > 0 ? (
-            <details>
-              <summary class="cursor-pointer text-body text-ink-2">
-                Show the last {d.recentRuns.length === 1 ? 'sync' : `${formatNumber(d.recentRuns.length)} syncs`}
-              </summary>
+            <Disclosure summary={`Show the last ${d.recentRuns.length === 1 ? 'sync' : `${formatNumber(d.recentRuns.length)} syncs`}`}>
               <SyncRunTable runs={d.recentRuns} now={props.now} />
-            </details>
+            </Disclosure>
           ) : (
-            <p class="text-body text-ink-2">No syncs yet.</p>
+            <p className="text-body text-muted-foreground">No syncs yet.</p>
           )}
         </Card>
 
         {isDemo ? null : (
-          // daisyUI collapse on a native <details>: works without JS, opens itself when it's needed.
-          <details id="manage" open={manageOpen} class="collapse collapse-arrow border border-base-300">
-            <summary class="collapse-title ps-5 sm:ps-6">
-              <h2 class="inline font-semibold">Manage</h2>
-              <span class="text-ink-2"> · Rename, replace the key or delete</span>
-            </summary>
-            <div class="collapse-content grid gap-8 border-t border-base-300 p-5 sm:p-6">
-              <section aria-labelledby="rename-title">
-                <h3 id="rename-title" class="font-semibold">
-                  Rename
-                </h3>
-                <form method="post" action={`${base}/rename`} class="mt-4 max-w-sm">
-                  <Field name="name" label="Name" value={d.name} required maxlength={60} autocomplete="off" />
-                  <Button variant="secondary">Save name</Button>
-                </form>
-              </section>
-
-              {meta.fields.length > 0 ? (
-                <section id="replace-key" aria-labelledby="replace-key-title" class="border-t border-base-300 pt-8">
-                  <h3 id="replace-key-title" class="font-semibold">
-                    Replace key
+          // A coss Collapsible: open by default when it's needed (a form in it failed, or the key does).
+          <Collapsible defaultOpen={manageOpen} render={<CossCard id="manage" render={<section aria-labelledby="manage-title" />} />}>
+            <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 rounded-2xl px-5 py-4 text-left sm:px-6">
+              <span className="min-w-0 flex-1">
+                <h2 id="manage-title" className="inline font-semibold">
+                  Manage
+                </h2>
+                <span className="text-muted-foreground"> · Rename, replace the key or delete</span>
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsiblePanel keepMounted hiddenUntilFound>
+              <div className="grid gap-8 border-t p-5 sm:p-6">
+                <section aria-labelledby="rename-title">
+                  <h3 id="rename-title" className="font-semibold">
+                    Rename
                   </h3>
-                  <p class="mt-1 mb-4 text-body text-ink-2">The current key stays in use until {meta.name} accepts the new one.</p>
-                  <ConnectionForm
-                    meta={meta}
-                    mode="rotate"
-                    action={`${base}/rotate`}
-                    values={rotateValues}
-                    fieldErrors={props.rotate?.fieldErrors}
-                    error={props.rotate?.error}
-                  />
+                  <form method="post" action={`${base}/rename`} className="mt-4 max-w-sm">
+                    <Field name="name" label="Name" value={d.name} required maxLength={60} autoComplete="off" />
+                    <Button variant="secondary">Save name</Button>
+                  </form>
                 </section>
-              ) : null}
 
-              <DangerZone
-                title="Delete connection"
-                description={`Deletes the stored key and all snapshots, transactions and sync history for this connection. This can’t be undone. The key stays active in ${meta.name}; revoke it there if you no longer need it.`}
-              >
-                <form method="post" action={`${base}/delete`}>
-                  <ConfirmCheckbox label={<>Yes, delete “{d.name}” and all of its data.</>} />
-                  <Button variant="danger">Delete connection</Button>
-                </form>
-              </DangerZone>
-            </div>
-          </details>
+                {meta.fields.length > 0 ? (
+                  <section id="replace-key" aria-labelledby="replace-key-title" className="scroll-mt-6 border-t pt-8">
+                    <h3 id="replace-key-title" className="font-semibold">
+                      Replace key
+                    </h3>
+                    <p className="mt-1 mb-4 text-body text-muted-foreground">
+                      The current key stays in use until {meta.name} accepts the new one.
+                    </p>
+                    <ConnectionForm
+                      meta={meta}
+                      mode="rotate"
+                      action={`${base}/rotate`}
+                      values={rotateValues}
+                      fieldErrors={props.rotate?.fieldErrors}
+                      error={props.rotate?.error}
+                    />
+                  </section>
+                ) : null}
+
+                <DangerZone
+                  title="Delete connection"
+                  description={`Deletes the stored key and all snapshots, transactions and sync history for this connection. This can’t be undone. The key stays active in ${meta.name}; revoke it there if you no longer need it.`}
+                >
+                  <form method="post" action={`${base}/delete`}>
+                    <ConfirmCheckbox label={<>Yes, delete “{d.name}” and all of its data.</>} />
+                    <Button variant="danger">Delete connection</Button>
+                  </form>
+                </DangerZone>
+              </div>
+            </CollapsiblePanel>
+          </Collapsible>
         )}
       </div>
     </Layout>
@@ -292,52 +301,48 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
 
 function SyncRunTable(props: { runs: SyncRunRow[]; now?: number }) {
   return (
-    <TableScroller labelledBy="recent-syncs-caption" class="mt-3">
-      <table class="table table-sm">
-        <caption id="recent-syncs-caption" class="sr-only">
-          Recent sync runs, newest first
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Kind</th>
-            <th scope="col">Started</th>
-            <th scope="col" class="text-right">
-              Duration
-            </th>
-            <th scope="col">Result</th>
-            <th scope="col" class="text-right">
-              Events
-            </th>
-            <th scope="col">Message</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.runs.map((r) => (
-            <tr>
-              <th scope="row" class="font-normal">
-                {RUN_KIND[r.kind]}
-              </th>
-              <td class="whitespace-nowrap">
-                <RelativeTime ms={r.startedAt} now={props.now} />
-              </td>
-              <td class="text-right whitespace-nowrap tabular-nums">
-                {r.finishedAt === null ? (
-                  <>
-                    <span aria-hidden="true">—</span>
-                    <span class="sr-only">Still running</span>
-                  </>
-                ) : (
-                  formatDuration(r.finishedAt - r.startedAt)
-                )}
-              </td>
-              <td>{runResult(r)}</td>
-              <td class="text-right tabular-nums">{formatNumber(r.events)}</td>
-              <td class="text-ink-2">{r.message ?? ''}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableScroller>
+    <ScrollTable labelledBy="recent-syncs-caption" className="mt-3">
+      <caption id="recent-syncs-caption" className="sr-only">
+        Recent sync runs, newest first
+      </caption>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Kind</TableHead>
+          <TableHead scope="col">Started</TableHead>
+          <TableHead scope="col" className="text-right">
+            Duration
+          </TableHead>
+          <TableHead scope="col">Result</TableHead>
+          <TableHead scope="col" className="text-right">
+            Events
+          </TableHead>
+          <TableHead scope="col">Message</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {props.runs.map((r, i) => (
+          <TableRow key={`${r.startedAt}-${i}`}>
+            <TableRowHeader>{RUN_KIND[r.kind]}</TableRowHeader>
+            <TableCell>
+              <RelativeTime ms={r.startedAt} now={props.now} />
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {r.finishedAt === null ? (
+                <>
+                  <span aria-hidden="true">—</span>
+                  <span className="sr-only">Still running</span>
+                </>
+              ) : (
+                formatDuration(r.finishedAt - r.startedAt)
+              )}
+            </TableCell>
+            <TableCell>{runResult(r)}</TableCell>
+            <TableCell className="text-right tabular-nums">{formatNumber(r.events)}</TableCell>
+            <TableCell className="whitespace-normal leading-5 text-muted-foreground">{r.message ?? ''}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </ScrollTable>
   );
 }
 
@@ -346,32 +351,38 @@ const RECENT_SNAPSHOTS = 7;
 function SnapshotTable(props: { id: string; rows: ConnectionDetail['snapshots']; currency: string; caption: string }) {
   const captionId = `${props.id}-caption`;
   return (
-    <TableScroller labelledBy={captionId}>
-      <table class="table table-sm">
-        <caption id={captionId} class="sr-only">
-          {props.caption}
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Date</th>
-            <th scope="col" class="text-right">MRR</th>
-            <th scope="col" class="text-right">Subscriptions</th>
-            <th scope="col" class="text-right">Trials</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.rows.map((s) => (
-            <tr>
-              <th scope="row" class="font-normal whitespace-nowrap">
-                <time datetime={s.day}>{formatDay(s.day)}</time>
-              </th>
-              <td class="text-right tabular-nums">{formatMoney(s.mrr, props.currency)}</td>
-              <td class="text-right tabular-nums">{formatNumber(s.activeSubscriptions)}</td>
-              <td class="text-right tabular-nums">{s.activeTrials === null ? <NotAvailable class="" /> : formatNumber(s.activeTrials)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableScroller>
+    <ScrollTable labelledBy={captionId}>
+      <caption id={captionId} className="sr-only">
+        {props.caption}
+      </caption>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Date</TableHead>
+          <TableHead scope="col" className="text-right">
+            MRR
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Subscriptions
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Trials
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {props.rows.map((s) => (
+          <TableRow key={s.day}>
+            <TableRowHeader>
+              <time dateTime={s.day}>{formatDay(s.day)}</time>
+            </TableRowHeader>
+            <TableCell className="text-right tabular-nums">{formatMoney(s.mrr, props.currency)}</TableCell>
+            <TableCell className="text-right tabular-nums">{formatNumber(s.activeSubscriptions)}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {s.activeTrials === null ? <NotAvailable className="" /> : formatNumber(s.activeTrials)}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </ScrollTable>
   );
 }

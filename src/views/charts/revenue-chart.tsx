@@ -1,27 +1,40 @@
 /**
- * RevenueChart — daily net revenue, stacked by connection. Server-rendered SVG, no JS.
+ * RevenueChart — daily net revenue, stacked by connection. shadcn Charts on Recharts 3.
  * Owner: Experience (data-viz). CONTRACT: props are fixed.
  *
  * - Bars stack bottom → top in `connections` order; positive and negative parts of a day stack
- *   separately around a visible zero baseline (refund-heavy days go below it).
- * - Colour = ConnectionSummary.color via the SVG `fill` attribute. Connections sharing a colour
+ *   separately around a visible zero line (stackOffset="sign" + a ReferenceLine at 0), so
+ *   refund-heavy days go below it.
+ * - Colour = ConnectionSummary.color as the SVG `fill` attribute. Connections sharing a colour
  *   (two Stripe accounts) step down in fill-opacity (1 / 0.65 / 0.4) and every stacked segment is
- *   separated by a 1px gap that shows the surface behind it.
+ *   separated by a 1px gap that shows the surface behind it (never a drawn border).
  * - Ids in byConnection that aren't in `connections`, plus any part of `total` that byConnection
- *   doesn't explain, become one neutral "Other" segment — so every bar always sums to the day total.
+ *   doesn't explain, become one "Other" segment in var(--faint) — so every bar always sums to the
+ *   day total. A connection without a valid hex colour is drawn in var(--series-neutral).
+ * - All-zero → only the $0 baseline and a calm message. The legend (more than one series) is
+ *   server HTML, like the description and the "Show data" table; the plot paints after hydration.
  */
 
+import { Bar, BarChart, CartesianGrid, ReferenceLine, XAxis, YAxis, type BarShapeProps, type TooltipContentProps } from 'recharts';
+import { ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import type { ConnectionSummary, RevenueDay } from '../../data/types';
+import { TableRowHeader } from '../components/ui';
 import {
-  AMOUNT_CELL,
-  AMOUNT_CELL_ZERO,
-  ChartGrid,
+  AmountCell,
+  AXIS_TEXT_FILL,
+  ChartFrame,
   DataDetails,
-  HEAD_CELL_LEFT,
-  HEAD_CELL_RIGHT,
+  DayCell,
+  HeadCell,
   Legend,
-  PlotMessage,
-  ROW_HEAD,
+  MARGIN_TOP,
+  Swatch,
+  TableRow,
+  TICK_MARGIN,
+  TooltipRow,
+  X_AXIS_HEIGHT,
+  xTick,
+  yAxisWidth,
 } from './frame';
 import {
   bandGapRatio,
@@ -31,14 +44,11 @@ import {
   isHexColor,
   longDay,
   money,
-  PLOT_HEIGHT,
   revenueScale,
   sameColorOpacities,
   shortDay,
-  svgNum,
   tickLabels,
-  xTicks,
-  yMapper,
+  xLabelIndices,
 } from './scale';
 
 export interface RevenueChartProps {
@@ -52,13 +62,17 @@ export interface RevenueChartProps {
   title?: string;
 }
 
-/** viewBox units per day; x is stretched to the container anyway. */
-const BAND = 10;
-/** Vertical gap between stacked segments, in CSS px (y units are px, see scale.ts). */
+/** Vertical gap between stacked segments, in CSS px. */
 const SEGMENT_GAP = 1;
-const OTHER_CLASS = 'fill-ink-3';
+/** "Other": everything byConnection can't attribute to a listed connection. */
+const OTHER_CLASS = 'fill-faint';
 /** Fallback for a connection whose colour isn't a valid hex. */
 const NEUTRAL_CLASS = 'fill-series-neutral';
+/** SVG fill for the neutral classes (bars and tooltip swatches use attributes, not classes). */
+const NEUTRAL_FILL: Record<string, string> = {
+  [OTHER_CLASS]: 'var(--faint)',
+  [NEUTRAL_CLASS]: 'var(--series-neutral)',
+};
 
 export interface RevenueSeries {
   key: string;
@@ -138,28 +152,9 @@ export function revenueModel(days: RevenueDay[], connections: ConnectionSummary[
   return { series, rows, allZero };
 }
 
-interface Seg {
-  s: RevenueSeries;
-  from: number;
-  to: number;
-}
-
-function stacks(row: RevenueRow, series: RevenueSeries[]): { up: Seg[]; down: Seg[] } {
-  const up: Seg[] = [];
-  const down: Seg[] = [];
-  let p = 0;
-  let n = 0;
-  for (const s of series) {
-    const v = row.values[s.col] ?? 0;
-    if (v > 0) {
-      up.push({ s, from: p, to: p + v });
-      p += v;
-    } else if (v < 0) {
-      down.push({ s, from: n, to: n + v });
-      n += v;
-    }
-  }
-  return { up, down };
+/** The SVG fill of a series: its brand hex, or the token behind its neutral class. */
+function seriesFill(s: RevenueSeries): string {
+  return s.color ?? NEUTRAL_FILL[s.neutralClass ?? ''] ?? 'var(--series-neutral)';
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -193,15 +188,83 @@ function describe(model: RevenueModel, currency: string): string {
   return parts.join(' ');
 }
 
-function tooltip(row: RevenueRow, series: RevenueSeries[], currency: string): string {
-  const lines = [`${longDay(row.day)}: ${money(row.total, currency)} total`];
-  if (series.length > 1) {
-    for (const s of series) {
+/** One bar band per day. `c{col}` holds the series values Recharts stacks (index keys: ids may contain dots). */
+interface Datum {
+  i: number;
+  row: RevenueRow;
+  /** Topmost positive / bottommost negative segment of the day (no gap beyond the outer end). */
+  topPos: number;
+  botNeg: number;
+  [key: `c${number}`]: number;
+}
+
+function toData(model: RevenueModel): Datum[] {
+  return model.rows.map((row, i) => {
+    const d: Datum = { i, row, topPos: -1, botNeg: -1 };
+    for (const s of model.series) {
       const v = row.values[s.col] ?? 0;
-      if (v !== 0) lines.push(`${s.name}: ${money(v, currency)}`);
+      d[`c${s.col}`] = v;
+      if (v > 0) d.topPos = s.col;
+      else if (v < 0) d.botNeg = s.col;
     }
-  }
-  return lines.join('\n');
+    return d;
+  });
+}
+
+/**
+ * A stacked segment with a 1px gap on its outer side (away from zero) unless it's the outermost
+ * one of its stack, so neighbours separate by showing the surface behind them.
+ */
+function segmentShape(s: RevenueSeries) {
+  const fill = seriesFill(s);
+  const opacity = s.opacity < 1 ? s.opacity : undefined;
+  return function Segment(props: BarShapeProps) {
+    const d = props.payload as Datum | undefined;
+    const x = finite(props.x);
+    const w = finite(props.width);
+    let top = Math.min(finite(props.y), finite(props.y) + finite(props.height));
+    let h = Math.abs(finite(props.height));
+    const v = d ? (d.row.values[s.col] ?? 0) : 0;
+    if (!d || v === 0 || h <= 0 || w <= 0) return <g />;
+    if (v > 0 && d.topPos !== s.col && h >= 2 * SEGMENT_GAP) {
+      top += SEGMENT_GAP;
+      h -= SEGMENT_GAP;
+    } else if (v < 0 && d.botNeg !== s.col && h >= 2 * SEGMENT_GAP) {
+      h -= SEGMENT_GAP;
+    }
+    return <rect x={x} y={top} width={w} height={h} fill={fill} fillOpacity={opacity} />;
+  };
+}
+
+/** The day, its total, then each non-zero series (when there is more than one). */
+function revenueTooltip(series: RevenueSeries[], currency: string) {
+  return function RevenueTooltip(props: TooltipContentProps) {
+    const d = props.payload?.[0]?.payload as Datum | undefined;
+    if (!props.active || !d) return null;
+    const total = { dataKey: '__total', name: 'Total', value: d.row.total, payload: d };
+    const parts =
+      series.length > 1
+        ? series
+            .filter((s) => (d.row.values[s.col] ?? 0) !== 0)
+            .map((s) => ({ dataKey: `c${s.col}`, name: s.name, value: d.row.values[s.col] ?? 0, payload: d }))
+        : [];
+    const byKey = new Map<string, RevenueSeries>(series.map((s) => [`c${s.col}`, s]));
+    return (
+      <ChartTooltipContent
+        active
+        payload={[total, ...parts] as unknown as TooltipContentProps['payload']}
+        labelFormatter={() => longDay(d.row.day)}
+        formatter={(value, _name, item) => {
+          const s = byKey.get(String(item.dataKey));
+          return s ? (
+            <TooltipRow name={s.name} value={money(Number(value), currency)} swatch={<Swatch fill={seriesFill(s)} opacity={s.opacity} />} />
+          ) : (
+            <TooltipRow strong name="Total" value={money(Number(value), currency)} />
+          );
+        }}
+      />
+    );
+  };
 }
 
 export function RevenueChart(props: RevenueChartProps) {
@@ -210,10 +273,7 @@ export function RevenueChart(props: RevenueChartProps) {
   const model = revenueModel(props.series, props.connections);
   const { rows, series, allZero } = model;
   const n = rows.length;
-  const H = PLOT_HEIGHT;
-  const W = Math.max(n, 1) * BAND;
   const gap = bandGapRatio(n);
-  const barW = BAND * (1 - gap);
 
   let maxPos = 0;
   let minNeg = 0;
@@ -222,140 +282,88 @@ export function RevenueChart(props: RevenueChartProps) {
     if (r.neg < minNeg) minNeg = r.neg;
   }
   const scale = revenueScale(minNeg, maxPos, currency);
-  const y = yMapper(scale, H);
-  const y0 = y(0);
   const labels = tickLabels(scale.ticks, currency);
+  const labelOf = new Map(scale.ticks.map((t, k) => [t, labels[k]!] as const));
   // All-zero: only the "$0" baseline label, no gridlines — a flat, calm frame instead of a fake scale.
-  const yLabels = allZero ? [labels[scale.ticks.indexOf(0)] ?? money(0, currency, { compact: true })] : labels.slice().reverse();
+  const yTicks = allZero ? [0] : scale.ticks;
+  const yLabels = yTicks.map((t) => labelOf.get(t) ?? money(t, currency, { compact: true }));
 
   const id = chartId(
     'rev',
     `${title}|${currency}|${series.map((s) => s.key).join(',')}|${rows.map((r) => `${r.day}:${r.total}`).join(',')}`,
   );
-  const titleId = `${id}-title`;
-  const descId = `${id}-desc`;
   const desc = describe(model, currency);
-
-  const bars = allZero
-    ? []
-    : rows.flatMap((row, i) => {
-        const x = i * BAND + (BAND * gap) / 2;
-        const { up, down } = stacks(row, series);
-        const rects = [];
-        for (let j = 0; j < up.length; j++) {
-          const seg = up[j]!;
-          let top = y(seg.to);
-          const bottom = y(seg.from);
-          if (j < up.length - 1 && bottom - top >= 2 * SEGMENT_GAP) top += SEGMENT_GAP;
-          rects.push(<Bar seg={seg} x={x} w={barW} top={top} bottom={bottom} />);
-        }
-        for (let j = 0; j < down.length; j++) {
-          const seg = down[j]!;
-          const top = y(seg.from);
-          let bottom = y(seg.to);
-          if (j < down.length - 1 && bottom - top >= 2 * SEGMENT_GAP) bottom -= SEGMENT_GAP;
-          rects.push(<Bar seg={seg} x={x} w={barW} top={top} bottom={bottom} />);
-        }
-        return rects;
-      });
-
-  const plot = (
-    <svg
-      role="img"
-      aria-labelledby={titleId}
-      aria-describedby={descId}
-      viewBox={`0 0 ${svgNum(W)} ${H}`}
-      preserveAspectRatio="none"
-      width="100%"
-      height={String(H)}
-      class="block h-40 w-full overflow-visible"
-    >
-      <title id={titleId}>{title}</title>
-      <desc id={descId}>{desc}</desc>
-      {allZero
-        ? null
-        : scale.ticks
-            .filter((t) => t !== 0)
-            .map((t) => (
-              <line
-                x1="0"
-                x2={svgNum(W)}
-                y1={svgNum(y(t))}
-                y2={svgNum(y(t))}
-                class="stroke-base-300"
-                vector-effect="non-scaling-stroke"
-                shape-rendering="crispEdges"
-              />
-            ))}
-      {bars}
-      <line
-        x1="0"
-        x2={svgNum(W)}
-        y1={svgNum(y0)}
-        y2={svgNum(y0)}
-        class="stroke-field"
-        vector-effect="non-scaling-stroke"
-        shape-rendering="crispEdges"
-      />
-      {/* Per-day hover targets with a native <title> tooltip, for mouse users only. Chromium
-          still exposes titled children of role="img" as graphics-symbol nodes (30–90 long names
-          inside the image), so the group is aria-hidden; the tooltips keep working. Screen-reader
-          and keyboard users get the same numbers from <desc> and the "Show data" table. */}
-      {allZero ? null : (
-        <g aria-hidden="true">
-          {rows.map((row, i) => (
-            <rect
-              x={svgNum(i * BAND)}
-              y="0"
-              width={svgNum(BAND)}
-              height={String(H)}
-              class="fill-transparent hover:fill-base-200"
-            >
-              <title>{tooltip(row, series, currency)}</title>
-            </rect>
-          ))}
-        </g>
-      )}
-    </svg>
-  );
+  const data = toData(model);
 
   return (
-    // block: daisyUI lays out a <figure> inside a .card as a centred flex row (it is meant for card images).
-    <figure class="block w-full">
+    <figure className="w-full min-w-0">
       {series.length > 1 && !allZero ? (
         <Legend
           items={series.map((s) => ({ name: s.name, color: s.color, opacity: s.opacity, neutralClass: s.neutralClass }))}
         />
       ) : null}
-      <ChartGrid
-        yLabels={yLabels}
-        xTicks={xTicks(
-          rows.map((r) => r.day),
-          'band',
-          gap,
-        )}
-        overlay={allZero ? <PlotMessage>No revenue in this period yet.</PlotMessage> : null}
-      >
-        {plot}
-      </ChartGrid>
+      <ChartFrame id={id} title={title} description={desc} message={allZero ? 'No revenue in this period yet.' : null}>
+        <BarChart
+          data={data}
+          accessibilityLayer={false}
+          stackOffset="sign"
+          barCategoryGap={`${(gap / 2) * 100}%`}
+          barGap={0}
+          margin={{ top: MARGIN_TOP, right: 0, bottom: 0, left: 0 }}
+        >
+          {allZero ? null : (
+            <CartesianGrid vertical={false} horizontalValues={scale.ticks.filter((t) => t !== 0)} stroke="var(--border)" />
+          )}
+          <XAxis
+            type="category"
+            dataKey="i"
+            ticks={xLabelIndices(n)}
+            interval={0}
+            axisLine={false}
+            tickLine={false}
+            tickSize={0}
+            tickMargin={TICK_MARGIN}
+            height={X_AXIS_HEIGHT}
+            tick={xTick({ count: n, bandGap: gap, label: (i) => (rows[i] ? shortDay(rows[i].day) : '') })}
+          />
+          <YAxis
+            type="number"
+            domain={[scale.min, scale.max]}
+            // All-zero stacks give Recharts no data domain, and it would drop the axis and the baseline.
+            allowDataOverflow={allZero}
+            ticks={yTicks}
+            interval={0}
+            axisLine={false}
+            tickLine={false}
+            tickSize={0}
+            tickMargin={TICK_MARGIN}
+            width={yAxisWidth(yLabels)}
+            tick={{ fill: AXIS_TEXT_FILL }}
+            tickFormatter={(v: number) => labelOf.get(v) ?? money(v, currency, { compact: true })}
+          />
+          {allZero ? null : <ChartTooltip cursor={{ fill: 'var(--muted)' }} content={revenueTooltip(series, currency)} />}
+          {/* Always drawn (all-zero days draw nothing): Recharts needs a series to lay out the y axis. */}
+          {series.length > 0 ? (
+            series.map((s) => (
+                <Bar
+                  key={s.key}
+                  dataKey={`c${s.col}`}
+                  name={s.name}
+                  stackId="day"
+                  fill={seriesFill(s)}
+                  fillOpacity={s.opacity}
+                  shape={segmentShape(s)}
+                  isAnimationActive={false}
+                />
+              ))
+          ) : (
+            <Bar dataKey={(d: Datum) => d.row.total} stackId="day" fill="none" isAnimationActive={false} />
+          )}
+          <ReferenceLine y={0} stroke="var(--input)" ifOverflow="visible" />
+        </BarChart>
+      </ChartFrame>
       {allZero ? null : <RevenueTable model={model} currency={currency} id={`${id}-data`} label={title} />}
     </figure>
-  );
-}
-
-function Bar(props: { seg: Seg; x: number; w: number; top: number; bottom: number }) {
-  const { s } = props.seg;
-  const h = Math.max(0, props.bottom - props.top);
-  return (
-    <rect
-      x={svgNum(props.x)}
-      y={svgNum(props.top)}
-      width={svgNum(props.w)}
-      height={svgNum(h)}
-      fill={s.color ?? undefined}
-      fill-opacity={s.color && s.opacity < 1 ? svgNum(s.opacity) : undefined}
-      class={s.color ? undefined : (s.neutralClass ?? undefined)}
-    />
   );
 }
 
@@ -365,44 +373,39 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
   const colTotals = series.map((s) => rows.reduce((acc, r) => acc + (r.values[s.col] ?? 0), 0));
   const grand = rows.reduce((acc, r) => acc + r.total, 0);
   const caption = `Daily revenue by connection, ${dayRangeLabel(rows[0]!.day, rows[rows.length - 1]!.day)}, in ${cur.trim().toUpperCase()}.`;
-  const cell = (v: number) => <td class={v === 0 ? AMOUNT_CELL_ZERO : AMOUNT_CELL}>{money(v, cur)}</td>;
   return (
     <DataDetails
       id={props.id}
       label={props.label}
       caption={caption}
       head={
-        <tr>
-          <th scope="col" class={HEAD_CELL_LEFT}>
-            Date
-          </th>
+        <TableRow>
+          <HeadCell>Date</HeadCell>
           {series.map((s) => (
-            <th scope="col" class={HEAD_CELL_RIGHT}>
+            <HeadCell key={s.key} numeric>
               {s.name}
-            </th>
+            </HeadCell>
           ))}
-          <th scope="col" class={HEAD_CELL_RIGHT}>
-            Total
-          </th>
-        </tr>
+          <HeadCell numeric>Total</HeadCell>
+        </TableRow>
       }
-      body={rows.map((r) => (
-        <tr>
-          <th scope="row" class={ROW_HEAD}>
-            <time datetime={r.day}>{shortDay(r.day)}</time>
-          </th>
-          {series.map((s) => cell(r.values[s.col] ?? 0))}
-          {cell(r.total)}
-        </tr>
+      body={rows.map((r, i) => (
+        <TableRow key={`${i}-${r.day}`}>
+          <DayCell day={r.day} label={shortDay(r.day)} />
+          {series.map((s) => (
+            <AmountCell key={s.key} value={r.values[s.col] ?? 0} text={money(r.values[s.col] ?? 0, cur)} />
+          ))}
+          <AmountCell value={r.total} text={money(r.total, cur)} />
+        </TableRow>
       ))}
       foot={
-        <tr>
-          <th scope="row" class={HEAD_CELL_LEFT}>
-            Total
-          </th>
-          {colTotals.map((v) => cell(v))}
-          {cell(grand)}
-        </tr>
+        <TableRow>
+          <TableRowHeader className="font-medium">Total</TableRowHeader>
+          {colTotals.map((v, k) => (
+            <AmountCell key={series[k]!.key} value={v} text={money(v, cur)} />
+          ))}
+          <AmountCell value={grand} text={money(grand, cur)} />
+        </TableRow>
       }
     />
   );

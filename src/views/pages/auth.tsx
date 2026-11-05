@@ -1,7 +1,7 @@
 /** Log in and sign up (one narrow card, two fields). Owner: Experience (pages). */
 
 import { PASSWORD_MIN } from '../../lib/auth';
-import { Button, Card, Field, FormError, LinkButton } from '../components/ui';
+import { Button, Card, Field, FormError, LinkButton, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 
 export interface AuthPageProps {
@@ -30,11 +30,11 @@ export function AuthPage(props: AuthPageProps) {
     return (
       <Layout {...props.chrome} title="Sign-ups closed" width="narrow">
         <Card>
-          <h1 class="text-title">Sign-ups are closed</h1>
-          <p class="mt-2 text-body text-ink-2">
+          <h1 className="font-heading text-title">Sign-ups are closed</h1>
+          <p className="mt-2 text-body text-muted-foreground">
             This hoomuch instance isn’t accepting new accounts. If you already have one, log in.
           </p>
-          <div class="mt-6">
+          <div className="mt-6">
             <LinkButton href={withNext('/login', props.next)}>Log in</LinkButton>
           </div>
         </Card>
@@ -54,52 +54,48 @@ export function AuthPage(props: AuthPageProps) {
   return (
     <Layout {...props.chrome} title={pageTitle} width="narrow">
       <Card>
-        <h1 class={isSignup ? 'text-title' : 'mb-6 text-title'}>{title}</h1>
-        {isSignup ? <p class="mt-1.5 mb-6 text-body text-ink-2">Two fields, then your MRR.</p> : null}
+        <h1 className={isSignup ? 'font-heading text-title' : 'mb-6 font-heading text-title'}>{title}</h1>
+        {isSignup ? <p className="mt-1.5 mb-6 text-body text-muted-foreground">Two fields, then your MRR.</p> : null}
         <form method="post" action={isSignup ? '/signup' : '/login'}>
-          <FormError message={formError} autofocus={focus === 'form'} />
+          <FormError message={formError} autoFocus={focus === 'form'} />
           {props.next ? <input type="hidden" name="next" value={props.next} /> : null}
           <Field
             name="email"
             label="Email"
             type="email"
             value={props.email}
-            autocomplete="email"
+            autoComplete="email"
             required
-            maxlength={254}
-            autofocus={focus === 'email'}
+            maxLength={254}
+            autoFocus={focus === 'email'}
             error={emailError}
           />
           <Field
             name="password"
             label="Password"
             type="password"
-            autocomplete={isSignup ? 'new-password' : 'current-password'}
+            autoComplete={isSignup ? 'new-password' : 'current-password'}
             required
-            minlength={isSignup ? PASSWORD_MIN : undefined}
-            maxlength={256}
-            autofocus={focus === 'password'}
+            minLength={isSignup ? PASSWORD_MIN : undefined}
+            maxLength={256}
+            autoFocus={focus === 'password'}
             help={isSignup ? `At least ${PASSWORD_MIN} characters.` : undefined}
             error={passwordError}
           />
-          <div class="mt-6">
-            <Button busyLabel={isSignup ? 'Creating account…' : 'Logging in…'}>{isSignup ? 'Create account' : 'Log in'}</Button>
+          <div className="mt-6">
+            <Button block busyLabel={isSignup ? 'Creating account…' : 'Logging in…'}>{isSignup ? 'Create account' : 'Log in'}</Button>
           </div>
         </form>
-        <p class="mt-6 text-body text-ink-2">
+        <p className="mt-6 text-body text-muted-foreground">
           {isSignup ? (
             <>
               Already have an account?{' '}
-              <a href={withNext('/login', props.next)} class="link link-accent">
-                Log in
-              </a>
+              <TextLink href={withNext('/login', props.next)}>Log in</TextLink>
             </>
           ) : props.signupOpen ? (
             <>
               New here?{' '}
-              <a href={withNext('/signup', props.next)} class="link link-accent">
-                Create an account
-              </a>
+              <TextLink href={withNext('/signup', props.next)}>Create an account</TextLink>
             </>
           ) : (
             'Sign-ups are closed on this instance.'

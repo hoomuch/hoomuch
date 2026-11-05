@@ -9,10 +9,11 @@
  * Security: secret fields are NEVER pre-filled, even on a validation error.
  */
 
+import { Check, ExternalLink } from 'lucide-react';
+import { Card, CardHeader, CardPanel, CardTitle } from '@/components/ui/card';
 import type { ProviderMeta } from '../../providers/types';
-import { Alert, Button, Field, FormError, LinkButton } from './ui';
 import { ProviderDot } from './badges';
-import { IconCheck, IconExternal } from './icons';
+import { Alert, Button, Field, FormError, LinkButton, TextLink } from './ui';
 
 export interface ConnectionFormProps {
   meta: ProviderMeta;
@@ -37,8 +38,9 @@ function submitLabel(meta: ProviderMeta, mode: 'create' | 'rotate'): string {
 }
 
 /**
- * The key-creation steps + permission checklist. Exported so the landing page can show the real
- * thing; `preview` makes it an <h3> and drops the outbound "Open Stripe" link.
+ * The key-creation steps + permission checklist, in a coss Card on the muted fill. Exported so
+ * the landing page can show the real thing; `preview` makes it an <h3> and drops the outbound
+ * "Open Stripe" link.
  */
 export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview?: boolean }) {
   const { meta } = props;
@@ -47,55 +49,56 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
   return (
     // A named <section> (region), not <aside>: the steps are part of the task, and a complementary
     // landmark nested inside <main> is flagged by axe (landmark-complementary-is-top-level).
-    <section aria-labelledby={props.headingId} class="card card-border border-base-300 bg-base-200">
-      <div class="card-body">
-      <Heading id={props.headingId} class="card-title">
-        <ProviderDot dotClass={meta.dotClass} size="md" />
-        Create a {meta.name} key
-      </Heading>
-
-      {meta.keySteps.length > 0 ? (
-        <ol class="mt-4 space-y-3">
-          {meta.keySteps.map((step, i) => (
-            <li class="flex gap-3">
-              <span
-                aria-hidden="true"
-                class="flex size-5 shrink-0 items-center justify-center rounded-full border border-field text-caption leading-none font-semibold tabular-nums text-ink-2"
-              >
-                {i + 1}
-              </span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
-      ) : null}
-
-      {meta.keyUrl && !props.preview ? (
-        <p class="mt-4 pl-8">
-          <a href={meta.keyUrl} rel="noopener noreferrer" target="_blank" class="link link-accent inline-flex items-center gap-1 font-semibold">
-            Open {meta.name}
-            <IconExternal class="size-3.5 shrink-0" />
-            <span class="sr-only"> (opens in a new tab)</span>
-          </a>
-        </p>
-      ) : null}
-
-      {meta.permissions.length > 0 ? (
-        <div class="mt-5 border-t border-base-300 pt-4">
-          <Sub class="font-semibold">Permissions it needs</Sub>
-          <ul class="mt-2 space-y-1.5">
-            {meta.permissions.map((p) => (
-              <li class="flex items-start gap-2">
-                <IconCheck class="mt-0.5 size-4 shrink-0 text-ink-2" />
-                <span>{p}</span>
+    <Card render={<section aria-labelledby={props.headingId} />} className="bg-muted/60 text-body">
+      <CardHeader className="px-5 pt-5 sm:px-6 sm:pt-6">
+        <CardTitle render={<Heading id={props.headingId} />} className="flex items-center gap-2 text-base">
+          <ProviderDot dotClass={meta.dotClass} size="md" />
+          Create a {meta.name} key
+        </CardTitle>
+      </CardHeader>
+      <CardPanel className="px-5 pb-5 sm:px-6 sm:pb-6">
+        {meta.keySteps.length > 0 ? (
+          <ol className="space-y-3">
+            {meta.keySteps.map((step, i) => (
+              <li key={step} className="flex gap-3">
+                <span
+                  aria-hidden="true"
+                  className="flex size-5 shrink-0 items-center justify-center rounded-full border border-input bg-background text-caption leading-none font-semibold tabular-nums text-muted-foreground"
+                >
+                  {i + 1}
+                </span>
+                <span>{step}</span>
               </li>
             ))}
-          </ul>
-          <p class="mt-3 text-ink-2">hoomuch only makes read requests.</p>
-        </div>
-      ) : null}
-      </div>
-    </section>
+          </ol>
+        ) : null}
+
+        {meta.keyUrl && !props.preview ? (
+          <p className="mt-4 pl-8">
+            <TextLink href={meta.keyUrl} external className="inline-flex items-center gap-1">
+              Open {meta.name}
+              <ExternalLink className="size-3.5 shrink-0" />
+              <span className="sr-only"> (opens in a new tab)</span>
+            </TextLink>
+          </p>
+        ) : null}
+
+        {meta.permissions.length > 0 ? (
+          <div className="mt-5 border-t pt-4">
+            <Sub className="font-semibold">Permissions it needs</Sub>
+            <ul className="mt-2 space-y-1.5">
+              {meta.permissions.map((p) => (
+                <li key={p} className="flex items-start gap-2">
+                  <Check className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span>{p}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-muted-foreground">hoomuch only makes read requests.</p>
+          </div>
+        ) : null}
+      </CardPanel>
+    </Card>
   );
 }
 
@@ -112,14 +115,14 @@ export function ConnectionForm(props: ConnectionFormProps) {
   const firstInvalid = fieldOrder.find((n) => errors[n]);
 
   return (
-    <div class={hasGuide ? 'grid items-start gap-8 md:grid-cols-2 md:gap-10' : 'max-w-md'}>
-      <form method="post" action={props.action} class="min-w-0">
+    <div className={hasGuide ? 'grid items-start gap-8 md:grid-cols-2 md:gap-10' : 'max-w-md'}>
+      <form method="post" action={props.action} className="min-w-0">
         {showGuide && meta.warning ? (
-          <Alert tone="warning" title="Before you paste the key" class="mb-6">
+          <Alert tone="warning" title="Before you paste the key" className="mb-6">
             {meta.warning}
           </Alert>
         ) : null}
-        <FormError message={props.error} autofocus={!firstInvalid && Boolean(props.error)} />
+        <FormError message={props.error} autoFocus={!firstInvalid && Boolean(props.error)} />
         {props.mode === 'create' ? <input type="hidden" name="provider" value={meta.id} /> : null}
         {props.mode === 'create' ? (
           <Field
@@ -129,12 +132,13 @@ export function ConnectionForm(props: ConnectionFormProps) {
             placeholder={meta.name}
             help="Shown on your dashboard. You can change it later."
             error={errors['name']}
-            autofocus={firstInvalid === 'name'}
-            maxlength={60}
+            autoFocus={firstInvalid === 'name'}
+            maxLength={60}
           />
         ) : null}
         {meta.fields.map((f) => (
           <Field
+            key={f.name}
             name={f.name}
             label={f.label}
             type={f.type}
@@ -143,15 +147,15 @@ export function ConnectionForm(props: ConnectionFormProps) {
             placeholder={f.placeholder}
             help={f.help}
             error={errors[f.name]}
-            autofocus={firstInvalid === f.name}
+            autoFocus={firstInvalid === f.name}
             required={f.required}
-            autocomplete="off"
-            spellcheck={false}
-            autocapitalize="off"
-            inputClass={f.secret ? 'font-mono' : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            autoCapitalize="off"
+            inputClassName={f.secret ? 'font-mono' : undefined}
           />
         ))}
-        <div class="mt-6 flex flex-wrap items-center gap-3">
+        <div className="mt-6 flex flex-wrap items-center gap-3">
           {/* Verifying a key is a live call to the provider: a few seconds, so say what's happening. */}
           <Button busyLabel="Checking key…">{submitLabel(meta, props.mode)}</Button>
           {props.cancelHref ? (
@@ -161,7 +165,7 @@ export function ConnectionForm(props: ConnectionFormProps) {
           ) : null}
         </div>
         {hasSecret ? (
-          <p class="mt-3 text-ink-2">
+          <p className="mt-3 text-muted-foreground">
             The key is checked with {meta.name} before it’s saved, then stored encrypted with AES-256-GCM.
           </p>
         ) : null}

@@ -10,6 +10,7 @@ import { getCurrencySource, getUserById, setInferredCurrency, updateUserCurrency
 import { sha256Hex } from '../../src/lib/crypto';
 import { DAY } from '../../src/lib/time';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
+import { htmlOf } from '../fixtures/html';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const ORIGIN = 'https://hoomuch.test';
@@ -74,12 +75,12 @@ describe('display currency', () => {
   it('sets it once on the dashboard, says so, and never overrides a choice made in Settings', async () => {
     seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit', lastSyncedAt: NOW });
     snap('ls', { EUR: 400_000 });
-    const first = await (await get('/dashboard')).text();
+    const first = await htmlOf(await get('/dashboard'));
     expect(first).toContain('Amounts are in EUR, the currency most of your MRR is in.');
     expect(first).toContain('€4,000');
     expect((await getUserById(t.db, 'u1'))!.base_currency).toBe('EUR');
     expect(await getCurrencySource(t.db, 'u1')).toBe('inferred');
-    expect(await (await get('/dashboard')).text()).not.toContain('Amounts are in EUR'); // once
+    expect(await htmlOf(await get('/dashboard'))).not.toContain('Amounts are in EUR'); // once
 
     await updateUserCurrency(t.db, 'u1', 'USD');
     expect(await getCurrencySource(t.db, 'u1')).toBe('chosen');
@@ -95,10 +96,10 @@ describe('remembered choices', () => {
     const set = await get('/dashboard?range=90');
     const remembered = cookie(set, 'hm_range');
     expect(remembered).toBe('__Host-hm_range=90');
-    const bare = await (await get('/dashboard', [remembered!])).text();
-    expect(bare).toMatch(/<a href="\/dashboard\?range=90" aria-current="page"/);
-    const explicit = await (await get('/dashboard?range=7', [remembered!])).text();
-    expect(explicit).toMatch(/<a href="\/dashboard\?range=7" aria-current="page"/);
+    const bare = await htmlOf(await get('/dashboard', [remembered!]));
+    expect(bare).toMatch(/<a\b(?=[^>]*href="\/dashboard\?range=90")(?=[^>]*aria-current="page")/);
+    const explicit = await htmlOf(await get('/dashboard?range=7', [remembered!]));
+    expect(explicit).toMatch(/<a\b(?=[^>]*href="\/dashboard\?range=7")(?=[^>]*aria-current="page")/);
   });
 
   it('brings back the last transactions filter, with "All" as an explicit choice', async () => {
@@ -106,11 +107,11 @@ describe('remembered choices', () => {
     seedConnection(t, { id: 'b', userId: 'u1', provider: 'lemonsqueezy', lastSyncedAt: NOW });
     const set = await get('/transactions?provider=stripe');
     const remembered = cookie(set, 'hm_provider')!;
-    const bare = await (await get('/transactions', [remembered])).text();
-    expect(bare).toMatch(/<a href="\/transactions\?provider=stripe" aria-current="page"/);
+    const bare = await htmlOf(await get('/transactions', [remembered]));
+    expect(bare).toMatch(/<a\b(?=[^>]*href="\/transactions\?provider=stripe")(?=[^>]*aria-current="page")/);
     expect(bare).toContain('href="/transactions?provider=all"');
     const all = await get('/transactions?provider=all', [remembered]);
     expect(cookie(all, 'hm_provider')).toBe('__Host-hm_provider=all');
-    expect(await all.text()).toMatch(/<a href="\/transactions\?provider=all" aria-current="page"/);
+    expect(await htmlOf(all)).toMatch(/<a\b(?=[^>]*href="\/transactions\?provider=all")(?=[^>]*aria-current="page")/);
   });
 });

@@ -2,18 +2,18 @@
  * BreakdownTable: per-connection MRR, share, subscriptions, trials, revenue in the window.
  * Owner: Experience (design). CONTRACT: props are fixed.
  *
- * Figures are right-aligned tabular numbers, in whole units like the rest of the dashboard.
- * Share gets a thin neutral bar drawn as an SVG
- * <rect width="NN%"> (an attribute, not style="", so it passes the CSP); the provider dot
+ * A coss table. Figures are right-aligned tabular numbers, in whole units like the rest of the
+ * dashboard. Share gets a thin neutral bar drawn as an SVG <rect width="NN%">; the provider dot
  * carries identity, the bar only magnitude.
  */
 
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { BreakdownRow, RangeDays } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { ProviderDot, TestModeBadge } from './badges';
-import { NotAvailable, TableScroller } from './ui';
+import { NotAvailable, ScrollTable, TableRowHeader } from './ui';
 
-const NUM = 'text-right whitespace-nowrap tabular-nums';
+const NUM = 'text-right tabular-nums';
 const CAPTION_ID = 'breakdown-caption';
 
 function shareLabel(pct: number): string {
@@ -25,60 +25,68 @@ function shareLabel(pct: number): string {
 function ShareBar(props: { pct: number }) {
   const w = Math.max(0, Math.min(100, props.pct));
   return (
-    <svg width="48" height="4" viewBox="0 0 48 4" aria-hidden="true" class="hidden shrink-0 sm:block">
-      <rect width="48" height="4" rx="2" class="fill-base-300" />
-      {w > 0 ? <rect width={`${w.toFixed(1)}%`} height="4" rx="2" class="fill-ink-3" /> : null}
+    <svg width="48" height="4" viewBox="0 0 48 4" aria-hidden="true" className="hidden shrink-0 sm:block">
+      <rect width="48" height="4" rx="2" className="fill-border" />
+      {w > 0 ? <rect width={`${w.toFixed(1)}%`} height="4" rx="2" className="fill-faint" /> : null}
     </svg>
   );
 }
 
 export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; rangeDays: RangeDays }) {
   return (
-    <TableScroller labelledBy={CAPTION_ID}>
-      <table class="table">
-        {/* Rows arrive sorted by MRR (data/dashboard.ts); say so, since it isn't visible. */}
-        <caption id={CAPTION_ID} class="sr-only">
-          MRR by connection, highest first
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Connection</th>
-            <th scope="col" class="text-right">MRR</th>
-            <th scope="col" class="text-right">Share</th>
-            <th scope="col" class="text-right">Subscriptions</th>
-            <th scope="col" class="text-right">Trials</th>
-            <th scope="col" class="text-right whitespace-nowrap">
-              Revenue <span class="font-normal">({props.rangeDays} days)</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.rows.map((r) => (
-            <tr>
-              <th scope="row" class="font-normal">
-                <span class="flex min-w-0 items-center gap-2">
-                  <ProviderDot dotClass={r.dotClass} />
-                  <a href={`/connections/${r.id}`} class="max-w-56 truncate font-semibold hover:underline">
-                    {r.name}
-                  </a>
-                  {r.testMode ? <TestModeBadge /> : null}
-                </span>
-              </th>
-              <td class={NUM}>{formatMoney(r.mrr, props.currency, { whole: true })}</td>
-              <td class={NUM}>
-                {/* Label first in the DOM so the row's text baseline comes from it; reversed visually. */}
-                <span class="inline-flex flex-row-reverse items-center gap-2.5">
-                  <span class="w-9">{shareLabel(r.sharePct)}</span>
-                  <ShareBar pct={r.sharePct} />
-                </span>
-              </td>
-              <td class={NUM}>{formatNumber(r.activeSubscriptions)}</td>
-              <td class={NUM}>{r.activeTrials === null ? <NotAvailable /> : formatNumber(r.activeTrials)}</td>
-              <td class={NUM}>{r.revenue === null ? <NotAvailable /> : formatMoney(r.revenue, props.currency, { whole: true })}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </TableScroller>
+    <ScrollTable labelledBy={CAPTION_ID}>
+      {/* Rows arrive sorted by MRR (data/dashboard.ts); say so, since it isn't visible. */}
+      <caption id={CAPTION_ID} className="sr-only">
+        MRR by connection, highest first
+      </caption>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Connection</TableHead>
+          <TableHead scope="col" className="text-right">
+            MRR
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Share
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Subscriptions
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Trials
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Revenue <span className="font-normal">({props.rangeDays} days)</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {props.rows.map((r) => (
+          <TableRow key={r.id}>
+            <TableRowHeader>
+              <span className="flex min-w-0 items-center gap-2">
+                <ProviderDot dotClass={r.dotClass} />
+                <a href={`/connections/${r.id}`} className="max-w-56 truncate font-medium leading-5 hover:underline">
+                  {r.name}
+                </a>
+                {r.testMode ? <TestModeBadge /> : null}
+              </span>
+            </TableRowHeader>
+            <TableCell className={NUM}>{formatMoney(r.mrr, props.currency, { whole: true })}</TableCell>
+            <TableCell className={NUM}>
+              {/* Label first in the DOM so the row's text baseline comes from it; reversed visually. */}
+              <span className="inline-flex flex-row-reverse items-center gap-2.5">
+                <span className="w-9">{shareLabel(r.sharePct)}</span>
+                <ShareBar pct={r.sharePct} />
+              </span>
+            </TableCell>
+            <TableCell className={NUM}>{formatNumber(r.activeSubscriptions)}</TableCell>
+            <TableCell className={NUM}>{r.activeTrials === null ? <NotAvailable /> : formatNumber(r.activeTrials)}</TableCell>
+            <TableCell className={NUM}>
+              {r.revenue === null ? <NotAvailable /> : formatMoney(r.revenue, props.currency, { whole: true })}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </ScrollTable>
   );
 }

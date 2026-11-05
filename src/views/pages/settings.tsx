@@ -57,7 +57,7 @@ export function SettingsPage(props: SettingsPageProps) {
   return (
     <Layout {...props.chrome} title={focus ? 'Error: Settings' : 'Settings'} nav="settings" noindex>
       <PageHeader title="Settings" />
-      <div class="grid max-w-xl gap-6">
+      <div className="grid max-w-xl gap-6">
         <Card
           id="display-currency"
           title="Display currency"
@@ -77,27 +77,27 @@ export function SettingsPage(props: SettingsPageProps) {
 
         <Card id="change-password" title="Change password" description="Changing it logs you out on other devices.">
           <form method="post" action="/settings/password">
-            <FormError message={pwFormError} autofocus={focus === 'pw-form'} />
+            <FormError message={pwFormError} autoFocus={focus === 'pw-form'} />
             <Field
               name="current_password"
               label="Current password"
               type="password"
-              autocomplete="current-password"
+              autoComplete="current-password"
               required
-              maxlength={256}
-              autofocus={focus === 'current'}
+              maxLength={256}
+              autoFocus={focus === 'current'}
               error={pw?.fieldErrors?.current}
             />
             <Field
               name="new_password"
               label="New password"
               type="password"
-              autocomplete="new-password"
+              autoComplete="new-password"
               required
-              minlength={PASSWORD_MIN}
-              maxlength={256}
+              minLength={PASSWORD_MIN}
+              maxLength={256}
               help={`At least ${PASSWORD_MIN} characters.`}
-              autofocus={focus === 'next'}
+              autoFocus={focus === 'next'}
               error={pw?.fieldErrors?.next}
             />
             <Button variant="secondary">Change password</Button>
@@ -105,10 +105,10 @@ export function SettingsPage(props: SettingsPageProps) {
         </Card>
 
         <Card id="session" title="Session">
-          <p class="text-body text-ink-2">
-            Logged in as <span class="font-semibold text-base-content wrap-anywhere">{props.chrome.user?.email}</span>.
+          <p className="text-body text-muted-foreground">
+            Logged in as <span className="font-semibold text-foreground wrap-anywhere">{props.chrome.user?.email}</span>.
           </p>
-          <form method="post" action="/logout" class="mt-4">
+          <form method="post" action="/logout" className="mt-4">
             <Button variant="secondary">Log out</Button>
           </form>
         </Card>
@@ -118,21 +118,21 @@ export function SettingsPage(props: SettingsPageProps) {
           description="Deletes your account, all connections and their stored keys, and all synced data. This can’t be undone."
         >
           <form method="post" action="/settings/delete" id="delete-account">
-            <FormError message={delFormError} autofocus={focus === 'del-form'} />
+            <FormError message={delFormError} autoFocus={focus === 'del-form'} />
             <Field
               id="delete-password"
               name="password"
               label="Password"
               type="password"
-              autocomplete="current-password"
+              autoComplete="current-password"
               required
-              maxlength={256}
-              autofocus={focus === 'del-password'}
+              maxLength={256}
+              autoFocus={focus === 'del-password'}
               error={del?.fieldErrors?.password}
             />
             <ConfirmCheckbox
               label="Yes, delete my account and all of its data."
-              autofocus={focus === 'confirm'}
+              autoFocus={focus === 'confirm'}
               error={del?.fieldErrors?.confirm}
             />
             <Button variant="danger">Delete account</Button>

@@ -8,11 +8,10 @@
  * - Always decorative: alt="" and nothing depends on it.
  *
  * Files live in public/mascot at 2× the display size, with a recoloured *-dark.png picked by
- * prefers-color-scheme (same switch as the daisyUI themes). Size comes from width/height
- * attributes, not style="", so it passes the CSP.
+ * prefers-color-scheme (same switch as the theme). Size comes from width/height attributes.
  */
 
-import { cx } from './ui';
+import { cn } from '../../lib/utils';
 
 export type OwlPose = 'perched' | 'dozing' | 'cheer' | 'lost' | 'asleep';
 
@@ -30,15 +29,15 @@ export function Owl(props: {
   /** Override the display size (CSS px). Stay at or below OWL_SIZE[pose] to keep it sharp. */
   size?: number;
   /** Literal classes for the <picture> wrapper (placement, opacity). */
-  class?: string;
+  className?: string;
   /** Above-the-fold use: load eagerly. Everything else is lazy. */
   eager?: boolean;
 }) {
   const size = props.size ?? OWL_SIZE[props.pose];
   return (
     // w-fit: a block <picture> is otherwise full-width, and `mx-auto` couldn't centre it.
-    <picture class={cx('block w-fit shrink-0', props.class)}>
-      <source srcset={`/mascot/${props.pose}-dark.png`} media="(prefers-color-scheme: dark)" />
+    <picture className={cn('block w-fit shrink-0', props.className)}>
+      <source srcSet={`/mascot/${props.pose}-dark.png`} media="(prefers-color-scheme: dark)" />
       <img
         src={`/mascot/${props.pose}.png`}
         width={size}
@@ -46,8 +45,8 @@ export function Owl(props: {
         alt=""
         loading={props.eager ? undefined : 'lazy'}
         decoding="async"
-        class="block select-none"
-        draggable="false"
+        className="block select-none"
+        draggable={false}
       />
     </picture>
   );

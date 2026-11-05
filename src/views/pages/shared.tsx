@@ -3,10 +3,11 @@
  * Pure: formatting and tiny presentational pieces only, no data access.
  */
 
+import { ArrowLeft } from 'lucide-react';
 import type { ProviderMeta } from '../../providers/types';
-import { Alert } from '../components/ui';
+import { Alert, TextLink } from '../components/ui';
 
-/** Zero-JS polling state for a first sync. `null` on a page means "nothing is syncing". */
+/** Meta-refresh polling state for a first sync. `null` on a page means "nothing is syncing". */
 export interface SyncState {
   /**
    * Meta-refresh target while polling; null once the poll budget is spent or the user stopped it.
@@ -65,9 +66,7 @@ export function SyncNotice(props: {
           {refresh.stopUrl ? (
             <>
               {' '}
-              <a href={refresh.stopUrl} class="link link-accent">
-                Stop refreshing
-              </a>
+              <TextLink href={refresh.stopUrl}>Stop refreshing</TextLink>
             </>
           ) : null}
         </>
@@ -83,9 +82,10 @@ export function SyncNotice(props: {
 /** A quiet "← Back" link above a page header. The arrow is decoration, not part of the name. */
 export function BackLink(props: { href: string; label: string }) {
   return (
-    <p class="mb-4 text-body">
-      <a href={props.href} class="link link-hover text-ink-2">
-        <span aria-hidden="true">←</span> {props.label}
+    <p className="mb-4 text-body">
+      <a href={props.href} className="inline-flex items-center gap-1 rounded-md text-muted-foreground transition-colors hover:text-foreground">
+        <ArrowLeft className="size-3.5 shrink-0" />
+        {props.label}
       </a>
     </p>
   );

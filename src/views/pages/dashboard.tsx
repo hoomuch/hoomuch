@@ -7,20 +7,28 @@
  * figure it affects; nothing is left at the bottom of the page.
  */
 
+import { Info, TriangleAlert, X } from 'lucide-react';
+import { AnimatePresence, motion, MotionConfig, useAnimate, useReducedMotion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button as CossButton } from '@/components/ui/button';
+import { Card as CossCard, CardPanel } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { ConnectionSummary, DashboardData, MrrDay } from '../../data/types';
 import { formatMoney, formatNumber, toMinor } from '../../lib/money';
 import { addDays, dayKey, HOUR, MINUTE } from '../../lib/time';
+import { cn } from '../../lib/utils';
 import { MrrChart } from '../charts/mrr-chart';
 import { RevenueChart } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
 import { EmptyState } from '../components/empty-state';
-import { IconInfoCircle, IconWarning } from '../components/icons';
 import { KpiStat } from '../components/kpi';
 import { Owl } from '../components/mascot';
 import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
-import { Alert, Button, Card, cx, LinkButton, PageHeader } from '../components/ui';
+import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
+import { useNow } from '../page-root';
 import { formatDay, formatWhen, listNames, SyncNotice, type SyncState } from './shared';
 
 export interface DashboardPageProps {
@@ -36,11 +44,12 @@ export interface DashboardPageProps {
   cadence?: string;
   /** A healthy connection whose last sync is older than this reads as stale. Default: 120. */
   staleAfterMinutes?: number;
-  /** Clock for relative times (fixtures pin it). */
+  /** Clock for relative times (fixtures pin it). Defaults to the request's clock. */
   now?: number;
   /**
    * The first sync just finished: show the one-time "There it is" strip. `dismissHref` is the
-   * same dashboard without the trigger, so dismissing is a plain link (zero JS, no stored state).
+   * same dashboard without the trigger, so dismissing is a plain link before hydration (no stored
+   * state); after hydration it animates out and replaces the URL.
    */
   celebrate?: { dismissHref: string } | null;
   /** The first real connection just replaced demo data: the notice or the strip says so. */
@@ -118,11 +127,11 @@ export function freshness(connections: ConnectionSummary[], now: number, staleAf
 
 function FreshnessLabel(props: { freshness: Freshness; now: number }) {
   const f = props.freshness;
-  if (f.kind === 'never' || f.ms === null) return <p class="text-body text-ink-2">Not synced yet</p>;
+  if (f.kind === 'never' || f.ms === null) return <p className="text-body text-muted-foreground">Not synced yet</p>;
   const warn = f.kind !== 'fresh';
   return (
-    <p class={cx('flex items-center gap-1.5 text-body', warn ? 'text-warning' : 'text-ink-2')}>
-      {warn ? <IconWarning class="size-4 shrink-0" /> : null}
+    <p className={cn('flex items-center gap-1.5 text-body', warn ? 'text-warning-foreground' : 'text-muted-foreground')}>
+      {warn ? <TriangleAlert className="size-4 shrink-0" /> : null}
       <span>
         {f.kind === 'down' ? 'Last updated' : 'Updated'} <RelativeTime ms={f.ms} now={props.now} />
       </span>
@@ -239,35 +248,31 @@ export function completenessNotes(input: {
 
 function NoteList(props: { notes: DashboardNote[] }) {
   return (
-    <ul class="mt-5 space-y-2 border-t border-base-300 pt-4">
+    <ul className="mt-5 space-y-2 border-t pt-4">
       {props.notes.map((n) => (
-        <li class="flex items-start gap-2 text-body">
+        <li key={n.text} className="flex items-start gap-2 text-body">
           {n.tone === 'warning' ? (
-            <IconWarning class="mt-0.5 size-4 shrink-0 text-warning" />
+            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
           ) : (
-            <IconInfoCircle class="mt-0.5 size-4 shrink-0 text-info" />
+            <Info className="mt-0.5 size-4 shrink-0 text-info" />
           )}
           <span>
-            <span class="sr-only">{n.tone === 'warning' ? 'Warning: ' : 'Note: '}</span>
+            <span className="sr-only">{n.tone === 'warning' ? 'Warning: ' : 'Note: '}</span>
             {n.text}
             {n.link ? (
               <>
                 {' '}
-                <a href={n.link.href} class="link link-accent">
-                  {n.link.label}
-                </a>
+                <TextLink href={n.link.href}>{n.link.label}</TextLink>
               </>
             ) : null}
             {n.form ? (
               <>
                 {' '}
-                <form method="post" action={n.form.action} class="inline">
+                <form method="post" action={n.form.action} className="inline">
                   {Object.entries(n.form.fields ?? {}).map(([k, v]) => (
-                    <input type="hidden" name={k} value={v} />
+                    <input key={k} type="hidden" name={k} value={v} />
                   ))}
-                  <button type="submit" class="link link-accent">
-                    {n.form.label}
-                  </button>
+                  <LinkSubmit>{n.form.label}</LinkSubmit>
                 </form>
               </>
             ) : null}
@@ -281,20 +286,19 @@ function NoteList(props: { notes: DashboardNote[] }) {
 // ---------- the figures ----------
 
 /** MRR, its change, ARR, a milestone, and its trend in one card. Shared with the landing demo. */
-export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; class?: string }) {
+export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; className?: string }) {
   const { data } = props;
   const cur = data.currency;
   const k = data.kpis;
   const days = data.rangeDays;
   const milestone = recentMilestone(data.mrrSeries, cur, dayKey(data.generatedAt));
   return (
-    <section aria-label="MRR" class={cx('card card-border border-base-300', props.class)}>
-      <div class="card-body">
-        <div class="grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
-          <div class="min-w-0">
+    <CossCard render={<section aria-label="MRR" />} className={cn('min-w-0', props.className)}>
+      <CardPanel className="p-5 sm:p-6">
+        <div className="grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
+          <div className="min-w-0">
             <KpiStat
               hero
-              class="p-0"
               label="MRR"
               value={formatMoney(k.mrr.value, cur, { whole: true })}
               deltaPct={k.mrr.deltaPct}
@@ -302,8 +306,10 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; c
               hint={`${formatMoney(k.arr.value, cur, { whole: true })} ARR`}
             />
             {milestone !== null ? (
-              <p class="mt-3">
-                <span class="badge badge-soft">Passed {formatMoney(toMinor(milestone, cur), cur, { whole: true })} MRR</span>
+              <p className="mt-3">
+                <Badge variant="success" size="lg">
+                  Passed {formatMoney(toMinor(milestone, cur), cur, { whole: true })} MRR
+                </Badge>
               </p>
             ) : null}
           </div>
@@ -315,20 +321,20 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; c
           />
         </div>
         {props.notes && props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
-      </div>
-    </section>
+      </CardPanel>
+    </CossCard>
   );
 }
 
-/** Subscriptions, trials, revenue: daisyUI stats in one row (stacked on a phone), the comparison said once underneath. */
-export function SecondaryStats(props: { data: DashboardData; class?: string }) {
+/** Subscriptions, trials, revenue: three figures in one card (stacked on a phone), the comparison said once underneath. */
+export function SecondaryStats(props: { data: DashboardData; className?: string }) {
   const { data } = props;
   const cur = data.currency;
   const k = data.kpis;
   const days = data.rangeDays;
   return (
-    <section aria-label="Subscriptions, trials and revenue" class={props.class}>
-      <div class="stats stats-vertical w-full border border-base-300 bg-base-100 sm:stats-horizontal sm:grid-cols-3">
+    <section aria-label="Subscriptions, trials and revenue" className={props.className}>
+      <CossCard className="grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
         <KpiStat
           inlineDelta
           label="Active subscriptions"
@@ -351,9 +357,9 @@ export function SecondaryStats(props: { data: DashboardData; class?: string }) {
           deltaPct={k.revenue.deltaPct}
           deltaLabel={`vs. the previous ${days} days`}
         />
-      </div>
+      </CossCard>
       {/* Each delta already speaks its comparison; this is the visual version of the same. */}
-      <p aria-hidden="true" class="mt-2 text-caption text-ink-2">
+      <p aria-hidden="true" className="mt-2 text-caption text-muted-foreground">
         Changes compare with {days} days ago. Revenue compares with the {days} days before.
       </p>
     </section>
@@ -377,14 +383,14 @@ function revenueNotes(data: DashboardData): DashboardNote[] {
 }
 
 /** Revenue per day, the card. Shared with the landing demo. */
-export function RevenueCard(props: { data: DashboardData; class?: string }) {
+export function RevenueCard(props: { data: DashboardData; className?: string }) {
   const { data } = props;
   const notes = revenueNotes(data);
   return (
     <Card
       title="Revenue per day"
       description={`Charges minus refunds, before fees. Last ${data.rangeDays} days.`}
-      class={props.class}
+      className={props.className}
     >
       <RevenueChart series={data.revenueSeries} connections={data.breakdown} currency={data.currency} />
       {notes.length > 0 ? <NoteList notes={notes} /> : null}
@@ -393,11 +399,21 @@ export function RevenueCard(props: { data: DashboardData; class?: string }) {
 }
 
 /**
- * Reward moment after the first real sync, as a daisyUI alert with its action. Live numbers only,
- * never a sample figure. It fades in once (the page loads once); under reduced motion it simply appears.
+ * Reward moment after the first real sync. Live numbers only, never a sample figure. It fades in
+ * once with CSS (the page loads once, and it shows before hydration); once the page is
+ * interactive Motion gives the owl a small hop, and Dismiss animates the strip away and drops the
+ * trigger from the URL instead of reloading. Under reduced motion it simply appears and goes.
  */
 function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref: string; note?: string }) {
   const { data } = props;
+  const [open, setOpen] = useState(true);
+  const [owl, animate] = useAnimate<HTMLDivElement>();
+  const reduce = useReducedMotion();
+  useEffect(() => {
+    if (reduce || !owl.current) return;
+    void animate(owl.current, { y: [8, -6, 0], rotate: [-6, 3, 0], scale: [0.9, 1.04, 1] }, { duration: 0.7, ease: [0.2, 0, 0, 1] });
+  }, [animate, owl, reduce]);
+
   const rows = data.breakdown;
   const from = rows.length === 1 ? `from ${rows[0]!.name}` : `across ${formatNumber(rows.length)} connections`;
   const headline =
@@ -405,53 +421,83 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
       ? `There it is: ${formatMoney(data.kpis.mrr.value, data.currency, { whole: true })} MRR ${from}.`
       : `There it is: your first numbers, ${from}.`;
   return (
-    <section aria-labelledby="first-numbers" class="alert alert-vertical fade-in mb-6 sm:alert-horizontal">
-      <Owl pose="cheer" eager />
-      <div class="min-w-0">
-        <h2 id="first-numbers" class="font-semibold wrap-break-word">
-          {headline} <span aria-hidden="true">🎉</span>
-        </h2>
-        <p class="mt-1 text-ink-2">
-          It updates {props.cadence}. You can stop checking now.{props.note ? ` ${props.note}` : ''}
-        </p>
-      </div>
-      <LinkButton href={props.dismissHref} variant="secondary" small>
-        Dismiss
-      </LinkButton>
-    </section>
+    // Motion follows the OS setting: under reduced motion it skips transforms and only fades.
+    <MotionConfig reducedMotion="user">
+      <AnimatePresence initial={false} onExitComplete={() => window.history.replaceState(window.history.state, '', props.dismissHref)}>
+        {open ? (
+          <motion.section
+            key="first-numbers"
+            aria-labelledby="first-numbers"
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            transition={{ duration: 0.22, ease: [0.2, 0, 0, 1] }}
+            className="fade-in mb-6 overflow-hidden rounded-2xl border border-brand/24 bg-[radial-gradient(40rem_12rem_at_0%_0%,--alpha(var(--color-brand)/12%),transparent_70%)]"
+          >
+            <div className="flex flex-col items-start gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+              <div ref={owl}>
+                <Owl pose="cheer" eager />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 id="first-numbers" className="font-semibold wrap-break-word">
+                  {headline} <span aria-hidden="true">🎉</span>
+                </h2>
+                <p className="mt-1 text-muted-foreground">
+                  It updates {props.cadence}. You can stop checking now.{props.note ? ` ${props.note}` : ''}
+                </p>
+              </div>
+              <CossButton
+                render={
+                  <a
+                    href={props.dismissHref}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setOpen(false);
+                    }}
+                  />
+                }
+                variant="outline"
+                size="sm"
+              >
+                <X />
+                Dismiss
+              </CossButton>
+            </div>
+          </motion.section>
+        ) : null}
+      </AnimatePresence>
+    </MotionConfig>
   );
 }
 
 /**
- * While the first sync runs: daisyUI skeleton blocks the size of what's coming, in the same card
- * and stats, so nothing reads as $0. animate-none: no shimmer (no idle loops). Hidden from screen
- * readers, which hear one sentence instead.
+ * While the first sync runs: coss skeleton blocks the size of what's coming, in the same cards,
+ * so nothing reads as $0. animate-none: no shimmer (no idle loops, design/system.md §3.6).
+ * Hidden from screen readers, which hear one sentence instead.
  */
 function DashboardSkeleton() {
-  const block = 'skeleton animate-none';
+  const block = 'animate-none';
   return (
     <div aria-busy="true">
-      <p class="sr-only">Your first numbers are on their way.</p>
+      <p className="sr-only">Your first numbers are on their way.</p>
       <div aria-hidden="true">
-        <div class="card card-border mb-6 border-base-300">
-          <div class="card-body grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
+        <CossCard className="mb-6">
+          <CardPanel className="grid gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
             <div>
-              <div class={`h-4 w-10 ${block}`} />
-              <div class={`mt-2 h-10 w-40 sm:h-12 ${block}`} />
-              <div class={`mt-3 h-5 w-36 ${block}`} />
-              <div class={`mt-1 h-5 w-24 ${block}`} />
+              <Skeleton className={`h-4 w-10 ${block}`} />
+              <Skeleton className={`mt-2 h-10 w-40 sm:h-12 ${block}`} />
+              <Skeleton className={`mt-3 h-5 w-36 ${block}`} />
+              <Skeleton className={`mt-1 h-5 w-24 ${block}`} />
             </div>
-            <div class={`h-40 ${block}`} />
-          </div>
-        </div>
-        <div class="stats stats-vertical w-full border border-base-300 sm:stats-horizontal sm:grid-cols-3">
-          {[0, 1, 2].map(() => (
-            <div class="stat">
-              <div class={`h-4 w-28 ${block}`} />
-              <div class={`mt-2 h-7 w-20 ${block}`} />
+            <Skeleton className={`h-40 ${block}`} />
+          </CardPanel>
+        </CossCard>
+        <CossCard className="grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="px-5 py-4 sm:px-6">
+              <Skeleton className={`h-4 w-28 ${block}`} />
+              <Skeleton className={`mt-2 h-7 w-20 ${block}`} />
             </div>
           ))}
-        </div>
+        </CossCard>
       </div>
     </div>
   );
@@ -460,19 +506,20 @@ function DashboardSkeleton() {
 /** No connection has ever synced and none is syncing: say why there's no number, never "$0". */
 function NoNumbers(props: { notes: DashboardNote[] }) {
   return (
-    <section aria-labelledby="no-numbers" class="card card-border border-base-300">
-      <div class="card-body">
-        <h2 id="no-numbers" class="card-title">
+    <CossCard render={<section aria-labelledby="no-numbers" />}>
+      <CardPanel className="p-5 sm:p-6">
+        <h2 id="no-numbers" className="text-base font-semibold">
           No numbers yet
         </h2>
-        <p class="text-ink-2">They show up after a connection’s first successful sync.</p>
+        <p className="mt-1 text-muted-foreground">They show up after a connection’s first successful sync.</p>
         {props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
-      </div>
-    </section>
+      </CardPanel>
+    </CossCard>
   );
 }
 
 export function DashboardPage(props: DashboardPageProps) {
+  const requestNow = useNow();
   if (props.connections.length === 0) {
     return (
       <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex>
@@ -486,7 +533,7 @@ export function DashboardPage(props: DashboardPageProps) {
   }
 
   const { data } = props;
-  const now = props.now ?? Date.now();
+  const now = props.now ?? requestNow;
   const staleAfterMs = (props.staleAfterMinutes ?? 120) * MINUTE;
   const notes = completenessNotes({
     connections: props.connections,
@@ -501,15 +548,13 @@ export function DashboardPage(props: DashboardPageProps) {
   const hasNumbers = props.connections.some((c) => c.lastSyncedAt !== null);
   const note = props.demoRemoved ? DEMO_REMOVED : undefined;
   const currencyNote = props.currencyInferred ? (
-    <Alert tone="info" role="status" class="mb-6">
+    <Alert tone="info" role="status" className="mb-6">
       Amounts are in {props.currencyInferred}, the currency most of your MRR is in.{' '}
-      <a href="/settings#display-currency" class="link link-accent">
-        Change it in Settings
-      </a>
+      <TextLink href="/settings#display-currency">Change it in Settings</TextLink>
     </Alert>
   ) : null;
   const syncNotice = props.sync ? (
-    <div class="mb-6">
+    <div className="mb-6">
       <SyncNotice
         sync={props.sync}
         connected={props.connections.filter((c) => c.lastSyncedAt === null && c.status !== 'error').map((c) => c.name)}
@@ -533,7 +578,7 @@ export function DashboardPage(props: DashboardPageProps) {
       <PageHeader
         title="Dashboard"
         actions={
-          <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <FreshnessLabel freshness={freshness(props.connections, now, staleAfterMs)} now={now} />
             <RangeTabs current={data.rangeDays} basePath={props.basePath} />
           </div>
@@ -551,22 +596,22 @@ export function DashboardPage(props: DashboardPageProps) {
           />
         ) : null)}
 
-      <MrrCard data={data} notes={notes} class="mb-6" />
-      <SecondaryStats data={data} class="mb-6" />
+      <MrrCard data={data} notes={notes} className="mb-6" />
+      <SecondaryStats data={data} className="mb-6" />
 
-      <div class="grid gap-6">
-        <Card title="By connection">
+      <div className="grid gap-6">
+        <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
           {data.breakdown.length > 0 ? (
             <BreakdownTable rows={data.breakdown} currency={data.currency} rangeDays={data.rangeDays} />
           ) : (
-            <p class="text-body text-ink-2">No numbers yet. They appear after the first sync.</p>
+            <p className="px-3 text-body text-muted-foreground">No numbers yet. They appear after the first sync.</p>
           )}
         </Card>
 
         <RevenueCard data={data} />
 
         {data.fx.asOf ? (
-          <p class="text-caption text-ink-2">
+          <p className="text-caption text-muted-foreground">
             Converted to {data.currency} at ECB rates from {formatDay(data.fx.asOf)}, past days included.
           </p>
         ) : null}

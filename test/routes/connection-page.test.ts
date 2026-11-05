@@ -10,6 +10,7 @@ import { sha256Hex } from '../../src/lib/crypto';
 import { DAY } from '../../src/lib/time';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
+import { htmlOf } from '../fixtures/html';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const ORIGIN = 'https://hoomuch.test';
@@ -88,13 +89,13 @@ describe('Sync now', () => {
   });
 
   it('shows the run in progress, then its result', async () => {
-    const running = await (await send('GET', `/connections/${REAL}?sync=${NOW}`)).text();
+    const running = await htmlOf(await send('GET', `/connections/${REAL}?sync=${NOW}`));
     expect(running).toContain('Syncing now, usually in a few seconds.');
     expect(running).toContain(`content="5;url=/connections/${REAL}?sync=${NOW}&amp;poll=1"`);
-    expect(running).toMatch(/<button type="submit" disabled="" class="btn[^"]*">Syncing…<\/button>/);
+    expect(running).toMatch(/<button\b(?=[^>]*type="submit")(?=[^>]*disabled="")[^>]*>Syncing…<\/button>/);
 
     run(NOW + 50, NOW + 2_000, 1, 12);
-    const done = await (await send('GET', `/connections/${REAL}?sync=${NOW}&poll=1`)).text();
+    const done = await htmlOf(await send('GET', `/connections/${REAL}?sync=${NOW}&poll=1`));
     expect(done).toContain('Synced. 12 revenue events processed.');
     expect(done).not.toContain('http-equiv="refresh"');
   });
@@ -108,9 +109,9 @@ describe('removing a connection', () => {
     expect((await listConnections(t.db, 'u1')).map((c) => c.id)).toEqual([REAL]);
 
     // The next page shows the flash with a working Undo.
-    const page = await (await send('GET', '/connections', undefined, [flash(res)!])).text();
+    const page = await htmlOf(await send('GET', '/connections', undefined, [flash(res)!]));
     expect(page).toContain('Demo data removed.');
-    expect(page).toMatch(/<form method="post" action="\/connections\/demo" class="inline"><button type="submit"[^>]*>Add it back<\/button><\/form>/);
+    expect(page).toMatch(/<form\b(?=[^>]*action="\/connections\/demo")(?=[^>]*method="post")[^>]*><button type="submit"[^>]*>Add it back<\/button><\/form>/);
   });
 
   it('only sends demo removals back to the dashboard or the connections list', async () => {
@@ -122,8 +123,9 @@ describe('removing a connection', () => {
     const res = await send('POST', `/connections/${REAL}/delete`, {});
     expect(res.headers.get('location')).toBe(`/connections/${REAL}?manage=open`);
     expect((await listConnections(t.db, 'u1')).map((c) => c.id).sort()).toEqual([REAL, DEMO].sort());
-    const page = await (await send('GET', `/connections/${REAL}?manage=open`, undefined, [flash(res)!])).text();
+    const page = await htmlOf(await send('GET', `/connections/${REAL}?manage=open`, undefined, [flash(res)!]));
     expect(page).toContain('Tick the box to confirm.');
-    expect(page).toContain('<details id="manage" open=""');
+    // Manage (a coss Collapsible) renders open.
+    expect(page.match(/<section\b[^>]*\bid="manage"[^>]*>/)?.[0]).toContain('data-open=""');
   });
 });

@@ -1,56 +1,29 @@
 /*
- * hoomuch design system: Tailwind v4 + daisyUI v5. Owner: Experience (design).
+ * hoomuch design system: Tailwind v4 + coss ui. Owner: Experience (design).
  * Compiled to public/app.css by `npm run css`; never edit the output by hand.
  *
- * Principles (SPEC §7.1, design/brief.md §4): neutral greys from one hue family (264), ONE accent
- * (blue) used sparingly (focus ring, active nav marker, MRR line, links, the owl's right eye),
- * semantic colours only for deltas / status / flash, no shadows, 1px borders, tabular figures.
- * Two type weights only: 400 (body, nav, table heads) and 600 (headings, buttons, badges,
- * figures, labels). Never font-medium (500).
+ * Stack: coss ui components (src/components/ui, Base UI underneath), shadcn Charts on Recharts,
+ * Lucide icons, Geist Sans + Geist Mono, Tailwind radial gradients, Motion where it earns it.
  *
- * Contrast (WCAG AA, both themes; full table in the Experience report):
- *   text on base-100/200 ......... base-content ≥ 14.8:1, base-content/70 ≥ 6.3:1,
- *                                  base-content/60 ≥ 4.5:1 (floor for any text; prefer /70)
- *   accent, success, warning, error, info as TEXT on base-100/200 ≥ 4.8:1
- *   *-content on its fill ........ ≥ 5.1:1
- *   field (input/segment borders)  ≥ 3.2:1 against base-100/200
+ * Tokens use coss/shadcn names (background, foreground, muted-foreground, border, input, ring…),
+ * filled with hoomuch's measured palette (design/system.md §3.1). Contrast, WCAG 2.x:
+ *   foreground on background/muted ...... ≥ 15.9:1
+ *   muted-foreground (secondary text) .... ≥ 6.1:1 light · 7.5:1 dark
+ *   faint (meta text, the floor) ......... ≥ 4.8:1 light · 5.8:1 dark
+ *   brand, success, warning, destructive as TEXT on background/muted ≥ 4.8:1
+ *   input (field and control boundaries)  ≥ 3.5:1 (WCAG 1.4.11; coss's default 10% black is 1.3:1)
  *
- * Tokens are the only vocabulary (design/system.md §3). Tailwind's default size scale is switched
- * off below, so text-sm, text-lg, text-[17px]… generate nothing; use the named sizes:
- *   app      text-caption 12/16 · text-body 14/20 · text-title 20/28 · text-display(-sm) 44/48 (36/40)
- *   landing  text-hero(-sm) 48/52 (34/40) · text-section(-sm) 28/34 (24/30) · text-lead 18/28
- *   At most three sizes per screen; the dashboard adds the MRR display figure.
- *
- * Class conventions for pages/charts:
- *   hairline/decorative border → border-base-300   · state-bearing border → border-field
- *   text tones → text-base-content (ink), text-ink-2 (secondary), text-ink-3 (meta, floor).
- *                Solid colours, not /70 or /60: they keep AA on the base-200 fill too.
+ * Class conventions for pages and charts:
+ *   hairline border → border-border (the default)  · control boundary → border-input
+ *   text tones → text-foreground, text-muted-foreground (secondary), text-faint (meta, floor)
+ *   links → <TextLink> (views/components/ui.tsx): brand blue, underlined
  *   figures → tabular-nums (tables get it automatically)
- *   charts → stroke-accent for the MRR line (no area fill), provider hex via fill=/stroke=
- *            attributes, gridlines stroke-base-300, zero line stroke-field, axis labels fill-ink-2,
- *            hover band fill-base-200, "Other" fill-ink-3, colourless series fill-series-neutral
- *   focus: every focusable element gets the accent ring automatically; never remove it. Add
- *          `focus-inset` to links/buttons inside overflow-x-auto scrollers so it isn't clipped.
- *   wide tables → wrap in <TableScroller> (ui.tsx), not a bare overflow-x-auto div: it is
- *          keyboard-scrollable, named by the caption, and `relative` so sr-only text can't
- *          escape it and widen the page at 320px.
+ *   charts → --color-brand for the MRR line (no area fill), provider hex for series
+ *   focus → every focusable element gets the brand ring; never remove it. `focus-inset` draws it
+ *           inside scrollers so overflow doesn't clip it.
  *
- * Components are daisyUI's own (btn, input, select, checkbox, table, badge, link, alert, card,
- * tabs, collapse, skeleton, fieldset, stat, status, join, loading). Don't re-implement one here:
- * theme it with the variables below, or add a utility in the markup. The few utilities that sit
- * on daisyUI classes on purpose:
- *   border-field on .input/.select ... daisyUI's default boundary is base-content/20 (1.5:1);
- *                                      WCAG 1.4.11 needs 3:1. Swapped for input-error on error.
- *   border-base-300 on .card/.btn-outline ... daisyUI borders cards with base-200, which is our
- *                                      fill (1.07:1 on the page); hairlines are base-300.
- *   text-ink-2 on idle .tab .......... daisyUI's idle tab text is base-content/50 (3.4:1).
- *   before:text-accent on nav tabs ... the tabs-border bar is the tab's currentColor; ours is accent.
- *   text-base-content on .alert-soft . soft alerts colour their text by tone (~4.6:1 for warning
- *                                      and success); the text stays ink, the icon carries the tone.
- *   block on chart <figure>s ......... daisyUI lays out a figure inside a .card as a centred row.
- *   font-semibold + size token on .stat-value ... daisyUI's is 800 weight and 32px (two weights,
- *                                      four sizes, §3.2).
- *   animate-none on .skeleton ........ no idle loops (design/system.md §3.6).
+ * Dark mode follows the system (prefers-color-scheme), so coss's `dark:` utilities are mapped to
+ * that media query instead of a .dark class.
  */
 
 @import "tailwindcss" source("../");
@@ -59,114 +32,153 @@
    `invert` props, "rings", "container"…). Nothing in the views means them as classes. */
 @source not inline("container filter invert ring lowercase outline");
 
-/*
- * daisyUI supplies the themes, the colour utilities (bg-base-200, text-error, fill-accent…),
- * rounded-box/-field/-selector, the root colour + scrollbar base, and every component the views
- * use. It emits a component whenever its name appears anywhere in src/, and many are everyday
- * words in our code (range, filter, steps, list, menu…), so this is a whitelist.
- * Need another daisyUI component? Add it to `include`.
- */
-@plugin "daisyui" {
-  themes: false;
-  logs: false;
-  include: rootcolor, scrollbar, radius, join, button, input, select, checkbox, fieldset, label,
-    table, badge, status, link, alert, card, stat, tab, collapse, skeleton, loading;
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+/* ---------- fonts ----------
+ * Geist and Geist Mono (SIL OFL 1.1, public/fonts/LICENSE.txt), self-hosted variable woff2 from
+ * the `geist` package. Same origin, so the CSP's font-src 'self' (default-src) covers them. */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
-/* /app.js puts daisyUI's spinner on the pressed button; public/ isn't scanned, so name it here. */
-@source inline("loading loading-spinner loading-xs");
-
-/* ---------- themes ---------- */
-
-@plugin "daisyui/theme" {
-  name: "hoomuch";
-  default: true;
-  color-scheme: light;
-  --color-base-100: oklch(100% 0 0); /* #ffffff page */
-  --color-base-200: oklch(97.5% 0.003 264); /* #f6f7f9 quiet fill */
-  --color-base-300: oklch(91.8% 0.006 264); /* #e2e4e8 hairline */
-  --color-base-content: oklch(21% 0.012 264); /* #15181e ink */
-  --color-ink-2: oklch(47.8% 0.008 264); /* #5b5d62 secondary text: 6.59 page · 6.15 fill */
-  --color-ink-3: oklch(53.5% 0.006 264); /* #6c6d71 meta text, the floor: 5.17 page · 4.82 fill */
-  --color-field: oklch(63% 0.012 264); /* #858991 3:1 boundary */
-  --color-primary: oklch(21% 0.012 264); /* ink buttons */
-  --color-primary-content: oklch(99.5% 0 0);
-  --color-secondary: oklch(45% 0.012 264); /* #52555c graphite */
-  --color-secondary-content: oklch(99.5% 0 0);
-  --color-accent: oklch(52% 0.18 257); /* #0864cd */
-  --color-accent-content: oklch(99.5% 0 0);
-  --color-neutral: oklch(27% 0.012 264); /* #23262c */
-  --color-neutral-content: oklch(98.5% 0.002 264);
-  --color-info: oklch(52% 0.18 257); /* = accent */
-  --color-info-content: oklch(99.5% 0 0);
-  --color-success: oklch(52% 0.13 152); /* #137d41 */
-  --color-success-content: oklch(99.5% 0 0);
-  --color-warning: oklch(54% 0.12 65); /* #9d5d03 */
-  --color-warning-content: oklch(99.5% 0 0);
-  --color-error: oklch(53% 0.19 26); /* #c2272a */
-  --color-error-content: oklch(99.5% 0 0);
-  --radius-selector: 0.3125rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.625rem;
-  --size-selector: 0.25rem;
-  --size-field: 0.25rem;
-  --border: 1px;
-  --depth: 0;
-  --noise: 0;
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/geist-mono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
 }
 
-@plugin "daisyui/theme" {
-  name: "hoomuch-dark";
-  prefersdark: true;
-  color-scheme: dark;
-  --color-base-100: oklch(17.5% 0.006 264); /* #0f1013 page */
-  --color-base-200: oklch(21% 0.007 264); /* #17181c raised fill */
-  --color-base-300: oklch(29.5% 0.009 264); /* #2a2d31 hairline */
-  --color-base-content: oklch(94% 0.005 264); /* #e9ebef */
-  --color-ink-2: oklch(73.5% 0.006 264); /* #a8a9ad secondary text: 8.10 page · 7.55 fill */
-  --color-ink-3: oklch(66.4% 0.006 264); /* #929397 meta text, the floor: 6.20 page · 5.78 fill */
-  --color-field: oklch(54% 0.012 264); /* #6b6f76 3:1 boundary */
-  --color-primary: oklch(94% 0.005 264);
-  --color-primary-content: oklch(17.5% 0.006 264);
-  --color-secondary: oklch(75% 0.01 264); /* #abaeb4 */
-  --color-secondary-content: oklch(17.5% 0.006 264);
-  --color-accent: oklch(72% 0.14 254); /* #62a7fa */
-  --color-accent-content: oklch(17.5% 0.006 264);
-  --color-neutral: oklch(32% 0.01 264); /* #303338 */
-  --color-neutral-content: oklch(96% 0.004 264);
-  --color-info: oklch(72% 0.14 254);
-  --color-info-content: oklch(17.5% 0.006 264);
-  --color-success: oklch(74% 0.15 152); /* #54c57a */
-  --color-success-content: oklch(17.5% 0.006 264);
-  --color-warning: oklch(80% 0.14 75); /* #f2af48 */
-  --color-warning-content: oklch(17.5% 0.006 264);
-  --color-error: oklch(70% 0.17 24); /* #f66c69 */
-  --color-error-content: oklch(17.5% 0.006 264);
-  --radius-selector: 0.3125rem;
-  --radius-field: 0.5rem;
-  --radius-box: 0.625rem;
-  --size-selector: 0.25rem;
-  --size-field: 0.25rem;
-  --border: 1px;
-  --depth: 0;
-  --noise: 0;
+/* ---------- colour tokens ---------- */
+
+:root {
+  --radius: 0.625rem;
+
+  --background: #ffffff;
+  --foreground: #15181e;
+  --card: #ffffff;
+  --card-foreground: #15181e;
+  --popover: #ffffff;
+  --popover-foreground: #15181e;
+  --primary: #15181e;
+  --primary-foreground: #fcfcfd;
+  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary-foreground: #15181e;
+  --muted: #f6f7f9;
+  --muted-foreground: #5b5d62; /* 6.59 page · 6.15 muted */
+  --faint: #6c6d71; /* 5.17 page · 4.82 muted */
+  --accent: --alpha(var(--color-black) / 4%);
+  --accent-foreground: #15181e;
+  --border: #e2e4e8;
+  --input: #858991; /* 3.51 */
+  --ring: #0864cd;
+  --brand: #0864cd; /* 5.65 */
+  --destructive: #c2272a;
+  --destructive-foreground: #c2272a; /* 5.81 */
+  --info: #0864cd;
+  --info-foreground: #0864cd;
+  --success: #137d41;
+  --success-foreground: #137d41; /* 5.20 */
+  --warning: #9d5d03;
+  --warning-foreground: #9d5d03; /* 5.25 */
+  /* Chart series without a brand colour (demo uses the same grey). 3.25:1 light · 5.86:1 dark. */
+  --series-neutral: #8a8f98;
 }
 
-/* ---------- tokens ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0f1013;
+    --foreground: #e9ebef;
+    --card: #131417;
+    --card-foreground: #e9ebef;
+    --popover: #17181c;
+    --popover-foreground: #e9ebef;
+    --primary: #e9ebef;
+    --primary-foreground: #0f1013;
+    --secondary: --alpha(var(--color-white) / 4%);
+    --secondary-foreground: #e9ebef;
+    --muted: #17181c;
+    --muted-foreground: #a8a9ad; /* 8.10 page · 7.55 muted */
+    --faint: #929397; /* 6.20 page · 5.78 muted */
+    --accent: --alpha(var(--color-white) / 4%);
+    --accent-foreground: #e9ebef;
+    --border: #2a2d31;
+    --input: #6b6f76; /* 3.77 */
+    --ring: #62a7fa;
+    --brand: #62a7fa; /* 7.63 */
+    --destructive: #f66c69;
+    --destructive-foreground: #f66c69; /* 6.58 */
+    --info: #62a7fa;
+    --info-foreground: #62a7fa;
+    --success: #54c57a;
+    --success-foreground: #54c57a; /* 8.74 */
+    --warning: #f2af48;
+    --warning-foreground: #f2af48; /* 9.97 */
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-series-neutral: var(--series-neutral);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-heading: var(--font-sans);
+
+  /* coss Skeleton's shimmer. */
+  --animate-skeleton: skeleton 2s -1s infinite linear;
+  @keyframes skeleton {
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+/* ---------- type scale ----------
+ * Tailwind's sizes (text-xs…) stay on for coss components. Pages use the named sizes
+ * (design/system.md §3.2):
+ *   app      text-caption 12/16 · text-body 14/20 · text-title 20/28 · text-display(-sm) 44/48 (36/40)
+ *   landing  text-hero(-sm) 48/52 (34/40) · text-section(-sm) 28/34 (24/30) · text-lead 18/28 */
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  /* `border-field`, `text-ink-2` etc. Fallbacks only: each daisyUI theme above sets the real value. */
-  --color-field: oklch(63% 0.012 264);
-  --color-ink-2: oklch(47.8% 0.008 264);
-  --color-ink-3: oklch(53.5% 0.006 264);
-  /* Chart series without a brand colour (demo uses the same grey). 3.25:1 light · 5.86:1 dark. */
-  --color-series-neutral: oklch(64.9% 0.015 262); /* #8a8f98 */
-
-  /* Type scale (design/system.md §3.2). The reset removes Tailwind's text-xs…text-9xl. */
-  --text-*: initial;
   --text-caption: 0.75rem;
   --text-caption--line-height: 1rem;
   --text-body: 0.875rem;
@@ -177,63 +189,72 @@
   --text-title--font-weight: 600;
   --text-display: 2.75rem;
   --text-display--line-height: 3rem;
-  --text-display--letter-spacing: -0.02em;
+  --text-display--letter-spacing: -0.03em;
   --text-display--font-weight: 600;
   --text-display-sm: 2.25rem;
   --text-display-sm--line-height: 2.5rem;
-  --text-display-sm--letter-spacing: -0.02em;
+  --text-display-sm--letter-spacing: -0.03em;
   --text-display-sm--font-weight: 600;
   /* Landing only. */
   --text-hero: 3rem;
   --text-hero--line-height: 3.25rem;
-  --text-hero--letter-spacing: -0.025em;
+  --text-hero--letter-spacing: -0.035em;
   --text-hero--font-weight: 600;
   --text-hero-sm: 2.125rem;
   --text-hero-sm--line-height: 2.5rem;
-  --text-hero-sm--letter-spacing: -0.025em;
+  --text-hero-sm--letter-spacing: -0.03em;
   --text-hero-sm--font-weight: 600;
   --text-section: 1.75rem;
   --text-section--line-height: 2.125rem;
-  --text-section--letter-spacing: -0.02em;
+  --text-section--letter-spacing: -0.025em;
   --text-section--font-weight: 600;
   --text-section-sm: 1.5rem;
   --text-section-sm--line-height: 1.875rem;
-  --text-section-sm--letter-spacing: -0.02em;
+  --text-section-sm--letter-spacing: -0.025em;
   --text-section-sm--font-weight: 600;
   --text-lead: 1.125rem;
   --text-lead--line-height: 1.75rem;
+
+  /* Motion tokens (design/system.md §3.6): colour changes are fast, appearing things are base. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* ---------- base ---------- */
 
 @layer base {
-  /* Motion tokens (design/system.md §3.6): colour changes are fast, appearing things are base. */
+  * {
+    @apply border-border;
+  }
   :root {
     --dur-fast: 150ms;
     --dur-base: 200ms;
-    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-    /* daisyUI card knobs: titles at body size (16/18px are retired sizes), padding 20 → 24px. */
-    --cardtitle-fs: 0.875rem;
-    --card-p: 1.25rem;
-    @media (width >= 40rem) {
-      --card-p: 1.5rem;
-    }
   }
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01" off;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
   }
   ::selection {
-    background-color: color-mix(in oklab, var(--color-accent) 24%, transparent);
+    background-color: color-mix(in oklab, var(--brand) 24%, transparent);
   }
   ::placeholder {
-    color: var(--color-ink-3);
+    color: var(--faint);
     opacity: 1;
   }
   table {
     font-variant-numeric: tabular-nums;
   }
-  /* The UA makes <th> bold (700), a third weight. Header cells inherit; 400 by default. */
+  /* The UA makes <th> bold (700). Header cells inherit unless a component sets a weight. */
   th {
     font-weight: inherit;
   }
@@ -242,20 +263,26 @@
   h3 {
     text-wrap: balance;
   }
-  /* Bare links in prose are the accent; anything with a class styles itself. */
+  /* Bare links in prose are brand blue; anything with a class styles itself. */
   a:not([class]) {
-    color: var(--color-accent);
+    color: var(--brand);
     text-decoration-line: underline;
     text-decoration-thickness: 1px;
     text-underline-offset: 0.2em;
+  }
+  /* The default ring for anything a component doesn't draw one for (links, summaries, scrollers).
+     coss components set outline-none and draw their own ring-ring, which is the same blue. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
 /* ---------- helpers ---------- */
 
 @layer components {
-  /* Something new appeared because of what you just did (a flash, the first-numbers strip):
-     fade it in once. Opacity only, so nothing moves; reduced motion makes it instant. */
+  /* Something new appeared because of what you just did (a flash): fade it in once. Opacity only,
+     so nothing moves; reduced motion makes it instant. Works before the page hydrates. */
   .fade-in {
     animation: fade-in var(--dur-base) var(--ease-standard) both;
   }
@@ -267,27 +294,21 @@
   }
 }
 
-/* ---------- focus & motion ----------
+/* Inside scrollers (overflow-x-auto) an outset ring gets clipped: draw it inside instead. */
+@utility focus-inset {
+  &:focus-visible {
+    outline-offset: -2px;
+  }
+}
+
+/* ---------- forced colours & motion ----------
  * Unlayered on purpose: these must win over every component and utility. */
 
-:focus-visible,
-:is(.input, .select, .textarea):focus-within {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-:is(.input, .select) :focus-visible {
-  outline: none;
-}
-/* Inside scrollers (overflow-x-auto) an outset ring gets clipped: draw it inside instead. */
-.focus-inset:focus-visible {
-  outline-offset: -2px;
-}
-
-/* Forced colours (Windows contrast themes) paint every border in one system colour, transparent
-   ones included, so the current filter chip looked like the others. Draw it in Highlight. The nav
-   and range tabs need nothing: daisyUI marks the current tab with a border in forced colours. */
+/* Forced colours (Windows contrast themes) paint every border in one system colour, so the current
+   segment of a segmented control looked like the others. Draw it in Highlight. */
 @media (forced-colors: active) {
-  .btn:is(.btn-active, [aria-pressed="true"], [aria-current]:not([aria-current="false"])) {
+  [data-slot="segmented-control-item"][aria-current="page"],
+  [data-slot="nav-link"][aria-current="page"] {
     border-color: Highlight;
   }
 }
@@ -300,9 +321,5 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
-  }
-  /* No movement at all: the pressed colour is feedback enough. */
-  .btn:active {
-    translate: none;
   }
 }

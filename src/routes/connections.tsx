@@ -15,12 +15,7 @@ import {
   rotateCredentials,
   startSync,
 } from '../services/connections';
-import {
-  ConnectionDetailPage,
-  type ConnectionDetailPageProps,
-  type ManualSyncState,
-} from '../views/pages/connection-detail';
-import { ConnectionsPage, NewConnectionPage, ProviderPickerPage } from '../views/pages/connections';
+import type { ConnectionDetailPageProps, ManualSyncState } from '../views/pages/connection-detail';
 import {
   awaitingFirstSync,
   chrome,
@@ -33,6 +28,7 @@ import {
   type AppContext,
   type FormFields,
 } from './util';
+import { renderPage } from '../views/render';
 
 /** services/connections cleans names down to 60 chars; this only bounds the input. */
 const NAME_INPUT_MAX = 200;
@@ -91,31 +87,28 @@ function renderDetail(
     ? null
     : syncState(awaitingFirstSync(detail), poll, (n) => `/connections/${detail.id}?poll=${n}`);
   const manual = opts.rotate ? null : manualSyncState(c, detail, poll);
-  return c.html(
-    <ConnectionDetailPage
-      chrome={chrome(c)}
-      detail={detail}
-      sync={sync}
-      manual={manual}
-      manageOpen={c.req.query('manage') === 'open'}
-      rotate={opts.rotate}
-    />,
-    opts.status ?? 200,
-  );
+  return renderPage(c, 'connectionDetail', {
+      chrome: chrome(c),
+      detail,
+      sync,
+      manual,
+      manageOpen: c.req.query('manage') === 'open',
+      rotate: opts.rotate,
+    }, opts.status ?? 200);
 }
 
 export function registerConnectionRoutes(app: Hono<AppEnv>): void {
   app.get('/connections', requireUser, async (c) => {
     const connections = await listConnectionSummaries(c.env, currentUser(c).id);
-    return c.html(<ConnectionsPage chrome={chrome(c)} connections={connections} />);
+    return renderPage(c, 'connections', { chrome: chrome(c), connections });
   });
 
   // Registered before /connections/:id.
   app.get('/connections/new', requireUser, (c) => {
     const provider = c.req.query('provider');
-    if (provider === undefined) return c.html(<ProviderPickerPage chrome={chrome(c)} />);
+    if (provider === undefined) return renderPage(c, 'providerPicker', { chrome: chrome(c) });
     if (!isProviderId(provider)) return c.notFound();
-    return c.html(<NewConnectionPage chrome={chrome(c)} meta={getProviderMeta(provider)} />);
+    return renderPage(c, 'newConnection', { chrome: chrome(c), meta: getProviderMeta(provider) });
   });
 
   app.post('/connections', requireUser, formLimit, async (c) => {
@@ -131,16 +124,13 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
 
     const result = await createConnection(c.env, execCtx(c), user.id, provider, name || undefined, raw);
     if (!result.ok) {
-      return c.html(
-        <NewConnectionPage
-          chrome={chrome(c)}
-          meta={meta}
-          values={nonSecretValues(meta, raw, name)}
-          fieldErrors={result.fieldErrors}
-          error={result.error}
-        />,
-        422,
-      );
+      return renderPage(c, 'newConnection', {
+          chrome: chrome(c),
+          meta,
+          values: nonSecretValues(meta, raw, name),
+          fieldErrors: result.fieldErrors,
+          error: result.error,
+        }, 422);
     }
     // A first real connection goes straight to the dashboard (the number is the point); later
     // ones land on their own page. Either way the sync notice there confirms it, so there's no
