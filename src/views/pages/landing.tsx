@@ -149,7 +149,7 @@ export function LandingPage(props: LandingPageProps) {
       </section>
 
       {/* 3. What we store (literal) */}
-      <section aria-labelledby="store-title" className={SECTION}>
+      <section id="store" aria-labelledby="store-title" className={`${SECTION} scroll-mt-6`}>
         <h2 id="store-title" className={H2}>
           What hoomuch keeps, and what it doesn’t.
         </h2>
@@ -218,7 +218,7 @@ export function LandingPage(props: LandingPageProps) {
 
       {/* 6. Last call */}
       {props.signupOpen ? (
-        <section aria-labelledby="last-title" className={`${SECTION} mb-8 text-center sm:mb-12`}>
+        <section aria-labelledby="last-title" className={`${SECTION} text-center`}>
           <h2 id="last-title" className={H2}>
             One number. Every store.
           </h2>

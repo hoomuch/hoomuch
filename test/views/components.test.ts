@@ -104,6 +104,27 @@ describe('Layout', () => {
     expect(out).toContain('name="robots" content="noindex"');
     expect(out).toContain('role="status"');
     expect(out).toContain('Body');
+    // App footer: plain name, the source (AGPL-3.0 §13) and issues, the read-only promise. No owl.
+    const footer = out.slice(out.indexOf('<footer'), out.indexOf('</footer>'));
+    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch"');
+    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch/issues"');
+    expect(footer).toContain('Only ever reads. Keys are encrypted at rest.');
+    expect(footer).not.toContain('/mascot/');
+  });
+
+  it('gives marketing pages the owl footer with its links and the page’s dry line', async () => {
+    const out = await render(
+      'layout-marketing',
+      h(Layout, { title: 'Home', user: null, flash: null, marketing: true, footerNote: 'Syncs every hour, so you can check less often.' }),
+    );
+    const footer = out.slice(out.indexOf('<footer'), out.indexOf('</footer>'));
+    expect(footer).toContain('src="/mascot/asleep.png"');
+    expect(footer).toContain('Syncs every hour, so you can check less often.');
+    expect(footer).toContain('aria-label="Footer"');
+    for (const href of ['/#demo', '/#store', '/login', 'https://github.com/tahabozdemir/hoomuch#deploy-to-cloudflare']) {
+      expect(footer).toContain(`href="${href}"`);
+    }
+    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch/blob/main/LICENSE"');
   });
 
   it('hides the app nav when signed out and supports the narrow column and refresh', async () => {
@@ -540,6 +561,7 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('Syncs run every hour.');
     expect(out).toContain('src="/mascot/perched.png"');
     expect(out).toContain('src="/mascot/asleep.png"'); // marketing footer
+    expect(out).toContain('id="store"'); // the footer's "What we store" anchor
     expect(out).toContain('href="/login"'); // signed-out header link
     expect(out).not.toContain('NEEDS REAL DATA');
     expect(out).not.toContain('Why this exists'); // no founder note until it's real

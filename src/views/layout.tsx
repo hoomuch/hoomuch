@@ -11,6 +11,7 @@
  * `width="narrow"` centres a ~400px column; the page supplies the <Card> inside it.
  */
 
+import { ArrowUpRight, LockKeyhole } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Flash as FlashMsg, SessionUser } from '../env';
 import { cn } from '../lib/utils';
@@ -74,6 +75,10 @@ export const APP_NAME = 'hoomuch';
  * If you run a modified version, point this at your fork.
  */
 export const SOURCE_URL = 'https://github.com/tahabozdemir/hoomuch';
+/** Where a self-hoster starts: the README's deploy section. */
+const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
+const ISSUES_URL = `${SOURCE_URL}/issues`;
+const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
 export const DEFAULT_DESCRIPTION =
   'MRR, ARR, subscriptions and revenue from Stripe, Lemon Squeezy and RevenueCat, on one dashboard.';
 
@@ -199,25 +204,119 @@ export function Layout(props: LayoutProps) {
           {props.children}
         </main>
 
-        <footer className="border-t">
-          {props.marketing ? (
-            <div className={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-8 text-body text-muted-foreground`}>
-              <span className="flex items-center gap-3">
-                <Owl pose="asleep" className="opacity-70" />
-                <Wordmark className="font-semibold tracking-tight text-foreground" />
-              </span>
-              {props.footerNote ? <span>{props.footerNote}</span> : null}
-            </div>
-          ) : (
-            <div className={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-1 py-6 text-caption text-muted-foreground`}>
-              <span>{APP_NAME}</span>
-              <span>Only ever reads. Keys are encrypted at rest.</span>
-            </div>
-          )}
-        </footer>
+        {props.marketing ? <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} /> : <AppFooter />}
         {props.celebrate ? <Celebration /> : null}
         <PagePayloadScript />
       </body>
     </html>
+  );
+}
+
+// ---------- footer ----------
+//
+// Two footers that share one bottom line. Every page links to its source (AGPL-3.0 §13).
+// Marketing pages (landing, signed-out 404): the asleep owl on the top hairline, the wordmark and
+// the page's dry line, four links, then the meta line. App pages: the meta line only, plain
+// "hoomuch" instead of the wordmark (design/system.md §9 Brand). Hover is colour only (§3.6).
+
+/**
+ * Quiet footer link. py-1 makes it a 28px target in body text, 24px in captions (WCAG 2.5.8);
+ * -mx-1 px-1 gives the focus ring room without moving the text off the frame's edge.
+ */
+function FooterLink(props: { href: string; external?: boolean; children: ReactNode }) {
+  return (
+    <a
+      href={props.href}
+      className="-mx-1 inline-flex items-center gap-1 rounded-md px-1 py-1 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+    >
+      {props.children}
+      {props.external ? (
+        <>
+          <ArrowUpRight className="size-3.5 shrink-0" />
+          <span className="sr-only"> (GitHub)</span>
+        </>
+      ) : null}
+    </a>
+  );
+}
+
+/** The promise every page repeats, with its one icon. */
+function TrustLine() {
+  return (
+    <p className="flex items-center gap-2">
+      <LockKeyhole className="size-3.5 shrink-0 text-faint" />
+      Only ever reads. Keys are encrypted at rest.
+    </p>
+  );
+}
+
+function MarketingFooter(props: { note?: string; signedIn: boolean }) {
+  return (
+    // mt-*: room above the hairline for the owl, whatever section ends the page.
+    <footer className="mt-12 border-t sm:mt-16">
+      <div className={`${FRAME} relative`}>
+        {/* Asleep on the hairline: the PNG's lowest pixels are its bottom edge, so bottom-full
+            rests it on the line. Lined up with the wordmark below it. */}
+        <Owl pose="asleep" className="absolute bottom-full left-4 opacity-70 sm:left-6" />
+        <div className="flex flex-col gap-x-12 gap-y-5 py-10 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <Wordmark className="text-title font-semibold tracking-tight text-foreground" />
+            {props.note ? <p className="mt-1 text-body text-muted-foreground">{props.note}</p> : null}
+          </div>
+          <nav aria-label="Footer">
+            <ul className="flex flex-wrap gap-x-6 gap-y-1 text-body">
+              <li>
+                <FooterLink href="/#demo">Demo</FooterLink>
+              </li>
+              <li>
+                <FooterLink href="/#store">What we store</FooterLink>
+              </li>
+              <li>
+                <FooterLink href={SELF_HOST_URL} external>
+                  Self-host
+                </FooterLink>
+              </li>
+              <li>
+                {props.signedIn ? (
+                  <FooterLink href="/dashboard">Dashboard</FooterLink>
+                ) : (
+                  <FooterLink href="/login">Log in</FooterLink>
+                )}
+              </li>
+            </ul>
+          </nav>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t py-5 text-caption text-muted-foreground">
+          <TrustLine />
+          <p>
+            Open source under{' '}
+            <FooterLink href={LICENSE_URL} external>
+              AGPL-3.0
+            </FooterLink>
+          </p>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+function AppFooter() {
+  return (
+    <footer className="border-t">
+      <div className={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-5 text-caption text-muted-foreground`}>
+        <div className="flex flex-wrap items-center gap-x-5">
+          <span className="font-semibold text-foreground">{APP_NAME}</span>
+          <nav aria-label="Footer" className="flex flex-wrap gap-x-5">
+            <FooterLink href={SOURCE_URL} external>
+              Source code
+            </FooterLink>
+            <FooterLink href={ISSUES_URL} external>
+              Report an issue
+            </FooterLink>
+          </nav>
+        </div>
+        <TrustLine />
+      </div>
+    </footer>
   );
 }
