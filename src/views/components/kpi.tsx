@@ -1,9 +1,11 @@
 /**
- * KpiStat (one figure in the KPI strip) and DeltaBadge (period-over-period change).
+ * KpiStat (one daisyUI `stat`) and DeltaBadge (period-over-period change).
  * Owner: Experience (design). CONTRACT: props are fixed.
  *
  * Money typography: tabular figures, tight tracking, one weight (semibold). The MRR hero is the
  * largest type on any page; secondary KPIs step down two sizes. Labels are sentence case.
+ * stat-value carries a size token (text-display / text-title, both 600): daisyUI's own is 32px at
+ * 800, and nowrap, so a long currency gets wrap-anywhere back as a last resort.
  */
 
 import type { Child } from 'hono/jsx';
@@ -86,10 +88,10 @@ export function KpiStat(props: KpiStatProps) {
   const hero = Boolean(props.hero);
   if (props.inlineDelta && !hero) {
     return (
-      <div class={cx('min-w-0', props.class)}>
-        <p class="text-body text-ink-2">{props.label}</p>
-        <p class="mt-1.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
-          <span class="text-title tabular-nums wrap-anywhere">{props.value}</span>
+      <div class={cx('stat min-w-0', props.class)}>
+        <p class="stat-title">{props.label}</p>
+        <p class="stat-value mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-title whitespace-normal">
+          <span class="tabular-nums wrap-anywhere">{props.value}</span>
           {props.deltaPct !== undefined ? (
             <span class="text-body">
               <DeltaBadge pct={props.deltaPct} invert={props.invertDelta} neutral={props.neutralDelta} label={props.deltaLabel} />
@@ -97,31 +99,31 @@ export function KpiStat(props: KpiStatProps) {
             </span>
           ) : null}
         </p>
-        {props.hint ? <p class="mt-1 text-body text-ink-2 tabular-nums">{props.hint}</p> : null}
+        {props.hint ? <p class="stat-desc tabular-nums">{props.hint}</p> : null}
       </div>
     );
   }
   return (
-    <div class={cx('min-w-0', props.class)}>
-      <p class={'text-body text-ink-2'}>{props.label}</p>
+    <div class={cx('stat min-w-0', props.class)}>
+      <p class="stat-title">{props.label}</p>
       <p
         class={
           hero
-            ? 'mt-2 text-display-sm tabular-nums wrap-anywhere sm:text-display'
+            ? 'stat-value mt-1 text-display-sm tabular-nums wrap-anywhere whitespace-normal sm:text-display'
             : // Long currencies ("TRY 2,800,631", Intl joins code and number with a no-break space) must
               // fit a quarter of the card at md; wrap-anywhere is only the last-resort fallback.
-              'mt-1.5 text-title tabular-nums wrap-anywhere'
+              'stat-value mt-1 text-title tabular-nums wrap-anywhere whitespace-normal'
         }
       >
         {props.value}
       </p>
       {props.deltaPct !== undefined ? (
-        <p class={hero ? 'mt-3 flex flex-wrap items-baseline gap-x-2 text-body' : 'mt-1 flex flex-wrap items-baseline gap-x-1.5 text-body'}>
+        <p class={hero ? 'stat-desc mt-2 flex flex-wrap items-baseline gap-x-2 text-body' : 'stat-desc mt-1 flex flex-wrap items-baseline gap-x-1.5'}>
           <DeltaBadge pct={props.deltaPct} invert={props.invertDelta} neutral={props.neutralDelta} class="self-center" />
-          {props.deltaLabel ? <span class="text-ink-2">{props.deltaLabel}</span> : null}
+          {props.deltaLabel ? <span>{props.deltaLabel}</span> : null}
         </p>
       ) : null}
-      {props.hint ? <p class="mt-1 text-body text-ink-2 tabular-nums">{props.hint}</p> : null}
+      {props.hint ? <p class={hero ? 'stat-desc mt-1 text-body tabular-nums' : 'stat-desc tabular-nums'}>{props.hint}</p> : null}
     </div>
   );
 }

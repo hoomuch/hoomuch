@@ -83,8 +83,8 @@ describe('Layout', () => {
     expect(out).toMatch(/<a href="\/dashboard" aria-current="page"/);
     expect(out.match(/aria-current="page"/g)).toHaveLength(1);
     // Three daily places in the nav; Settings on its own; Log out lives in Settings, not the bar.
-    expect(out.match(/<li><a href="\/(dashboard|connections|transactions)"/g)).toHaveLength(3);
-    expect(out).toMatch(/<a href="\/settings" class="[^"]*ml-auto/);
+    expect(out.match(/<a href="\/(dashboard|connections|transactions)"[^>]*class="tab /g)).toHaveLength(3);
+    expect(out).toMatch(/<div class="[^"]*ml-auto[^"]*"><a href="\/settings"/);
     expect(out).not.toContain('action="/logout"');
     // The optional submit-feedback script: same origin, deferred, never inline.
     expect(out).toContain('<script src="/app.js" defer=""></script>');
@@ -297,8 +297,8 @@ describe('ui primitives', () => {
     }
     expect(await render('btn', Button({ children: 'Save' }))).toContain('class="btn btn-primary"');
     expect(await render('btn-sm', Button({ variant: 'ghost', small: true, type: 'button', children: 'x' }))).toContain('btn btn-ghost btn-sm');
-    expect(await render('btn-danger', Button({ variant: 'danger', children: 'Delete' }))).toContain('text-error');
-    expect(await render('link-btn', LinkButton({ href: '/x', variant: 'secondary', block: true, children: 'Go' }))).toContain('class="btn btn-block"');
+    expect(await render('btn-danger', Button({ variant: 'danger', children: 'Delete' }))).toContain('btn btn-outline btn-error');
+    expect(await render('link-btn', LinkButton({ href: '/x', variant: 'secondary', block: true, children: 'Go' }))).toContain('class="btn btn-outline border-base-300 btn-block"');
   });
 
   it('renders EmptyState, DangerZone and RelativeTime', async () => {
@@ -707,7 +707,7 @@ describe('personality: owl, landing, first sync, 404', () => {
         demoRemoved: true,
       }),
     );
-    expect(out).toMatch(/<section aria-labelledby="first-numbers" class="fade-in /);
+    expect(out).toMatch(/<section aria-labelledby="first-numbers" class="alert [^"]*\bfade-in\b/);
     expect(out).toContain('You can stop checking now. Demo data removed, so your totals are real.');
   });
 
@@ -737,7 +737,7 @@ describe('connection page', () => {
   it('leads with status and numbers, keeps changes in a closed Manage section, Sync now first', async () => {
     const out = await render('connection-ok', page(fixtureConnectionDetail(0)));
     expect(out).toMatch(/<form method="post" action="\/connections\/[^"]+\/sync"><button type="submit" class="btn btn-primary">Sync now<\/button>/);
-    expect(out).toContain('<details id="manage" class="rounded-box');
+    expect(out).toContain('<details id="manage" class="collapse ');
     expect(out).not.toContain('<details id="manage" open');
     expect(out.indexOf('>Details<')).toBeLessThan(out.indexOf('>Recent snapshots<'));
     expect(out.indexOf('>Sync history<')).toBeLessThan(out.indexOf('id="manage"'));
@@ -748,7 +748,7 @@ describe('connection page', () => {
     const failing = { ...fixtureConnectionDetail(2), status: 'error' as const };
     const out = await render('connection-failing', page(failing));
     expect(out).toContain('<a href="#replace-key" class="btn btn-primary">Replace key</a>');
-    expect(out).toMatch(/<button type="submit" class="btn">Sync now<\/button>/); // still there, secondary
+    expect(out).toMatch(/<button type="submit" class="btn btn-outline border-base-300">Sync now<\/button>/); // still there, secondary
     expect(out).toContain('<details id="manage" open=""');
     expect(out).toContain('Last sync failed');
   });

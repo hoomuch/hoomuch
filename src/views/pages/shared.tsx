@@ -65,7 +65,7 @@ export function SyncNotice(props: {
           {refresh.stopUrl ? (
             <>
               {' '}
-              <a href={refresh.stopUrl} class="link">
+              <a href={refresh.stopUrl} class="link link-accent">
                 Stop refreshing
               </a>
             </>

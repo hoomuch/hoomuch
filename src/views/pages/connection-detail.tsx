@@ -74,7 +74,7 @@ function ManualSyncNotice(props: { manual: ManualSyncState; hasError: boolean })
             {refresh.stopUrl ? (
               <>
                 {' '}
-                <a href={refresh.stopUrl} class="link">
+                <a href={refresh.stopUrl} class="link link-accent">
                   Stop refreshing
                 </a>
               </>
@@ -239,12 +239,13 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
         </Card>
 
         {isDemo ? null : (
-          <details id="manage" open={manageOpen} class="rounded-box border border-base-300">
-            <summary class="cursor-pointer rounded-box px-5 py-4 sm:px-6">
+          // daisyUI collapse on a native <details>: works without JS, opens itself when it's needed.
+          <details id="manage" open={manageOpen} class="collapse collapse-arrow border border-base-300">
+            <summary class="collapse-title ps-5 sm:ps-6">
               <h2 class="inline font-semibold">Manage</h2>
               <span class="text-ink-2"> · Rename, replace the key or delete</span>
             </summary>
-            <div class="grid gap-8 border-t border-base-300 p-5 sm:p-6">
+            <div class="collapse-content grid gap-8 border-t border-base-300 p-5 sm:p-6">
               <section aria-labelledby="rename-title">
                 <h3 id="rename-title" class="font-semibold">
                   Rename

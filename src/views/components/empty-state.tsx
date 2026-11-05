@@ -18,11 +18,13 @@ export function EmptyState(props: {
   class?: string;
 }) {
   return (
-    <section class={cx('rounded-box border border-base-300 px-6 py-12 text-center sm:py-16', props.class)}>
-      {props.plain ? null : <Owl pose="dozing" class="mx-auto mb-5" />}
-      <h2 class="text-title">{props.title}</h2>
-      {props.children ? <div class="mx-auto mt-2 max-w-md text-pretty text-ink-2">{props.children}</div> : null}
-      {props.actions ? <div class="mt-6 flex flex-wrap justify-center gap-3">{props.actions}</div> : null}
+    <section class={cx('card card-border border-base-300', props.class)}>
+      <div class="card-body items-center py-12 text-center sm:py-16">
+        {props.plain ? null : <Owl pose="dozing" class="mb-3" />}
+        <h2 class="text-title">{props.title}</h2>
+        {props.children ? <div class="max-w-md text-pretty text-ink-2">{props.children}</div> : null}
+        {props.actions ? <div class="card-actions mt-4 justify-center gap-3">{props.actions}</div> : null}
+      </div>
     </section>
   );
 }

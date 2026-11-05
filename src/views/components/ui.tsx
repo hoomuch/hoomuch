@@ -44,7 +44,7 @@ export function PageHeader(props: {
   );
 }
 
-/** Bordered section. `title` renders an <h2>. */
+/** daisyUI card with a hairline border. `title` renders an <h2 class="card-title">. */
 export function Card(props: {
   title?: string;
   description?: Child;
@@ -55,17 +55,19 @@ export function Card(props: {
   class?: string;
 }) {
   return (
-    <section id={props.id} class={cx('min-w-0 rounded-box border border-base-300 p-5 sm:p-6', props.class)}>
-      {props.title ? (
-        <div class="mb-4 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          <div class="min-w-0">
-            <h2 class="font-semibold">{props.title}</h2>
-            {props.description ? <p class="mt-1 text-body text-ink-2">{props.description}</p> : null}
+    <section id={props.id} class={cx('card card-border min-w-0 border-base-300', props.class)}>
+      <div class="card-body">
+        {props.title ? (
+          <div class="mb-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div class="min-w-0">
+              <h2 class="card-title">{props.title}</h2>
+              {props.description ? <p class="mt-1 text-ink-2">{props.description}</p> : null}
+            </div>
+            {props.actions ? <div class="card-actions items-center">{props.actions}</div> : null}
           </div>
-          {props.actions ? <div class="flex flex-wrap items-center gap-2">{props.actions}</div> : null}
-        </div>
-      ) : null}
-      {props.children}
+        ) : null}
+        {props.children}
+      </div>
     </section>
   );
 }
@@ -74,12 +76,16 @@ export function Card(props: {
 
 export type Tone = 'info' | 'success' | 'warning' | 'error';
 
-/** Tinted 1px border + whisper of tint. Text stays base-content, so contrast never depends on tone. */
-const TONE_BOX: Record<Tone, string> = {
-  info: 'border-info/40 bg-info/5',
-  success: 'border-success/40 bg-success/5',
-  warning: 'border-warning/50 bg-warning/5',
-  error: 'border-error/40 bg-error/5',
+/**
+ * daisyUI's soft alert: a whisper of tint and a tinted border. The text stays base-content, so its
+ * contrast never depends on the tone (soft warning/success text sits right at 4.6:1); the icon
+ * carries the colour.
+ */
+const TONE_ALERT: Record<Tone, string> = {
+  info: 'alert-info',
+  success: 'alert-success',
+  warning: 'alert-warning',
+  error: 'alert-error',
 };
 
 /** Spoken before the message so colour + icon are never the only signal. */
@@ -104,7 +110,7 @@ export function ToneIcon(props: { tone: Tone; class?: string }) {
 }
 
 /**
- * The shared message box behind Alert, Flash and FormError: tone icon, optional title, body.
+ * The shared daisyUI alert behind Alert, Flash and FormError: tone icon, optional title, body.
  * role="alert" for errors (announced immediately), role="status" otherwise; pass role="none"
  * for static page content, which is read in order like any other text.
  * `autofocus` makes the box a programmatic focus target (tabindex="-1") and focuses it on load:
@@ -126,13 +132,13 @@ export function ToneBox(props: {
       role={role === 'none' ? undefined : role}
       tabindex={props.autofocus ? -1 : undefined}
       autofocus={props.autofocus || undefined}
-      class={cx('flex items-start gap-3 rounded-box border px-4 py-3 text-body', TONE_BOX[props.tone], props.class)}
+      class={cx('alert alert-soft items-start gap-3 text-base-content', TONE_ALERT[props.tone], props.class)}
     >
       <ToneIcon tone={props.tone} class="mt-0.5" />
-      <div class="min-w-0 flex-1">
+      <div class="min-w-0">
         <span class="sr-only">{TONE_WORD[props.tone]} </span>
         {props.title ? <p class="font-semibold">{props.title}</p> : null}
-        {props.children ? <div class={props.title ? 'mt-0.5 text-base-content' : undefined}>{props.children}</div> : null}
+        {props.children ? <div class={props.title ? 'mt-0.5' : undefined}>{props.children}</div> : null}
       </div>
     </div>
   );
@@ -152,19 +158,30 @@ export function Alert(props: { tone?: Tone; title?: string; children?: Child; cl
   );
 }
 
+// ---------- tabs ----------
+
+/**
+ * One link in a daisyUI `tabs tabs-box` segmented control (range tabs, the transactions filter).
+ * The current one carries aria-current="page" (daisyUI's active state) plus a 3:1 border
+ * (--color-field) and ink text, so the state never relies on the fill alone. Idle tabs are
+ * ink-2: daisyUI's idle tone (base-content/50) is under AA.
+ */
+export const BOX_TAB =
+  'tab border whitespace-nowrap tabular-nums text-ink-2 hover:text-base-content aria-[current=page]:border-field aria-[current=page]:text-base-content';
+
 // ---------- buttons ----------
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 /**
- * primary: ink, one per view. secondary: quiet bordered. ghost: text-only.
- * danger: calm until hovered (red text, fills red on hover); the final destructive click.
+ * daisyUI buttons. primary: ink, one per view. secondary: outline on a hairline. ghost: text-only.
+ * danger: outlined red, fills red on hover; the final destructive click.
  */
 const BUTTON_CLASS: Record<ButtonVariant, string> = {
   primary: 'btn btn-primary',
-  secondary: 'btn',
+  secondary: 'btn btn-outline border-base-300',
   ghost: 'btn btn-ghost',
-  danger: 'btn text-error hover:border-error hover:bg-error hover:text-error-content',
+  danger: 'btn btn-outline btn-error',
 };
 
 function buttonClass(variant: ButtonVariant | undefined, small?: boolean, block?: boolean, extra?: string): string {
@@ -222,14 +239,18 @@ export function LinkButton(props: {
 }
 
 // ---------- form fields ----------
-// Every field: visible <label for>, help + error wired with aria-describedby, aria-invalid on error.
+// daisyUI fieldset + label. Every field: visible <label for> (styled as the fieldset legend, but a
+// real label, since each wraps one control), help + error wired with aria-describedby,
+// aria-invalid and input-error on error. text-body: daisyUI's fieldset text is 12px.
 
-const LABEL = 'mb-1.5 block text-body font-semibold';
-const HELP = 'mt-1.5 text-body text-ink-2';
+const FIELDSET = 'fieldset mb-2 text-body';
+const LABEL = 'fieldset-legend';
+/** daisyUI's `label` doesn't wrap; help text has to. */
+const HELP = 'label whitespace-normal';
 
 function FieldError(props: { id: string; message: string }) {
   return (
-    <p id={props.id} class="mt-1.5 flex items-start gap-1.5 text-body text-error">
+    <p id={props.id} class="label items-start whitespace-normal text-error">
       <IconErrorCircle class="mt-0.5 size-3.5 shrink-0" />
       <span>{props.message}</span>
     </p>
@@ -272,10 +293,12 @@ export function Field(props: FieldProps) {
   const errId = props.error ? `${id}-error` : undefined;
   const type = props.type ?? 'text';
   return (
-    <div class="mb-5">
+    <div class={FIELDSET}>
       <label for={id} class={LABEL}>
-        {props.label}
-        {props.required || props.hideOptional ? null : <span class="font-normal text-ink-3"> (optional)</span>}
+        <span>
+          {props.label}
+          {props.required || props.hideOptional ? null : <span class="font-normal text-ink-3"> (optional)</span>}
+        </span>
       </label>
       <input
         id={id}
@@ -293,7 +316,7 @@ export function Field(props: FieldProps) {
         inputmode={props.inputmode}
         aria-invalid={props.error ? 'true' : undefined}
         aria-describedby={describedBy(errId, helpId)}
-        class={cx('input w-full', props.inputClass)}
+        class={cx('input w-full', props.error ? 'input-error' : 'border-field', props.inputClass)}
       />
       {props.error && errId ? <FieldError id={errId} message={props.error} /> : null}
       {props.help ? (
@@ -320,7 +343,7 @@ export function SelectField(props: {
   const helpId = props.help ? `${id}-help` : undefined;
   const errId = props.error ? `${id}-error` : undefined;
   return (
-    <div class="mb-5">
+    <div class={FIELDSET}>
       <label for={id} class={LABEL}>
         {props.label}
       </label>
@@ -331,7 +354,7 @@ export function SelectField(props: {
         autocomplete={props.autocomplete}
         aria-invalid={props.error ? 'true' : undefined}
         aria-describedby={describedBy(errId, helpId)}
-        class="select w-full"
+        class={cx('select w-full', props.error ? 'select-error' : 'border-field')}
       >
         {props.options.map((o) => (
           <option value={o.value} selected={o.value === props.value}>
@@ -350,16 +373,16 @@ export function SelectField(props: {
 }
 
 /**
- * A required confirmation checkbox for destructive actions. The whole label is the click target,
- * so the 16px box still meets the 24×24 target size (WCAG 2.5.8).
+ * A required confirmation checkbox for destructive actions (daisyUI checkbox + fieldset-label).
+ * The whole label is the click target. The statement is read in ink, not the label's muted tone.
  */
 export function ConfirmCheckbox(props: { name?: string; label: Child; error?: string; id?: string; autofocus?: boolean }) {
   const name = props.name ?? 'confirm';
   const id = props.id ?? name;
   const errId = props.error ? `${id}-error` : undefined;
   return (
-    <div class="mb-5">
-      <label for={id} class="flex cursor-pointer items-start gap-2.5 text-body">
+    <div class={FIELDSET}>
+      <label for={id} class="fieldset-label items-start gap-2.5 text-base-content">
         <input
           id={id}
           type="checkbox"
@@ -371,7 +394,7 @@ export function ConfirmCheckbox(props: { name?: string; label: Child; error?: st
           // (native :invalid), so screen readers say "invalid entry" before anything was submitted.
           aria-invalid={props.error ? 'true' : 'false'}
           aria-describedby={errId}
-          class="checkbox checkbox-sm mt-0.5"
+          class="checkbox checkbox-primary checkbox-sm"
         />
         <span>{props.label}</span>
       </label>

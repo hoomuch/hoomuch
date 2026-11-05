@@ -34,6 +34,23 @@
  *   wide tables → wrap in <TableScroller> (ui.tsx), not a bare overflow-x-auto div: it is
  *          keyboard-scrollable, named by the caption, and `relative` so sr-only text can't
  *          escape it and widen the page at 320px.
+ *
+ * Components are daisyUI's own (btn, input, select, checkbox, table, badge, link, alert, card,
+ * tabs, collapse, skeleton, fieldset, stat, status, join, loading). Don't re-implement one here:
+ * theme it with the variables below, or add a utility in the markup. The few utilities that sit
+ * on daisyUI classes on purpose:
+ *   border-field on .input/.select ... daisyUI's default boundary is base-content/20 (1.5:1);
+ *                                      WCAG 1.4.11 needs 3:1. Swapped for input-error on error.
+ *   border-base-300 on .card/.btn-outline ... daisyUI borders cards with base-200, which is our
+ *                                      fill (1.07:1 on the page); hairlines are base-300.
+ *   text-ink-2 on idle .tab .......... daisyUI's idle tab text is base-content/50 (3.4:1).
+ *   before:text-accent on nav tabs ... the tabs-border bar is the tab's currentColor; ours is accent.
+ *   text-base-content on .alert-soft . soft alerts colour their text by tone (~4.6:1 for warning
+ *                                      and success); the text stays ink, the icon carries the tone.
+ *   block on chart <figure>s ......... daisyUI lays out a figure inside a .card as a centred row.
+ *   font-semibold + size token on .stat-value ... daisyUI's is 800 weight and 32px (two weights,
+ *                                      four sizes, §3.2).
+ *   animate-none on .skeleton ........ no idle loops (design/system.md §3.6).
  */
 
 @import "tailwindcss" source("../");
@@ -44,19 +61,20 @@
 
 /*
  * daisyUI supplies the themes, the colour utilities (bg-base-200, text-error, fill-accent…),
- * rounded-box/-field/-selector, the root colour + scrollbar base, and loading/kbd. It emits a
- * component whenever its name appears anywhere in src/, and many are everyday words in our code
- * (range, filter, steps, status, label, list, card…), so this is a whitelist.
- * btn, input, select, textarea, checkbox, radio, table, badge and link keep their daisyUI class
- * names and meaning but are implemented below at a fraction of the size (with daisyUI's own
- * versions the bundle was 51 KB).
+ * rounded-box/-field/-selector, the root colour + scrollbar base, and every component the views
+ * use. It emits a component whenever its name appears anywhere in src/, and many are everyday
+ * words in our code (range, filter, steps, list, menu…), so this is a whitelist.
  * Need another daisyUI component? Add it to `include`.
  */
 @plugin "daisyui" {
   themes: false;
   logs: false;
-  include: rootcolor, scrollbar, radius, loading, kbd;
+  include: rootcolor, scrollbar, radius, join, button, input, select, checkbox, fieldset, label,
+    table, badge, status, link, alert, card, stat, tab, collapse, skeleton, loading;
 }
+
+/* /app.js puts daisyUI's spinner on the pressed button; public/ isn't scanned, so name it here. */
+@source inline("loading loading-spinner loading-xs");
 
 /* ---------- themes ---------- */
 
@@ -194,6 +212,12 @@
     --dur-fast: 150ms;
     --dur-base: 200ms;
     --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    /* daisyUI card knobs: titles at body size (16/18px are retired sizes), padding 20 → 24px. */
+    --cardtitle-fs: 0.875rem;
+    --card-p: 1.25rem;
+    @media (width >= 40rem) {
+      --card-p: 1.5rem;
+    }
   }
   html {
     -webkit-text-size-adjust: 100%;
@@ -227,320 +251,13 @@
   }
 }
 
-/* ---------- components ----------
- * Same class names and semantics as daisyUI v5, lean implementations. Tailwind utilities in
- * the markup always win (they sit in a later layer), e.g. `btn w-full`, `input font-mono`. */
+/* ---------- helpers ---------- */
 
 @layer components {
-  /* Buttons: btn (= quiet bordered), btn-primary (ink), btn-ghost, btn-error (solid red),
-     btn-active / aria-current / aria-pressed (selected), btn-sm, btn-block, disabled.
-     Pressed (:active) goes one step past hover and nudges down half a pixel. */
-  .btn {
-    --btn-bg: var(--color-base-100);
-    --btn-fg: var(--color-base-content);
-    --btn-border: var(--color-base-300);
-    --btn-hover: var(--color-base-200);
-    --btn-press: var(--color-base-300);
-    display: inline-flex;
-    flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
-    gap: 0.375rem;
-    height: 2.5rem;
-    padding-inline: 1rem;
-    border: var(--border) solid var(--btn-border);
-    border-radius: var(--radius-field);
-    background-color: var(--btn-bg);
-    color: var(--btn-fg);
-    font-size: 0.875rem;
-    font-weight: 600;
-    line-height: 1.25rem;
-    white-space: nowrap;
-    text-decoration-line: none;
-    cursor: pointer;
-    user-select: none;
-    touch-action: manipulation;
-    transition-property: color, background-color, border-color;
-    transition-duration: var(--dur-fast);
-    transition-timing-function: var(--ease-standard);
-  }
-  @media (hover: hover) {
-    .btn:hover {
-      background-color: var(--btn-hover);
-      border-color: var(--btn-hover-border, var(--btn-border));
-    }
-  }
-  /* Outside the hover query: a tap on a touch screen has no hover, so this is its only feedback. */
-  .btn:active:not(:disabled) {
-    background-color: var(--btn-press);
-    border-color: var(--btn-press-border, var(--btn-border));
-    translate: 0 0.5px;
-  }
-  /* Smaller box, same body size: size steps come from height and padding, not a 13px font. */
-  .btn-sm {
-    height: 2rem;
-    padding-inline: 0.75rem;
-  }
-  .btn-block {
-    width: 100%;
-  }
-  .btn-primary {
-    --btn-bg: var(--color-primary);
-    --btn-fg: var(--color-primary-content);
-    --btn-border: var(--color-primary);
-    /* Ink can't get darker on hover, so it lightens toward the page. */
-    --btn-hover: color-mix(in oklab, var(--color-primary) 84%, var(--color-base-100));
-    --btn-hover-border: var(--btn-hover);
-    --btn-press: color-mix(in oklab, var(--color-primary) 74%, var(--color-base-100));
-    --btn-press-border: var(--btn-press);
-  }
-  .btn-error {
-    --btn-bg: var(--color-error);
-    --btn-fg: var(--color-error-content);
-    --btn-border: var(--color-error);
-    --btn-hover: color-mix(in oklab, var(--color-error) 88%, var(--color-base-content));
-    --btn-hover-border: var(--btn-hover);
-    --btn-press: color-mix(in oklab, var(--color-error) 78%, var(--color-base-content));
-    --btn-press-border: var(--btn-press);
-  }
-  .btn-ghost {
-    --btn-bg: transparent;
-    --btn-border: transparent;
-  }
-  .btn-active,
-  .btn:is([aria-pressed="true"], [aria-current]:not([aria-current="false"])) {
-    --btn-bg: var(--color-base-200);
-    --btn-border: var(--color-field);
-    --btn-hover: var(--color-base-200);
-  }
-  .btn:is(:disabled, [aria-disabled="true"], .btn-disabled) {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  .btn:is([aria-disabled="true"], .btn-disabled) {
-    pointer-events: none;
-  }
-  /* On its way (set by /app.js on submit): a small spinner before the label, full opacity, no
-     second click. The spinner only turns while the request runs; reduced motion holds it still. */
-  .btn[aria-busy="true"] {
-    pointer-events: none;
-    cursor: progress;
-  }
-  .btn[aria-busy="true"]::before {
-    content: "";
-    width: 0.875rem;
-    height: 0.875rem;
-    flex-shrink: 0;
-    border: 2px solid currentColor;
-    border-inline-end-color: transparent;
-    border-radius: 9999px;
-    animation: btn-spin 700ms linear infinite;
-  }
-
-  /* Fields: input, select, textarea. 1px boundary at ≥3:1 (--color-field); red when invalid. */
-  .input,
-  .select,
-  .textarea {
-    --input-color: var(--color-field);
-    width: clamp(3rem, 20rem, 100%);
-    min-width: 0;
-    height: 2.5rem;
-    padding-inline: 0.75rem;
-    border: var(--border) solid var(--input-color);
-    border-radius: var(--radius-field);
-    background-color: var(--color-base-100);
-    color: var(--color-base-content);
-    font-size: 0.875rem;
-    transition: border-color var(--dur-fast) var(--ease-standard);
-  }
-  .textarea {
-    height: auto;
-    min-height: 5rem;
-    padding-block: 0.5rem;
-  }
-  .select {
-    appearance: none;
-    padding-inline-end: 2.25rem;
-    text-overflow: ellipsis;
-    background-image: linear-gradient(45deg, #0000 50%, currentColor 50%),
-      linear-gradient(135deg, currentColor 50%, #0000 50%);
-    background-position: calc(100% - 1.125rem) calc(50% + 1px), calc(100% - 0.8125rem) calc(50% + 1px);
-    background-size: 0.3125rem 0.3125rem;
-    background-repeat: no-repeat;
-  }
-  .input-sm,
-  .select-sm {
-    height: 2rem;
-    font-size: 0.875rem;
-  }
-  .input-error,
-  .select-error,
-  .textarea-error,
-  :is(.input, .select, .textarea)[aria-invalid="true"] {
-    --input-color: var(--color-error);
-  }
-  :is(.input, .select, .textarea):is(:disabled, [disabled]) {
-    background-color: var(--color-base-200);
-    border-color: var(--color-base-300);
-    color: var(--color-ink-3);
-    cursor: not-allowed;
-  }
-  /* iOS zooms into fields under 16px. */
-  @media (pointer: coarse) {
-    .input,
-    .select,
-    .textarea {
-      font-size: 1rem;
-    }
-  }
-
-  /* Checkbox / radio: native controls (crisp, forced-colours aware), tinted ink. */
-  .checkbox,
-  .radio {
-    width: 1.125rem;
-    height: 1.125rem;
-    flex-shrink: 0;
-    margin: 0;
-    accent-color: var(--color-primary);
-    cursor: pointer;
-  }
-  .checkbox-sm,
-  .radio-sm {
-    width: 1rem;
-    height: 1rem;
-  }
-  .checkbox:disabled,
-  .radio:disabled {
-    cursor: not-allowed;
-  }
-
-  /* Table: quiet header, hairline rows, flush outer edges, tabular figures.
-     table-sm / table-xs tighten; table-zebra and tr.row-hover add a quiet fill. */
-  .table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    text-align: start;
-    font-size: 0.875rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .table :where(th, td) {
-    padding: 0.625rem 0.75rem;
-    text-align: start;
-    vertical-align: middle;
-  }
-  .table :where(thead, tfoot) {
-    color: var(--color-ink-2);
-    font-size: 0.75rem;
-    font-weight: 400;
-    white-space: nowrap;
-  }
-  .table :where(thead tr :is(th, td), tbody tr:not(:last-child) :is(th, td)) {
-    border-bottom: var(--border) solid var(--color-base-300);
-  }
-  .table :where(tfoot tr:first-child :is(th, td)) {
-    border-top: var(--border) solid var(--color-base-300);
-  }
-  .table-sm :where(th, td) {
-    padding-block: 0.5rem;
-  }
-  .table-sm :where(tbody) {
-    font-size: 0.875rem;
-  }
-  .table-xs :where(th, td) {
-    padding: 0.25rem 0.5rem;
-  }
-  .table-xs :where(tbody) {
-    font-size: 0.75rem;
-  }
-  /* Flush outer edges at every size, so figures line up with card titles. */
-  .table :where(tr > :first-child) {
-    padding-inline-start: 0;
-  }
-  .table :where(tr > :last-child) {
-    padding-inline-end: 0;
-  }
-  .table-zebra :where(tbody tr:nth-child(even)),
-  .table :where(tr.row-hover:hover) {
-    background-color: var(--color-base-200);
-  }
-
-  /* Badge: small capsule. badge-{success,warning,error,info} fill; badge-outline keeps the
-     colour on text + border only. */
-  .badge {
-    --badge-color: var(--color-base-content);
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    height: 1.25rem;
-    padding-inline: 0.5rem;
-    border: var(--border) solid var(--color-base-300);
-    border-radius: 9999px;
-    background-color: var(--color-base-200);
-    color: var(--color-base-content);
-    font-size: 0.75rem;
-    font-weight: 600;
-    line-height: 1;
-    white-space: nowrap;
-    vertical-align: middle;
-  }
-  .badge-sm {
-    height: 1.125rem;
-    padding-inline: 0.4375rem;
-    font-size: 0.75rem;
-  }
-  .badge-success {
-    --badge-color: var(--color-success);
-    --badge-fg: var(--color-success-content);
-  }
-  .badge-warning {
-    --badge-color: var(--color-warning);
-    --badge-fg: var(--color-warning-content);
-  }
-  .badge-error {
-    --badge-color: var(--color-error);
-    --badge-fg: var(--color-error-content);
-  }
-  .badge-info {
-    --badge-color: var(--color-info);
-    --badge-fg: var(--color-info-content);
-  }
-  .badge:is(.badge-success, .badge-warning, .badge-error, .badge-info) {
-    border-color: var(--badge-color);
-    background-color: var(--badge-color);
-    color: var(--badge-fg);
-  }
-  .badge.badge-outline {
-    border-color: color-mix(in oklab, var(--badge-color) 45%, transparent);
-    background-color: transparent;
-    color: var(--badge-color);
-  }
-
-  /* Links are the accent, underlined; link-hover underlines on hover only. */
-  .link {
-    color: var(--color-accent);
-    text-decoration-line: underline;
-    text-decoration-thickness: 1px;
-    text-underline-offset: 0.2em;
-    cursor: pointer;
-  }
-  .link-hover {
-    text-decoration-line: none;
-  }
-  .link-hover:hover {
-    text-decoration-line: underline;
-  }
-
   /* Something new appeared because of what you just did (a flash, the first-numbers strip):
      fade it in once. Opacity only, so nothing moves; reduced motion makes it instant. */
   .fade-in {
     animation: fade-in var(--dur-base) var(--ease-standard) both;
-  }
-}
-
-@keyframes btn-spin {
-  to {
-    rotate: 1turn;
   }
 }
 
@@ -567,13 +284,9 @@
 }
 
 /* Forced colours (Windows contrast themes) paint every border in one system colour, transparent
-   ones included, so the current nav item, range and filter looked like all the others. Hide the
-   idle borders and draw the current marker in Highlight. Text and outlines are left to the system. */
+   ones included, so the current filter chip looked like the others. Draw it in Highlight. The nav
+   and range tabs need nothing: daisyUI marks the current tab with a border in forced colours. */
 @media (forced-colors: active) {
-  nav a:not(.btn, [aria-current="page"]) {
-    border-color: Canvas;
-  }
-  nav a[aria-current="page"],
   .btn:is(.btn-active, [aria-pressed="true"], [aria-current]:not([aria-current="false"])) {
     border-color: Highlight;
   }

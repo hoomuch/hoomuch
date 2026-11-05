@@ -34,7 +34,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
         actions={hasAny ? <LinkButton href="/connections/new">Add connection</LinkButton> : undefined}
       />
       {hasAny ? (
-        <TableScroller labelledBy="connections-caption" class="rounded-box border border-base-300 px-5 py-1">
+        <TableScroller labelledBy="connections-caption" class="rounded-box border border-base-300">
           <table class="table">
             <caption id="connections-caption" class="sr-only">
               Your connections
@@ -55,7 +55,7 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
                       <ProviderDot dotClass={c.dotClass} />
                       {c.name}
                     </a>
-                    {c.lastError ? <p class="mt-1 max-w-md text-body text-error">{c.lastError}</p> : null}
+                    {c.lastError ? <p class="mt-1 max-w-md text-error">{c.lastError}</p> : null}
                   </th>
                   <td class="whitespace-nowrap">{getProviderMeta(c.provider).name}</td>
                   <td>
@@ -93,26 +93,27 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
       <ul class="grid gap-4 sm:grid-cols-3">
         {real.map((p) => (
           <li>
-            <a
-              href={`/connections/new?provider=${p.id}`}
-              class="block h-full rounded-box border border-base-300 p-5 hover:border-field"
-            >
-              <span class="inline-flex items-center gap-2 font-semibold">
-                <ProviderDot dotClass={p.dotClass} size="md" />
-                {p.name}
+            <a href={`/connections/new?provider=${p.id}`} class="card card-border h-full border-base-300 hover:border-field">
+              <span class="card-body">
+                <span class="card-title">
+                  <ProviderDot dotClass={p.dotClass} size="md" />
+                  {p.name}
+                </span>
+                <span class="text-ink-2">{p.tagline}</span>
               </span>
-              <span class="mt-1 block text-body text-ink-2">{p.tagline}</span>
             </a>
           </li>
         ))}
       </ul>
       <a
         href="/connections/new?provider=demo"
-        class="mt-4 flex items-center gap-2 rounded-box border border-dashed border-base-300 px-5 py-3 text-body text-ink-2 hover:text-base-content"
+        class="card card-dash mt-4 border-base-300 text-ink-2 hover:text-base-content"
       >
-        <ProviderDot dotClass={demo.dotClass} />
-        <span>
-          <span class="font-semibold">{demo.name}</span> · {demo.tagline}
+        <span class="card-body flex-row items-center py-3">
+          <ProviderDot dotClass={demo.dotClass} />
+          <span>
+            <span class="font-semibold">{demo.name}</span> · {demo.tagline}
+          </span>
         </span>
       </a>
     </Layout>
@@ -150,10 +151,10 @@ export function NewConnectionPage(props: NewConnectionPageProps) {
       {isDemo ? (
         <Card>
           <FormError message={props.error} autofocus />
-          <p class="text-body text-ink-2">
+          <p class="text-ink-2">
             Adds a connection with sample data in 3 currencies and 90 days of history. You can delete it any time.
           </p>
-          <form method="post" action="/connections/demo" class="mt-4">
+          <form method="post" action="/connections/demo" class="mt-2">
             <Button>Add demo data</Button>
           </form>
         </Card>

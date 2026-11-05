@@ -12,14 +12,14 @@ import type { ConnectionStatus } from '../../db/queries';
 import { IconCheckCircle, IconClock, IconErrorCircle, IconSync } from './icons';
 import { cx } from './ui';
 
-/** Hairline darker rim keeps light brand colours (Lemon Squeezy yellow) crisp on white. */
-const DOT_SIZE = { sm: 'size-2', md: 'size-2.5' } as const;
+/** daisyUI status dot. A hairline darker rim keeps light brand colours (Lemon Squeezy yellow) crisp on white. */
+const DOT_SIZE = { sm: 'status-md', md: 'status-lg' } as const;
 
 export function ProviderDot(props: { dotClass: string; size?: 'sm' | 'md'; class?: string }) {
   return (
     <span
       aria-hidden="true"
-      class={cx('inline-block shrink-0 rounded-full border border-black/10', DOT_SIZE[props.size ?? 'sm'], props.dotClass, props.class)}
+      class={cx('status shrink-0 rounded-full border border-black/10', DOT_SIZE[props.size ?? 'sm'], props.dotClass, props.class)}
     />
   );
 }
@@ -31,13 +31,14 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   error: 'Error',
 };
 
-const PILL = 'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-caption font-semibold whitespace-nowrap';
+/** daisyUI soft badges: neutral for the calm states, error-toned when a sync failed. */
+const PILL = 'badge badge-soft badge-sm gap-1.5 whitespace-nowrap';
 
 const STATUS_CLASS: Record<ConnectionStatus, string> = {
-  ok: 'border-base-300 text-base-content',
-  syncing: 'border-base-300 text-base-content',
-  pending: 'border-base-300 text-ink-2',
-  error: 'border-error/40 text-error',
+  ok: '',
+  syncing: '',
+  pending: 'text-ink-2',
+  error: 'badge-error',
 };
 
 function StatusIcon(props: { status: ConnectionStatus }) {
@@ -64,7 +65,7 @@ export function StatusBadge(props: { status: ConnectionStatus; class?: string })
 
 export function TestModeBadge(props: { class?: string } = {}) {
   return (
-    <span class={cx(PILL, 'border-warning/50 text-warning', props.class)} title="Data from the provider’s test mode">
+    <span class={cx(PILL, 'badge-warning', props.class)} title="Data from the provider’s test mode">
       Test mode
     </span>
   );

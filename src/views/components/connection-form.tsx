@@ -47,8 +47,9 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
   return (
     // A named <section> (region), not <aside>: the steps are part of the task, and a complementary
     // landmark nested inside <main> is flagged by axe (landmark-complementary-is-top-level).
-    <section aria-labelledby={props.headingId} class="rounded-box border border-base-300 bg-base-200 p-5 text-body sm:p-6">
-      <Heading id={props.headingId} class="flex items-center gap-2 font-semibold">
+    <section aria-labelledby={props.headingId} class="card card-border border-base-300 bg-base-200">
+      <div class="card-body">
+      <Heading id={props.headingId} class="card-title">
         <ProviderDot dotClass={meta.dotClass} size="md" />
         Create a {meta.name} key
       </Heading>
@@ -71,7 +72,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
 
       {meta.keyUrl && !props.preview ? (
         <p class="mt-4 pl-8">
-          <a href={meta.keyUrl} rel="noopener noreferrer" target="_blank" class="link inline-flex items-center gap-1 font-semibold">
+          <a href={meta.keyUrl} rel="noopener noreferrer" target="_blank" class="link link-accent inline-flex items-center gap-1 font-semibold">
             Open {meta.name}
             <IconExternal class="size-3.5 shrink-0" />
             <span class="sr-only"> (opens in a new tab)</span>
@@ -93,6 +94,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
           <p class="mt-3 text-ink-2">hoomuch only makes read requests.</p>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }
@@ -159,7 +161,7 @@ export function ConnectionForm(props: ConnectionFormProps) {
           ) : null}
         </div>
         {hasSecret ? (
-          <p class="mt-3 text-body text-ink-2">
+          <p class="mt-3 text-ink-2">
             The key is checked with {meta.name} before it’s saved, then stored encrypted with AES-256-GCM.
           </p>
         ) : null}

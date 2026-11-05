@@ -77,7 +77,7 @@ export function LandingPage(props: LandingPageProps) {
           three tabs.
         </p>
         <div class="mt-8">
-          <LinkButton href={cta.href} class="h-11 px-5">
+          <LinkButton href={cta.href} class="btn-lg">
             {cta.label}
           </LinkButton>
         </div>
@@ -88,7 +88,7 @@ export function LandingPage(props: LandingPageProps) {
 
       {/* 1b. The real dashboard, demo numbers. The owl sits on its top edge. */}
       <section id="demo" aria-labelledby="demo-title" class="mt-28 scroll-mt-6 sm:mt-32">
-        <div class="relative rounded-box border border-base-300 bg-base-200 p-3 sm:p-5">
+        <div class="card card-border border-base-300 bg-base-200 p-3 sm:p-5">
           <Owl pose="perched" eager class="absolute right-6 bottom-full sm:right-10" />
           <div class="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1 sm:mb-4">
             <h2 id="demo-title" class="font-semibold">
@@ -216,7 +216,7 @@ export function LandingPage(props: LandingPageProps) {
             One number. Every store.
           </h2>
           <div class="mt-6">
-            <LinkButton href={cta.href} class="h-11 px-5">
+            <LinkButton href={cta.href} class="btn-lg">
               {cta.label}
             </LinkButton>
           </div>

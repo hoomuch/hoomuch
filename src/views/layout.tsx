@@ -76,11 +76,14 @@ const SKIP_LINK =
   'sr-only rounded-field border border-base-300 bg-base-100 px-4 py-2 text-body font-semibold focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50';
 
 /**
- * Nav link: regular weight in both states (no width jump); the active one gets ink + a 2px accent
- * bar. focus-inset keeps the ring visible inside the scrolling phone nav.
+ * Nav link: a daisyUI tab (inside `tabs tabs-border`), regular weight in both states (no width
+ * jump). The current one (aria-current, daisyUI's active state) gets ink and the tab's bar, drawn
+ * in the accent (before:text-accent: the bar is the tab's currentColor). Idle tabs are ink-2:
+ * daisyUI's idle tone (base-content/50) is under AA. focus-inset keeps the ring visible inside
+ * the scrolling phone nav.
  */
-const NAV_LINK =
-  'focus-inset flex h-11 items-center border-b-2 border-transparent text-body whitespace-nowrap text-ink-2 hover:text-base-content sm:h-14 aria-[current=page]:border-accent aria-[current=page]:text-base-content';
+const NAV_TAB =
+  'tab focus-inset h-11 whitespace-nowrap text-ink-2 before:text-accent hover:text-base-content sm:h-14 aria-[current=page]:text-base-content';
 
 export function Layout(props: LayoutProps) {
   const fullTitle = props.title ? `${props.title} · ${APP_NAME}` : APP_NAME;
@@ -133,28 +136,24 @@ export function Layout(props: LayoutProps) {
                   {/* -mb-px lets the active 2px accent bar sit on the header's hairline. Below sm the
                       nav bleeds to both screen edges (-mx-4 + 2rem wider): with plain w-full it
                       stopped 2rem short, and a half-hidden item wasn't scrolled into view on focus. */}
+                  {/* px-1 below sm: the tabs' own 12px padding lines their text up with the wordmark. */}
                   <nav
                     aria-label="Main"
-                    class="order-last -mx-4 -mb-px w-[calc(100%+2rem)] self-end overflow-x-auto px-4 sm:order-none sm:mx-0 sm:w-auto sm:overflow-visible sm:px-0"
+                    class="tabs tabs-border order-last -mx-4 -mb-px w-[calc(100%+2rem)] flex-nowrap justify-between self-end overflow-x-auto px-1 sm:order-none sm:mx-0 sm:w-auto sm:justify-start sm:overflow-visible sm:px-0"
                   >
-                    <ul class="flex justify-between gap-3 sm:justify-start sm:gap-6">
-                      {NAV.map((n) => (
-                        <li>
-                          <a href={n.href} aria-current={props.nav === n.key ? 'page' : undefined} class={NAV_LINK}>
-                            {n.label}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
+                    {NAV.map((n) => (
+                      <a href={n.href} aria-current={props.nav === n.key ? 'page' : undefined} class={NAV_TAB}>
+                        {n.label}
+                      </a>
+                    ))}
                   </nav>
-                  {/* Same look and current-page marker as the nav, kept apart from the daily places. */}
-                  <a
-                    href="/settings"
-                    aria-current={props.nav === 'settings' ? 'page' : undefined}
-                    class={`${NAV_LINK} -mr-1 ml-auto px-1`}
-                  >
-                    Settings
-                  </a>
+                  {/* Same look and current-page marker as the nav, kept apart from the daily places.
+                      -mr-3 puts its text on the frame's right edge. */}
+                  <div class="tabs tabs-border -mr-3 ml-auto">
+                    <a href="/settings" aria-current={props.nav === 'settings' ? 'page' : undefined} class={NAV_TAB}>
+                      Settings
+                    </a>
+                  </div>
                 </>
               ) : props.marketing ? (
                 <a

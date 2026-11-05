@@ -6,7 +6,7 @@ import { getProviderMeta } from '../../providers/registry';
 import type { ProviderId } from '../../providers/types';
 import { ProviderDot } from '../components/badges';
 import { EmptyState } from '../components/empty-state';
-import { LinkButton, PageHeader, TableScroller } from '../components/ui';
+import { BOX_TAB, LinkButton, PageHeader, TableScroller } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 import { formatDateTime } from './shared';
 
@@ -20,11 +20,6 @@ export interface TransactionsPageProps {
   /** Filter and pagination links; defaults to "/transactions". */
   basePath?: string;
 }
-
-const FILTER_CLASS = {
-  active: 'btn btn-sm btn-active',
-  idle: 'btn btn-sm btn-ghost',
-} as const;
 
 /** "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter. */
 function href(base: string, provider: ProviderId | null, page: number): string {
@@ -82,27 +77,21 @@ export function TransactionsPage(props: TransactionsPageProps) {
     <Layout {...props.chrome} title={pageTitle} nav="transactions" noindex>
       <PageHeader title="Transactions" description={`Charges and refunds, newest first. Amounts in ${cur}.`} />
 
-      <nav aria-label="Filter by provider" class="mb-6 flex flex-wrap gap-2">
-        {filters.map((f) => {
-          const active = f.id === p.provider;
-          return (
-            <a
-              href={href(base, f.id, 1)}
-              aria-current={active ? 'page' : undefined}
-              class={active ? FILTER_CLASS.active : FILTER_CLASS.idle}
-            >
-              {f.label}
-            </a>
-          );
-        })}
+      {/* The same daisyUI segmented control as the dashboard's range tabs: one choice of several. */}
+      <nav aria-label="Filter by provider" class="tabs tabs-box tabs-sm mb-6 w-fit border border-base-300">
+        {filters.map((f) => (
+          <a href={href(base, f.id, 1)} aria-current={f.id === p.provider ? 'page' : undefined} class={BOX_TAB}>
+            {f.label}
+          </a>
+        ))}
       </nav>
 
       {p.items.length === 0 ? (
-        <div class="rounded-box border border-dashed border-base-300 px-6 py-10 text-center text-ink-2">
+        <div class="card card-dash border-base-300 px-6 py-10 text-center text-ink-2">
           {p.page > 1 ? (
             <p>
               Nothing on this page.{' '}
-              <a href={href(base, p.provider, 1)} class="link">
+              <a href={href(base, p.provider, 1)} class="link link-accent">
                 Back to the first page
               </a>
             </p>
@@ -120,7 +109,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
           )}
         </div>
       ) : (
-        <TableScroller labelledBy="transactions-caption" class="rounded-box border border-base-300 px-5 py-1">
+        <TableScroller labelledBy="transactions-caption" class="rounded-box border border-base-300">
           <table class="table">
             <caption id="transactions-caption" class="sr-only">
               Transactions, newest first, page {p.page}
@@ -153,7 +142,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
                     <td>{t.description ?? <span class="text-ink-3">—</span>}</td>
                     <td>
                       {t.type === 'refund' ? (
-                        <span class="badge badge-sm badge-outline badge-error">Refund</span>
+                        <span class="badge badge-soft badge-sm badge-error">Refund</span>
                       ) : (
                         <span class="text-ink-2">Charge</span>
                       )}
@@ -170,19 +159,20 @@ export function TransactionsPage(props: TransactionsPageProps) {
         </TableScroller>
       )}
 
+      {/* daisyUI pagination: a join of buttons. Missing ends are left out, not disabled. */}
       {p.page > 1 || p.hasMore ? (
-        <nav aria-label="Pagination" class="mt-6 flex items-center justify-between gap-4">
-          <div>
+        <nav aria-label="Pagination" class="mt-6 flex justify-center">
+          <div class="join">
             {p.page > 1 ? (
-              <LinkButton href={href(base, p.provider, p.page - 1)} variant="secondary" small>
+              <LinkButton href={href(base, p.provider, p.page - 1)} variant="secondary" small class="join-item">
                 <span aria-hidden="true">←</span> Previous<span class="sr-only"> page</span>
               </LinkButton>
             ) : null}
-          </div>
-          <span class="text-body text-ink-3">Page {p.page}</span>
-          <div>
+            <span aria-current="page" class="join-item btn btn-sm btn-outline pointer-events-none border-base-300">
+              Page {p.page}
+            </span>
             {p.hasMore ? (
-              <LinkButton href={href(base, p.provider, p.page + 1)} variant="secondary" small>
+              <LinkButton href={href(base, p.provider, p.page + 1)} variant="secondary" small class="join-item">
                 Next<span class="sr-only"> page</span> <span aria-hidden="true">→</span>
               </LinkButton>
             ) : null}

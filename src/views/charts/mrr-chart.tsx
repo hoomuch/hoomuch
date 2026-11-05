@@ -235,7 +235,8 @@ export function MrrChart(props: MrrChartProps) {
         : null;
 
   return (
-    <figure class="w-full">
+    // block: daisyUI lays out a <figure> inside a .card as a centred flex row (it is meant for card images).
+    <figure class="block w-full">
       <ChartGrid
         yLabels={yLabels}
         xTicks={xTicks(domain, 'point')}

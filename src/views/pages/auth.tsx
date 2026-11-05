@@ -90,14 +90,14 @@ export function AuthPage(props: AuthPageProps) {
           {isSignup ? (
             <>
               Already have an account?{' '}
-              <a href={withNext('/login', props.next)} class="link">
+              <a href={withNext('/login', props.next)} class="link link-accent">
                 Log in
               </a>
             </>
           ) : props.signupOpen ? (
             <>
               New here?{' '}
-              <a href={withNext('/signup', props.next)} class="link">
+              <a href={withNext('/signup', props.next)} class="link link-accent">
                 Create an account
               </a>
             </>

@@ -253,7 +253,7 @@ function NoteList(props: { notes: DashboardNote[] }) {
             {n.link ? (
               <>
                 {' '}
-                <a href={n.link.href} class="link">
+                <a href={n.link.href} class="link link-accent">
                   {n.link.label}
                 </a>
               </>
@@ -265,7 +265,7 @@ function NoteList(props: { notes: DashboardNote[] }) {
                   {Object.entries(n.form.fields ?? {}).map(([k, v]) => (
                     <input type="hidden" name={k} value={v} />
                   ))}
-                  <button type="submit" class="link cursor-pointer">
+                  <button type="submit" class="link link-accent">
                     {n.form.label}
                   </button>
                 </form>
@@ -288,36 +288,39 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; c
   const days = data.rangeDays;
   const milestone = recentMilestone(data.mrrSeries, cur, dayKey(data.generatedAt));
   return (
-    <section aria-label="MRR" class={cx('rounded-box border border-base-300 p-5 sm:p-6', props.class)}>
-      <div class="grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
-        <div class="min-w-0">
-          <KpiStat
-            hero
-            label="MRR"
-            value={formatMoney(k.mrr.value, cur, { whole: true })}
-            deltaPct={k.mrr.deltaPct}
-            deltaLabel={`vs. ${days} days ago`}
-            hint={`${formatMoney(k.arr.value, cur, { whole: true })} ARR`}
+    <section aria-label="MRR" class={cx('card card-border border-base-300', props.class)}>
+      <div class="card-body">
+        <div class="grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
+          <div class="min-w-0">
+            <KpiStat
+              hero
+              class="p-0"
+              label="MRR"
+              value={formatMoney(k.mrr.value, cur, { whole: true })}
+              deltaPct={k.mrr.deltaPct}
+              deltaLabel={`vs. ${days} days ago`}
+              hint={`${formatMoney(k.arr.value, cur, { whole: true })} ARR`}
+            />
+            {milestone !== null ? (
+              <p class="mt-3">
+                <span class="badge badge-soft">Passed {formatMoney(toMinor(milestone, cur), cur, { whole: true })} MRR</span>
+              </p>
+            ) : null}
+          </div>
+          <MrrChart
+            series={data.mrrSeries}
+            windowDays={data.revenueSeries.map((d) => d.day)}
+            currency={cur}
+            title={`MRR, last ${days} days`}
           />
-          {milestone !== null ? (
-            <p class="mt-3">
-              <span class="badge">Passed {formatMoney(toMinor(milestone, cur), cur, { whole: true })} MRR</span>
-            </p>
-          ) : null}
         </div>
-        <MrrChart
-          series={data.mrrSeries}
-          windowDays={data.revenueSeries.map((d) => d.day)}
-          currency={cur}
-          title={`MRR, last ${days} days`}
-        />
+        {props.notes && props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
       </div>
-      {props.notes && props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
     </section>
   );
 }
 
-/** Subscriptions, trials, revenue: one row, with the comparison said once underneath. */
+/** Subscriptions, trials, revenue: daisyUI stats in one row (stacked on a phone), the comparison said once underneath. */
 export function SecondaryStats(props: { data: DashboardData; class?: string }) {
   const { data } = props;
   const cur = data.currency;
@@ -325,7 +328,7 @@ export function SecondaryStats(props: { data: DashboardData; class?: string }) {
   const days = data.rangeDays;
   return (
     <section aria-label="Subscriptions, trials and revenue" class={props.class}>
-      <div class="grid grid-cols-2 gap-6 rounded-box border border-base-300 bg-base-100 p-5 sm:grid-cols-3 sm:p-6">
+      <div class="stats stats-vertical w-full border border-base-300 bg-base-100 sm:stats-horizontal sm:grid-cols-3">
         <KpiStat
           inlineDelta
           label="Active subscriptions"
@@ -390,8 +393,8 @@ export function RevenueCard(props: { data: DashboardData; class?: string }) {
 }
 
 /**
- * Reward moment after the first real sync. Live numbers only, never a sample figure. It fades in
- * once (the page loads once); under reduced motion it simply appears.
+ * Reward moment after the first real sync, as a daisyUI alert with its action. Live numbers only,
+ * never a sample figure. It fades in once (the page loads once); under reduced motion it simply appears.
  */
 function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref: string; note?: string }) {
   const { data } = props;
@@ -402,16 +405,13 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
       ? `There it is: ${formatMoney(data.kpis.mrr.value, data.currency, { whole: true })} MRR ${from}.`
       : `There it is: your first numbers, ${from}.`;
   return (
-    <section
-      aria-labelledby="first-numbers"
-      class="fade-in mb-6 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-box border border-base-300 p-4 sm:flex-nowrap sm:p-5"
-    >
+    <section aria-labelledby="first-numbers" class="alert alert-vertical fade-in mb-6 sm:alert-horizontal">
       <Owl pose="cheer" eager />
-      <div class="min-w-0 flex-1 basis-48">
+      <div class="min-w-0">
         <h2 id="first-numbers" class="font-semibold wrap-break-word">
           {headline} <span aria-hidden="true">🎉</span>
         </h2>
-        <p class="mt-1 text-body text-ink-2">
+        <p class="mt-1 text-ink-2">
           It updates {props.cadence}. You can stop checking now.{props.note ? ` ${props.note}` : ''}
         </p>
       </div>
@@ -423,29 +423,32 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
 }
 
 /**
- * While the first sync runs: static blocks the size of what's coming, so nothing reads as $0.
- * No shimmer (no idle loops). Hidden from screen readers, which hear one sentence instead.
+ * While the first sync runs: daisyUI skeleton blocks the size of what's coming, in the same card
+ * and stats, so nothing reads as $0. animate-none: no shimmer (no idle loops). Hidden from screen
+ * readers, which hear one sentence instead.
  */
 function DashboardSkeleton() {
-  const block = 'rounded-field bg-base-200';
+  const block = 'skeleton animate-none';
   return (
     <div aria-busy="true">
       <p class="sr-only">Your first numbers are on their way.</p>
       <div aria-hidden="true">
-        <div class="mb-6 grid gap-6 rounded-box border border-base-300 p-5 sm:p-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
-          <div>
-            <div class={`h-5 w-10 ${block}`} />
-            <div class={`mt-2 h-10 w-40 sm:h-12 ${block}`} />
-            <div class={`mt-3 h-5 w-36 ${block}`} />
-            <div class={`mt-1 h-5 w-24 ${block}`} />
-          </div>
-          <div class="h-40 rounded-box bg-base-200" />
-        </div>
-        <div class="grid grid-cols-2 gap-6 rounded-box border border-base-300 p-5 sm:grid-cols-3 sm:p-6">
-          {[0, 1, 2].map(() => (
+        <div class="card card-border mb-6 border-base-300">
+          <div class="card-body grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
             <div>
-              <div class={`h-5 w-28 ${block}`} />
-              <div class={`mt-1.5 h-7 w-20 ${block}`} />
+              <div class={`h-4 w-10 ${block}`} />
+              <div class={`mt-2 h-10 w-40 sm:h-12 ${block}`} />
+              <div class={`mt-3 h-5 w-36 ${block}`} />
+              <div class={`mt-1 h-5 w-24 ${block}`} />
+            </div>
+            <div class={`h-40 ${block}`} />
+          </div>
+        </div>
+        <div class="stats stats-vertical w-full border border-base-300 sm:stats-horizontal sm:grid-cols-3">
+          {[0, 1, 2].map(() => (
+            <div class="stat">
+              <div class={`h-4 w-28 ${block}`} />
+              <div class={`mt-2 h-7 w-20 ${block}`} />
             </div>
           ))}
         </div>
@@ -457,12 +460,14 @@ function DashboardSkeleton() {
 /** No connection has ever synced and none is syncing: say why there's no number, never "$0". */
 function NoNumbers(props: { notes: DashboardNote[] }) {
   return (
-    <section aria-labelledby="no-numbers" class="rounded-box border border-base-300 p-5 sm:p-6">
-      <h2 id="no-numbers" class="font-semibold">
-        No numbers yet
-      </h2>
-      <p class="mt-1 text-body text-ink-2">They show up after a connection’s first successful sync.</p>
-      {props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
+    <section aria-labelledby="no-numbers" class="card card-border border-base-300">
+      <div class="card-body">
+        <h2 id="no-numbers" class="card-title">
+          No numbers yet
+        </h2>
+        <p class="text-ink-2">They show up after a connection’s first successful sync.</p>
+        {props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
+      </div>
     </section>
   );
 }
@@ -498,7 +503,7 @@ export function DashboardPage(props: DashboardPageProps) {
   const currencyNote = props.currencyInferred ? (
     <Alert tone="info" role="status" class="mb-6">
       Amounts are in {props.currencyInferred}, the currency most of your MRR is in.{' '}
-      <a href="/settings#display-currency" class="link">
+      <a href="/settings#display-currency" class="link link-accent">
         Change it in Settings
       </a>
     </Alert>
