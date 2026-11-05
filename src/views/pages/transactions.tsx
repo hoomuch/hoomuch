@@ -1,4 +1,4 @@
-/** Unified transactions (GET /transactions?provider=&page=). Owner: Experience (pages). */
+/** Unified transactions (GET /transactions?provider=&page=&day=). Owner: Experience (pages). */
 
 import { Badge } from '@/components/ui/badge';
 import { buttonVariants } from '@/components/ui/button';
@@ -19,7 +19,7 @@ import { ProviderDot } from '../components/badges';
 import { EmptyState } from '../components/empty-state';
 import { LinkButton, PageHeader, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { formatDateTime } from './shared';
+import { formatDateTime, formatDay } from './shared';
 
 export interface TransactionsPageProps {
   chrome: PageChrome;
@@ -32,10 +32,14 @@ export interface TransactionsPageProps {
   basePath?: string;
 }
 
-/** "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter. */
-function href(base: string, provider: ProviderId | null, page: number): string {
+/**
+ * "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter.
+ * `day` (one UTC day, from the dashboard calendar) is kept across filters and pages.
+ */
+function href(base: string, provider: ProviderId | null, page: number, day: string | null = null): string {
   const q = new URLSearchParams();
   q.set('provider', provider ?? 'all');
+  if (day) q.set('day', day);
   if (page > 1) q.set('page', String(page));
   const s = q.toString();
   return s ? `${base}?${s}` : base;
@@ -60,6 +64,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
   const base = props.basePath ?? '/transactions';
   const p = props.page;
   const cur = p.currency;
+  const day = p.day ?? null;
 
   if (!props.hasConnections) {
     return (
@@ -81,25 +86,45 @@ export function TransactionsPage(props: TransactionsPageProps) {
     ...props.filterProviders.map((id) => ({ id, label: getProviderMeta(id).name })),
   ];
 
-  // Page 2+ says so in the title: each page of results is a distinct page (2.4.2).
-  const pageTitle = p.page > 1 ? `Transactions, page ${p.page}` : 'Transactions';
+  // Page 2+ says so in the title: each page of results is a distinct page (2.4.2). So does a day.
+  const dayLabel = day ? formatDay(day) : null;
+  const pageTitle = [`Transactions${dayLabel ? ` on ${dayLabel}` : ''}`, p.page > 1 ? `page ${p.page}` : null]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <Layout {...props.chrome} title={pageTitle} nav="transactions" noindex backdrop>
-      <PageHeader title="Transactions" description={`Charges and refunds, newest first. Amounts in ${cur}.`} />
+      <PageHeader
+        title="Transactions"
+        description={
+          dayLabel ? (
+            <>
+              Charges and refunds on {dayLabel} (UTC), newest first. Amounts in {cur}.{' '}
+              <TextLink href={href(base, p.provider, 1)}>Show all days</TextLink>
+            </>
+          ) : (
+            `Charges and refunds, newest first. Amounts in ${cur}.`
+          )
+        }
+      />
 
       {/* The same coss segmented control as the dashboard's range tabs: one choice of several. */}
       <SegmentedLinks
         label="Filter by provider"
         className="mb-6"
-        items={filters.map((f) => ({ key: f.id ?? 'all', href: href(base, f.id, 1), current: f.id === p.provider, label: f.label }))}
+        items={filters.map((f) => ({ key: f.id ?? 'all', href: href(base, f.id, 1, day), current: f.id === p.provider, label: f.label }))}
       />
 
       {p.items.length === 0 ? (
         <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-muted-foreground">
           {p.page > 1 ? (
             <p>
-              Nothing on this page. <TextLink href={href(base, p.provider, 1)}>Back to the first page</TextLink>
+              Nothing on this page. <TextLink href={href(base, p.provider, 1, day)}>Back to the first page</TextLink>
+            </p>
+          ) : dayLabel ? (
+            <p>
+              No {p.provider ? `${getProviderMeta(p.provider).name} ` : ''}transactions on {dayLabel}.{' '}
+              <TextLink href={href(base, p.provider, 1)}>Show all days</TextLink>
             </p>
           ) : p.provider ? (
             getProviderMeta(p.provider).revenueHistory === 'daily' ? (
@@ -118,7 +143,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
         <CossCard className="overflow-hidden">
           <ScrollTable labelledBy="transactions-caption" className="px-2 py-1 sm:px-3">
             <caption id="transactions-caption" className="sr-only">
-              Transactions, newest first, page {p.page}
+              Transactions{dayLabel ? ` on ${dayLabel}` : ''}, newest first, page {p.page}
             </caption>
             <TableHeader>
               <TableRow>
@@ -171,7 +196,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
           <PaginationContent>
             {p.page > 1 ? (
               <PaginationItem>
-                <PaginationPrevious href={href(base, p.provider, p.page - 1)} aria-label="Previous page" />
+                <PaginationPrevious href={href(base, p.provider, p.page - 1, day)} aria-label="Previous page" />
               </PaginationItem>
             ) : null}
             <PaginationItem>
@@ -181,7 +206,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
             </PaginationItem>
             {p.hasMore ? (
               <PaginationItem>
-                <PaginationNext href={href(base, p.provider, p.page + 1)} aria-label="Next page" />
+                <PaginationNext href={href(base, p.provider, p.page + 1, day)} aria-label="Next page" />
               </PaginationItem>
             ) : null}
           </PaginationContent>

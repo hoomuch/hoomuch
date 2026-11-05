@@ -12,7 +12,7 @@
  */
 
 import { ChevronDown, ChevronLeft, CircleAlert, CircleCheck, Info, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Alert as CossAlert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardAction, CardDescription, CardHeader, CardPanel, CardTitle } from '@/components/ui/card';
@@ -94,10 +94,18 @@ export function Card(props: {
 // ---------- links ----------
 
 /** A text link: brand blue, underlined, the same in prose and in notes. */
-export function TextLink(props: { href: string; children?: ReactNode; className?: string; external?: boolean }) {
+export function TextLink(props: {
+  href: string;
+  children?: ReactNode;
+  className?: string;
+  external?: boolean;
+  /** After hydration only, e.g. to pick a calendar day in place; the href still works without it. */
+  onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
+}) {
   return (
     <a
       href={props.href}
+      onClick={props.onClick}
       target={props.external ? '_blank' : undefined}
       rel={props.external ? 'noopener noreferrer' : undefined}
       className={cn(

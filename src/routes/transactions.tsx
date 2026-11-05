@@ -1,6 +1,7 @@
-/** GET /transactions?provider=&page=. Owner: Experience (routes). */
+/** GET /transactions?provider=&page=&day=. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
+import { parseDayParam } from '../data/calendar';
 import { listConnectionSummaries } from '../data/connections';
 import { listTransactions } from '../data/transactions';
 import type { ConnectionSummary } from '../data/types';
@@ -25,9 +26,11 @@ export function registerTransactionRoutes(app: Hono<AppEnv>): void {
     const p = rememberedQuery(c, 'provider', 'hm_provider', (v) => v === 'all' || isProviderId(v));
     const provider = p !== undefined && isProviderId(p) ? p : null;
     const page = parsePage(c.req.query('page'));
+    // ?day= narrows the list to one UTC day (the dashboard calendar links here). Not remembered.
+    const day = parseDayParam(c.req.query('day'));
 
     const [txns, connections] = await Promise.all([
-      listTransactions(c.env, user, { provider, page }),
+      listTransactions(c.env, user, { provider, page, day }),
       listConnectionSummaries(c.env, user.id),
     ]);
 

@@ -5,6 +5,7 @@
 
 import type { Bindings, SessionUser } from '../env';
 import { normalizeCurrency } from '../lib/money';
+import { DAY, dayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
@@ -30,7 +31,8 @@ interface Row {
 export async function listTransactions(
   env: Bindings,
   user: SessionUser,
-  opts: { provider: ProviderId | null; page: number; pageSize?: number },
+  /** `day`: one UTC day ('YYYY-MM-DD', already validated), or null for every day. */
+  opts: { provider: ProviderId | null; page: number; pageSize?: number; day?: string | null },
 ): Promise<TransactionPage> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(opts.pageSize ?? TRANSACTIONS_PAGE_SIZE)));
@@ -38,8 +40,18 @@ export async function listTransactions(
   const offset = (page - 1) * pageSize;
   const db = env.DB;
 
-  const where = opts.provider ? 'c.user_id = ? AND c.provider = ?' : 'c.user_id = ?';
-  const binds: Array<string | number> = opts.provider ? [user.id, opts.provider] : [user.id];
+  const day = opts.day ?? null;
+  const conds = ['c.user_id = ?'];
+  const binds: Array<string | number> = [user.id];
+  if (opts.provider) {
+    conds.push('c.provider = ?');
+    binds.push(opts.provider);
+  }
+  if (day) {
+    conds.push('t.occurred_at >= ? AND t.occurred_at < ?');
+    binds.push(dayStart(day), dayStart(day) + DAY);
+  }
+  const where = conds.join(' AND ');
   const [pageR, fxR] = await db.batch([
     db
       .prepare(
@@ -75,5 +87,5 @@ export async function listTransactions(
     };
   });
 
-  return { currency, provider: opts.provider, items, page, pageSize, hasMore: rows.length > pageSize };
+  return { currency, provider: opts.provider, day, items, page, pageSize, hasMore: rows.length > pageSize };
 }

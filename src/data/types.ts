@@ -102,6 +102,54 @@ export interface DashboardData {
   warnings: string[];
 }
 
+/** One day of the dashboard calendar. Days after `CalendarMonth.today` carry nulls and zeros. */
+export interface CalendarDay {
+  day: string;
+  /**
+   * Net revenue (gross − refunds) across connections with daily history. Null before that history
+   * starts (`CalendarMonth.revenueFrom`) and after today; 0 is a real day without revenue.
+   */
+  net: number | null;
+  gross: number;
+  /** Positive amount refunded. */
+  refunds: number;
+  /** connectionId → net amount. Connections with nothing that day are absent. */
+  byConnection: Record<string, number>;
+  /** Charges and refunds listed one by one (not counted for providers that report daily totals only). */
+  charges: number;
+  refundCount: number;
+  /**
+   * End-of-day totals: each connection's latest snapshot on or before this day. Null before the
+   * first snapshot and after today. `activeTrials` is also null when no connection reports trials.
+   */
+  mrr: number | null;
+  activeSubscriptions: number | null;
+  activeTrials: number | null;
+  /** Change from the day before; null when either day has no value. */
+  mrrChange: number | null;
+  subscriptionsChange: number | null;
+  trialsChange: number | null;
+}
+
+export interface CalendarMonth {
+  /** 'YYYY-MM' (UTC). */
+  month: string;
+  /** Display currency. */
+  currency: string;
+  /** UTC day the month was read on. */
+  today: string;
+  /** Every day of the month, 1st → last. */
+  days: CalendarDay[];
+  /** First day revenue history covers, or null when no connection has any yet. */
+  revenueFrom: string | null;
+  /** Day of the first MRR snapshot, or null when there's none yet. */
+  mrrFrom: string | null;
+  /** The month before, when there's data that far back; otherwise null. */
+  prevMonth: string | null;
+  /** The month after, up to the current one; otherwise null. */
+  nextMonth: string | null;
+}
+
 export interface TransactionRow {
   connectionId: string;
   connectionName: string;
@@ -123,6 +171,8 @@ export interface TransactionPage {
   /** Display currency. */
   currency: string;
   provider: ProviderId | null;
+  /** One UTC day ('YYYY-MM-DD') the list is narrowed to, or null for every day. */
+  day?: string | null;
   items: TransactionRow[];
   page: number;
   pageSize: number;

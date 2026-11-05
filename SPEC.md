@@ -321,9 +321,9 @@ hoomuch/
 ### 9.1 Kontratlar (değiştirmek için Lead onayı gerekir)
 
 - `src/providers/types.ts` — `ProviderAdapter`, `ProviderMeta`, `MetricsSnapshot`, `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
-- `src/data/types.ts` — `DashboardData`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail`
+- `src/data/types.ts` — `DashboardData`, `CalendarMonth`, `CalendarDay`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail`
 - `src/services/connections.ts` — `createConnection`, `renameConnection`, `rotateCredentials`, `deleteConnection`, `triggerSync`
-- `src/data/*.ts` — `getDashboardData`, `listTransactions`, `listConnectionSummaries`, `getConnectionDetail`
+- `src/data/*.ts` — `getDashboardData`, `getCalendarMonth`, `listTransactions`, `listConnectionSummaries`, `getConnectionDetail`
 - `src/sync/engine.ts` — `syncConnection`, `runScheduledSync`
 
 ---

@@ -14,13 +14,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { ConnectionSummary, DashboardData, MrrDay } from '../../data/types';
+import type { CalendarMonth, ConnectionSummary, DashboardData, MrrDay } from '../../data/types';
 import { formatMoney, formatNumber, toMinor } from '../../lib/money';
 import { addDays, dayKey, HOUR, MINUTE } from '../../lib/time';
 import { cn } from '../../lib/utils';
 import { MrrChart } from '../charts/mrr-chart';
 import { RevenueChart } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
+import { CalendarCard } from '../components/calendar-card';
 import { EmptyState } from '../components/empty-state';
 import { FLAT, KpiStat } from '../components/kpi';
 import { Owl, type OwlPose } from '../components/mascot';
@@ -56,6 +57,10 @@ export interface DashboardPageProps {
   demoRemoved?: boolean;
   /** The display currency was just picked from the user's numbers (once): say so, and where to change it. */
   currencyInferred?: string | null;
+  /** One month, day by day (?month=, ?day=). Absent on the landing demo and in older fixtures. */
+  calendar?: CalendarMonth | null;
+  /** The calendar day picked in the URL (?day=), opened on first paint. */
+  calendarDay?: string | null;
 }
 
 const DEMO_REMOVED = 'Demo data removed, so your totals are real.';
@@ -390,8 +395,11 @@ export function SecondaryStats(props: { data: DashboardData; className?: string 
   );
 }
 
-/** Providers that only report a trailing total, said inside the Revenue card they're missing from. */
-function revenueNotes(data: DashboardData): DashboardNote[] {
+/**
+ * Providers that only report a trailing total, said inside the card they're missing from.
+ * `where` finishes the sentence: the Revenue card by default, the calendar passes its own.
+ */
+function revenueNotes(data: DashboardData, where = 'in these bars or in Revenue above'): DashboardNote[] {
   return data.breakdown
     .filter((b) => b.periodRevenue)
     .map((b) => {
@@ -400,8 +408,8 @@ function revenueNotes(data: DashboardData): DashboardNote[] {
         tone: 'info' as const,
         text:
           p.amount !== null
-            ? `${b.name} reports a ${p.days}-day total only (${formatMoney(p.amount, data.currency, { whole: true })}), so it isn’t in these bars or in Revenue above.`
-            : `${b.name} has no daily revenue history, so it isn’t in these bars or in Revenue above.`,
+            ? `${b.name} reports a ${p.days}-day total only (${formatMoney(p.amount, data.currency, { whole: true })}), so it isn’t ${where}.`
+            : `${b.name} has no daily revenue history, so it isn’t ${where}.`,
       };
     });
 }
@@ -634,6 +642,19 @@ export function DashboardPage(props: DashboardPageProps) {
         </Card>
 
         <RevenueCard data={data} />
+
+        {props.calendar ? (
+          <CalendarCard
+            calendar={props.calendar}
+            connections={props.connections}
+            selected={props.calendarDay}
+            basePath={props.basePath}
+            notes={(() => {
+              const notes = revenueNotes(data, 'in this calendar');
+              return notes.length > 0 ? <NoteList notes={notes} /> : null;
+            })()}
+          />
+        ) : null}
 
         {data.fx.asOf ? (
           <p className="text-caption text-muted-foreground">

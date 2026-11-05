@@ -1,6 +1,7 @@
-/** GET /dashboard?range=7|30|90. Owner: Experience (routes). */
+/** GET /dashboard?range=7|30|90&month=YYYY-MM&day=YYYY-MM-DD. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
+import { getCalendarMonth, parseCalendarQuery } from '../data/calendar';
 import { listConnectionSummaries } from '../data/connections';
 import { dominantMrrCurrency } from '../data/currency';
 import { getDashboardData } from '../data/dashboard';
@@ -29,10 +30,13 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
     // ?range= wins and is remembered; the bare nav link brings back the last range.
     const range = parseRange(rememberedQuery(c, 'range', 'hm_range', (v) => v === '7' || v === '30' || v === '90'));
     const poll = parsePoll(c.req.query('poll'));
+    // The calendar's month and picked day (?month=, ?day=). Not remembered: a bare link is this month.
+    const cal = parseCalendarQuery(c.req.query('month'), c.req.query('day'));
 
-    const [data, connections] = await Promise.all([
+    const [data, connections, calendar] = await Promise.all([
       getDashboardData(c.env, user, range),
       listConnectionSummaries(c.env, user.id),
+      getCalendarMonth(c.env, user, cal.month),
     ]);
 
     // The first real connection just replaced demo data: say so in the notice or the strip, and
@@ -59,6 +63,8 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
         celebrate: justSynced ? { dismissHref: `/dashboard?range=${range}` } : null,
         demoRemoved,
         currencyInferred,
+        calendar,
+        calendarDay: cal.day,
       });
   });
 }
