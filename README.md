@@ -116,6 +116,10 @@ test/                Vitest suites and API fixtures
   after purchase are missed.
 - RevenueCat: daily history is in USD only, and test mode can't be detected.
 - Past revenue is converted at today's FX rate. Day boundaries are UTC.
+- Amounts are ISO 4217 minor units, so HUF, IDR, COP and PKR count in hundredths (they used to show 100× too large;
+  rows already stored now read correctly without a resync). Stripe sends ISK, UGX and MGA in its own units, which are
+  now converted on sync. Rows synced before that read 100× off (ISK and UGX too large, MGA too small) until the
+  connection is removed and added again. Lemon Squeezy doesn't document its units for currencies without two decimals; hoomuch assumes ISO 4217.
 - Provider webhooks and Queue-based fan-out are planned for v1.1 (SPEC §12.1).
 
 ## Contributing

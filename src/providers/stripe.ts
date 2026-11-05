@@ -22,10 +22,14 @@
  *                 whose default currency differs from the subscription's.
  *                 Running out of budget throws BudgetExhaustedError: a partial MRR would be wrong.
  *   fetchRevenue  balance_transactions newest to oldest between a fixed [since, startedAt] window, resumable.
+ *
+ * Amount units: Stripe's integers match ISO 4217 minor units (hoomuch's `currencyExponent`) except for MGA,
+ * ISK and UGX, which `fromStripeAmount` converts. Every amount read from Stripe goes through it.
  */
 
 import {
   addToMoney,
+  currencyExponent,
   normalizeCurrency,
   normalizeToMonthly,
   type BillingInterval,
@@ -214,6 +218,38 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
+// ---------- amount units ----------
+
+/**
+ * Currencies whose Stripe amount digits differ from ISO 4217 (https://docs.stripe.com/currencies):
+ *   - MGA is in Stripe's zero-decimal list (BIF CLP DJF GNF JPY KMF KRW MGA PYG RWF VND VUV XAF XOF XPF);
+ *     ISO 4217 gives it 2. The rest of that list is 0 in ISO too.
+ *   - ISK and UGX "transitioned to a zero-decimal currency, but backward compatibility requires you to
+ *     represent it as a two-decimal value" (500 = 5 ISK); ISO gives both 0. UGX also still appears in the
+ *     zero-decimal list; the special case wins, matching Stripe's own client (stripe-android
+ *     CurrencyFormatter.SERVER_DECIMAL_DIGITS lists UGX and ISK as 2).
+ * Everything else is two-decimal unless ISO says otherwise: HUF and TWD charge in hundredths (they're
+ * zero-decimal for payouts only), and so do IDR, COP and PKR; BHD, JOD, KWD, OMR and TND use 3 digits.
+ */
+const STRIPE_DIGITS: Readonly<Record<string, number>> = { MGA: 0, ISK: 2, UGX: 2 };
+
+/** Digits Stripe uses for `currency` in API amounts. */
+export function stripeDigits(currency: string): number {
+  const cur = normalizeCurrency(currency);
+  return STRIPE_DIGITS[cur] ?? currencyExponent(cur);
+}
+
+/** A Stripe API amount → hoomuch minor units (ISO 4217 digits). Not rounded: callers round once, at the end. */
+export function fromStripeAmount(amount: number, currency: string): number {
+  const shift = currencyExponent(currency) - stripeDigits(currency);
+  return shift === 0 ? amount : amount * 10 ** shift;
+}
+
+/** A Stripe integer amount → integer hoomuch minor units (ISK 500 → 5, MGA 5000 → 500000). */
+function stripeMinor(amount: number, currency: string): number {
+  return Math.round(fromStripeAmount(amount, currency)) || 0; // no -0
+}
+
 // ---------- MRR ----------
 
 const INTERVALS: readonly BillingInterval[] = ['day', 'week', 'month', 'year'];
@@ -325,7 +361,7 @@ function amountOf(a: StripeAmounts | null | undefined): number | null {
   return null;
 }
 
-/** Unit amount in the subscription's currency (lowercase), or null if it can't be determined. */
+/** Unit amount in the subscription's currency (lowercase), in Stripe's units, or null if it can't be determined. */
 async function unitAmountIn(price: StripePrice, currency: string, env: MrrEnv): Promise<number | null> {
   if (price.currency?.toLowerCase() === currency) return amountOf(price);
   // Multi-currency price: the embedded object carries the default currency only.
@@ -365,16 +401,19 @@ async function itemLine(item: StripeSubscriptionItem, currency: string, env: Mrr
     return null;
   }
   const count = rec.interval_count > 0 ? rec.interval_count : 1;
-  // Stripe bills round(unit × quantity) per period; normalize that invoice line to a month.
-  const perPeriod = Math.round(unit * billedQuantity(item.quantity ?? 1, price.transform_quantity));
+  // Stripe bills round(unit × quantity) per period in its own units; convert that invoice line to
+  // minor units (fractional for ISK/UGX until normalizeToMonthly rounds) and normalize it to a month.
+  const billed = Math.round(unit * billedQuantity(item.quantity ?? 1, price.transform_quantity));
+  const perPeriod = fromStripeAmount(billed, currency);
   return { product: productId(price.product), monthly: normalizeToMonthly(perPeriod, interval, count), interval, count };
 }
 
+/** The coupon's amount_off in `currency`, in hoomuch minor units. */
 function amountOffIn(coupon: StripeCoupon, currency: string): number | null {
   if (typeof coupon.amount_off !== 'number') return null;
-  if (coupon.currency?.toLowerCase() === currency) return coupon.amount_off;
+  if (coupon.currency?.toLowerCase() === currency) return fromStripeAmount(coupon.amount_off, currency);
   const opt = coupon.currency_options?.[currency]?.amount_off;
-  return typeof opt === 'number' ? opt : null;
+  return typeof opt === 'number' ? fromStripeAmount(opt, currency) : null;
 }
 
 /** Shortest billing period among the lines = how often an invoice (and so an amount_off) occurs. */
@@ -578,16 +617,18 @@ function toRevenueEvent(raw: unknown): RevenueEvent | null {
     REVENUE_TYPES.has(bt.type) ||
     (bt.type === 'adjustment' && REVENUE_ADJUSTMENT_CATEGORIES.has(bt.reporting_category ?? ''));
   if (!counted) return null;
-  const { id, amount, created, currency } = bt;
-  if (typeof id !== 'string' || typeof amount !== 'number' || !Number.isInteger(amount) || amount === 0) return null;
+  const { id, amount: stripeAmount, created, currency } = bt;
+  if (typeof id !== 'string' || typeof stripeAmount !== 'number' || !Number.isInteger(stripeAmount)) return null;
   if (typeof created !== 'number' || !Number.isFinite(created) || typeof currency !== 'string') return null;
+  const amount = stripeMinor(stripeAmount, currency);
+  if (amount === 0) return null;
   return {
     externalId: id,
     occurredAt: created * 1000,
     type: amount > 0 ? 'charge' : 'refund',
     amount,
     currency: normalizeCurrency(currency),
-    fee: typeof bt.fee === 'number' && Number.isInteger(bt.fee) ? bt.fee : null,
+    fee: typeof bt.fee === 'number' && Number.isInteger(bt.fee) ? stripeMinor(bt.fee, currency) : null,
     description: null,
   };
 }

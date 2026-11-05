@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { BudgetExhaustedError } from '../../src/providers/http';
-import { SECRET_KEY_WARNING, STRIPE_API_VERSION, stripeAdapter } from '../../src/providers/stripe';
+import { formatMoney } from '../../src/lib/money';
+import {
+  fromStripeAmount,
+  SECRET_KEY_WARNING,
+  STRIPE_API_VERSION,
+  stripeAdapter,
+  stripeDigits,
+} from '../../src/providers/stripe';
 import { ProviderError } from '../../src/providers/types';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type Route } from '../fixtures/harness';
 // Verbatim example objects from https://docs.stripe.com/api for Stripe-Version 2026-10-28.endive.
@@ -391,6 +398,37 @@ describe('stripe fetchSnapshot', () => {
     expect(snap.activeTrials).toBe(2);
   });
 
+  it('reads a HUF 4,990.00 price as 499000 fillér, the same unit hoomuch stores and shows as HUF 4,990', async () => {
+    const { snap } = await snapshot({ active: [simple(499000, { currency: 'huf' })] });
+    expect(snap.mrr).toEqual({ HUF: 499000 });
+    expect(formatMoney(snap.mrr['HUF']!, 'HUF')).toBe('HUF\u00a04,990'); // not HUF 499,000
+  });
+
+  it('passes IDR, COP and PKR through in hundredths and converts MGA, ISK and UGX to ISO minor units', async () => {
+    const coupons = [coupon('OFF1000ISK', { amount_off: 100000, currency: 'isk' })]; // ISK 1,000 off
+    const { snap } = await snapshot({
+      coupons,
+      active: [
+        simple(15000000, { currency: 'idr' }), // IDR 150,000.00
+        simple(4990000, { currency: 'cop' }), // COP 49,900.00
+        simple(99900, { currency: 'pkr' }), // PKR 999.00
+        simple(500000, { currency: 'isk' }), // Stripe's ISK 5,000 (two-decimal representation) → 5000
+        simple(1200000, { currency: 'isk', interval: 'year', discounts: [discount('OFF1000ISK')] }), // (12,000 − 1,000)/12 → 917
+        simple(5000000, { currency: 'ugx' }), // UGX 50,000 → 50000
+        simple(20000, { currency: 'mga' }), // Ar 20,000 (zero-decimal at Stripe) → 2000000
+        simple(10000, { currency: 'mga', interval: 'year' }), // Ar 10,000/yr → 1000000/12 = 83333 (converted before rounding)
+      ],
+    });
+    expect(snap.mrr).toEqual({
+      IDR: 15000000,
+      COP: 4990000,
+      PKR: 99900,
+      ISK: 5000 + 917,
+      UGX: 50000,
+      MGA: 2000000 + 83333,
+    });
+  });
+
   it('pages through subscriptions with limit=100, starting_after and the discount expansions', async () => {
     const page1 = [simple(1000), simple(2000)];
     const page2 = [simple(3000)];
@@ -578,6 +616,24 @@ describe('stripe fetchRevenue', () => {
     });
   });
 
+  it('converts balance transaction amounts and fees to ISO minor units (HUF unchanged, ISK/UGX ÷100, MGA ×100)', async () => {
+    const t = NOW_S - 3600;
+    const data = [
+      bt('txn_FakeHuf', 'charge', 499000, { fee: 15000, currency: 'huf', created: t }),
+      bt('txn_FakeIsk', 'charge', 500000, { fee: 2500, currency: 'isk', created: t - 1 }),
+      bt('txn_FakeUgx', 'refund', -500000, { currency: 'ugx', created: t - 2 }),
+      bt('txn_FakeMga', 'charge', 20000, { fee: 700, currency: 'mga', created: t - 3 }),
+    ];
+    const { fetch } = fakeFetch([route('/v1/balance_transactions', { json: list(data, false, '/v1/balance_transactions') })]);
+    const page = await stripeAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(fetch, { pageBudget: 20 }));
+    expect(page.events.map((e) => [e.externalId, e.type, e.amount, e.currency, e.fee])).toEqual([
+      ['txn_FakeHuf', 'charge', 499000, 'HUF', 15000],
+      ['txn_FakeIsk', 'charge', 5000, 'ISK', 25],
+      ['txn_FakeUgx', 'refund', -5000, 'UGX', 0],
+      ['txn_FakeMga', 'charge', 2000000, 'MGA', 70000],
+    ]);
+  });
+
   it('resumes from its cursor when pageBudget runs out mid-backfill, with a fixed time window', async () => {
     const p1 = [bt('txn_Fake1', 'charge', 100, { created: NOW_S - 10 }), bt('txn_Fake2', 'charge', 200, { created: NOW_S - 20 })];
     const p2 = [bt('txn_Fake3', 'refund', -50, { created: NOW_S - 30 }), bt('txn_Fake4', 'charge', 400, { created: NOW_S - 40 })];
@@ -644,5 +700,29 @@ describe('stripe fetchRevenue', () => {
     const err = await catchErr(stripeAdapter.fetchRevenue(input('sk_FakeNotStripe'), { since: SINCE, cursor: null }, makeCtx(fetch)));
     expect(err.kind).toBe('invalid_input');
     expect(calls).toHaveLength(0);
+  });
+});
+
+// ---------- amount units ----------
+
+describe('stripe amount units', () => {
+  it('follows docs.stripe.com/currencies: zero-decimal list, ISK/UGX two-decimal, HUF/TWD two-decimal', () => {
+    // The documented zero-decimal list. UGX is in it too, but its special case (and stripe-android's
+    // SERVER_DECIMAL_DIGITS) say it is sent as a two-decimal value, like ISK.
+    for (const c of ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'VND', 'VUV', 'XAF', 'XOF', 'XPF']) {
+      expect(stripeDigits(c), c).toBe(0);
+    }
+    for (const c of ['ISK', 'UGX', 'HUF', 'TWD', 'IDR', 'COP', 'PKR', 'USD', 'EUR']) expect(stripeDigits(c), c).toBe(2);
+    expect(stripeDigits('kwd')).toBe(3);
+  });
+
+  it('converts only where Stripe and ISO 4217 disagree', () => {
+    expect(fromStripeAmount(499000, 'huf')).toBe(499000);
+    expect(fromStripeAmount(1500, 'jpy')).toBe(1500);
+    expect(fromStripeAmount(1250, 'kwd')).toBe(1250);
+    expect(fromStripeAmount(500, 'isk')).toBe(5); // "to charge 5 ISK, provide an amount value of 500"
+    expect(fromStripeAmount(500, 'UGX')).toBe(5);
+    expect(fromStripeAmount(5000, 'mga')).toBe(500000);
+    expect(fromStripeAmount(1249.5, 'isk')).toBeCloseTo(12.495); // unrounded; callers round once
   });
 });

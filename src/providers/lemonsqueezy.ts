@@ -17,6 +17,10 @@
  *    unit_price_decimal, fixed_fee}]`, `usage_aggregation` (non-null ⇒ usage-based),
  *    `renewal_interval_unit` day|week|month|year, `renewal_interval_quantity`.
  *  - Subscription statuses: on_trial, active, paused, past_due, unpaid, cancelled, expired.
+ *  - Money (`unit_price`, `total`, `refunded_amount`, …) is "a positive integer in cents" of the store or order
+ *    currency. Neither the API reference nor the currencies page says what "cents" means for a currency
+ *    without two decimals, so amounts are read as ISO 4217 minor units (`currencyExponent`): JPY and KRW whole,
+ *    HUF and IDR in hundredths. Unverified for ISK, UGX and MGA, where Stripe's units differ from ISO.
  *  - Initial checkout fires `order_created` + `subscription_created` + `subscription_payment_success`
  *    (the latter carries the `initial` subscription invoice); renewals fire only `subscription_payment_success`
  *    (no order). So the `initial` invoice is the same money as the checkout order → not counted again.
