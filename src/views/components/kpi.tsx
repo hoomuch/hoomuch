@@ -12,7 +12,7 @@ import type { ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 
 /** |pct| below this reads as "0.0%", so it's shown as flat, not as a tiny rise or fall. */
-const FLAT = 0.05;
+export const FLAT = 0.05;
 
 type Direction = 'up' | 'down' | 'flat';
 

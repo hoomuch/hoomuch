@@ -22,8 +22,8 @@ import { MrrChart } from '../charts/mrr-chart';
 import { RevenueChart } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
 import { EmptyState } from '../components/empty-state';
-import { KpiStat } from '../components/kpi';
-import { Owl } from '../components/mascot';
+import { FLAT, KpiStat } from '../components/kpi';
+import { Owl, type OwlPose } from '../components/mascot';
 import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
 import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
@@ -285,18 +285,41 @@ function NoteList(props: { notes: DashboardNote[] }) {
 
 // ---------- the figures ----------
 
-/** MRR, its change, ARR, a milestone, and its trend in one card. Shared with the landing demo. */
-export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; className?: string }) {
+/**
+ * The owl under the MRR (design/brief.md §2): a flag while a milestone holds, pleased when MRR is
+ * up, otherwise perched. None when the card carries a warning: the owl never sits next to
+ * something that needs fixing, and never cheers numbers that may be out of date.
+ */
+export function mrrOwl(input: { milestone: number | null; deltaPct: number | null; notes: DashboardNote[] }): OwlPose | null {
+  if (input.notes.some((n) => n.tone === 'warning')) return null;
+  if (input.milestone !== null) return 'flag';
+  if (input.deltaPct !== null && input.deltaPct >= FLAT) return 'proud';
+  return 'perched';
+}
+
+/**
+ * Where the owl stands in a figure column: at its foot, from md up (on a phone the column has no
+ * spare room). The negative margins take back the canvas's empty edge, so its feet sit on the
+ * column's last line and its body lines up with the text above.
+ */
+const OWL_FOOT = 'mt-auto hidden pt-4 -mb-4 -ml-[19px] md:block';
+
+/**
+ * MRR, its change, ARR, a milestone, and its trend in one card. Shared with the landing demo.
+ * `owl`: the dashboard's mood owl (`mrrOwl`); the landing demo leaves it out, its owl sits on the frame.
+ */
+export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; owl?: boolean; className?: string }) {
   const { data } = props;
   const cur = data.currency;
   const k = data.kpis;
   const days = data.rangeDays;
   const milestone = recentMilestone(data.mrrSeries, cur, dayKey(data.generatedAt));
+  const owl = props.owl ? mrrOwl({ milestone, deltaPct: k.mrr.deltaPct, notes: props.notes ?? [] }) : null;
   return (
     <CossCard render={<section aria-label="MRR" />} className={cn('min-w-0', props.className)}>
       <CardPanel className="p-5 sm:p-6">
         <div className="grid gap-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
-          <div className="min-w-0">
+          <div className="flex min-w-0 flex-col">
             <KpiStat
               hero
               label="MRR"
@@ -312,6 +335,7 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; c
                 </Badge>
               </p>
             ) : null}
+            {owl ? <Owl pose={owl} className={OWL_FOOT} /> : null}
           </div>
           <MrrChart
             series={data.mrrSeries}
@@ -468,7 +492,7 @@ function FirstNumbers(props: { data: DashboardData; cadence: string; dismissHref
 
 /**
  * While the first sync runs: coss skeleton blocks the size of what's coming, in the same cards,
- * so nothing reads as $0. animate-none! (important: tailwind-merge doesn't know coss's
+ * so nothing reads as $0, and the counting owl where the MRR card's owl will stand. animate-none! (important: tailwind-merge doesn't know coss's
  * animate-skeleton, so both classes survive and the shimmer would win): no idle loops, §3.6.
  * Hidden from screen readers, which hear one sentence instead.
  */
@@ -480,11 +504,13 @@ function DashboardSkeleton() {
       <div aria-hidden="true">
         <CossCard className="mb-6">
           <CardPanel className="grid gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] md:gap-8">
-            <div>
+            <div className="flex flex-col">
               <Skeleton className={`h-4 w-10 ${block}`} />
               <Skeleton className={`mt-2 h-10 w-40 sm:h-12 ${block}`} />
               <Skeleton className={`mt-3 h-5 w-36 ${block}`} />
               <Skeleton className={`mt-1 h-5 w-24 ${block}`} />
+              {/* Where the mood owl will stand, adding up the first numbers meanwhile. */}
+              <Owl pose="counting" eager className={OWL_FOOT} />
             </div>
             <Skeleton className={`h-40 ${block}`} />
           </CardPanel>
@@ -595,7 +621,7 @@ export function DashboardPage(props: DashboardPageProps) {
           />
         ) : null)}
 
-      <MrrCard data={data} notes={notes} className="mb-6" />
+      <MrrCard data={data} notes={notes} owl className="mb-6" />
       <SecondaryStats data={data} className="mb-6" />
 
       <div className="grid gap-6">

@@ -38,6 +38,7 @@ import {
   DashboardPage,
   freshness,
   milestoneAtOrBelow,
+  mrrOwl,
   recentMilestone,
 } from '../../src/views/pages/dashboard';
 import { NotFoundPage, ServerErrorPage } from '../../src/views/pages/errors';
@@ -733,6 +734,47 @@ describe('personality: owl, landing, first sync, 404', () => {
     );
     expect(tags(out, 'section', 'aria-labelledby="first-numbers"', 'fade-in')).toHaveLength(1);
     expect(out).toContain('You can stop checking now. Demo data removed, so your totals are real.');
+  });
+
+  it('picks the MRR owl from the numbers and drops it next to a warning', () => {
+    const info = { tone: 'info' as const, text: 'Acme isn’t counted yet.' };
+    const warning = { tone: 'warning' as const, text: 'Acme hasn’t synced since 3 Nov.' };
+    expect(mrrOwl({ milestone: 5000, deltaPct: 12, notes: [] })).toBe('flag');
+    expect(mrrOwl({ milestone: null, deltaPct: 12, notes: [info] })).toBe('proud');
+    expect(mrrOwl({ milestone: null, deltaPct: 0.01, notes: [] })).toBe('perched'); // reads as flat
+    expect(mrrOwl({ milestone: null, deltaPct: -3, notes: [] })).toBe('perched');
+    expect(mrrOwl({ milestone: null, deltaPct: null, notes: [] })).toBe('perched');
+    expect(mrrOwl({ milestone: 5000, deltaPct: 12, notes: [info, warning] })).toBeNull();
+  });
+
+  it('puts the mood owl in the dashboard’s MRR card only, and the counting owl in the first-sync skeleton', async () => {
+    const data = fixtureDashboard(30, 'full', FIXTURE_NOW);
+    const fresh = FIXTURE_CONNECTIONS.slice(0, 2).map((c) => ({ ...c, status: 'ok' as const, lastSyncedAt: FIXTURE_NOW - MINUTE }));
+    const page = await render(
+      'dashboard-owl',
+      h(DashboardPage, { chrome: { user, flash: null }, data, connections: fresh, sync: null, now: FIXTURE_NOW }),
+    );
+    const milestone = recentMilestone(data.mrrSeries, data.currency, '2026-11-05');
+    const pose = mrrOwl({ milestone, deltaPct: data.kpis.mrr.deltaPct, notes: [] });
+    expect(pose).not.toBeNull();
+    expect(tags(page, 'img', `src="/mascot/${pose}.png"`)).toHaveLength(1);
+    // The landing demo reuses the MRR card; its owl sits on the frame, so the card brings none.
+    const landing = await html(
+      h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo: data, cadence: 'every hour' }),
+    );
+    for (const p of ['proud', 'flag', 'counting']) expect(landing).not.toContain(`/mascot/${p}.png`);
+    expect(tags(landing, 'img', 'src="/mascot/perched.png"')).toHaveLength(1);
+
+    const syncing = await html(
+      h(DashboardPage, {
+        chrome: { user, flash: null },
+        data: fixtureDashboard(30, 'empty', FIXTURE_NOW),
+        connections: [{ ...FIXTURE_CONNECTIONS[3]!, lastSyncedAt: null, status: 'syncing' as const }],
+        sync: { refresh: { seconds: 5, url: '/dashboard?poll=1' } },
+        now: FIXTURE_NOW,
+      }),
+    );
+    expect(syncing).toContain('src="/mascot/counting.png"');
   });
 
   it('gives the dashboard empty state the dozing owl and keeps the 500 page literal', async () => {
