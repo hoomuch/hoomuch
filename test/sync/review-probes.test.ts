@@ -223,6 +223,7 @@ describe('probe: key rotation across modes', () => {
       route('/v1/subscriptions', { json: emptyStripeList }),
       route('/v1/prices', { json: emptyStripeList }),
       route('/v1/balance_transactions', balance),
+      route('/v1/coupons', { json: emptyStripeList }),
     ]);
     vi.stubGlobal('fetch', fetch);
 

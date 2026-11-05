@@ -1,0 +1,23 @@
+{
+  "object": "chart_data",
+  "request_id": "req_31b9d0c4",
+  "series": [{ "breakdown": "none", "key": null }],
+  "data": [
+    { "x": "2026-10-30", "incomplete": false, "values": { "null": { "y": 401, "extra": {} } } },
+    { "x": "2026-10-31", "incomplete": false, "values": { "null": { "y": 403, "extra": {} } } },
+    { "x": "2026-11-01", "incomplete": false, "values": { "null": { "y": 404, "extra": {} } } },
+    { "x": "2026-11-02", "incomplete": false, "values": { "null": { "y": 405, "extra": {} } } },
+    { "x": "2026-11-03", "incomplete": false, "values": { "null": { "y": 407, "extra": {} } } },
+    { "x": "2026-11-04", "incomplete": false, "values": { "null": { "y": 408, "extra": {} } } },
+    { "x": "2026-11-05", "incomplete": true, "values": { "null": { "y": 409, "extra": {} } } }
+  ],
+  "y_axis": { "key": "activeSubscriptionCount", "name": "Active Subscriptions", "description": "Count of unexpired, paid subscriptions.", "value_type": "number" },
+  "x_axis": { "key": "mrrDate", "name": "Date", "description": "Date the subscription state applies to", "value_type": "date", "fill_missing_values": "cumulative" },
+  "filters": [],
+  "breakdowns": [],
+  "date_filters": [
+    { "name": "Last 7 days", "preset": "last_7_days", "active": true, "range": { "from": "2026-10-30", "to": "2026-11-05" } }
+  ],
+  "enriched_data": {},
+  "duration": { "start_time": 1793966400500, "end_time": 1793966400790, "duration_ms": 290 }
+}

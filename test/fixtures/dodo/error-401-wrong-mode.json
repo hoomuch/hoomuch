@@ -1,0 +1,4 @@
+{
+  "code": "UNAUTHORIZED",
+  "message": "This API key is a test mode key. This environment accepts only live mode keys."
+}

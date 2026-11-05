@@ -1,0 +1,40 @@
+{
+  "list": [
+    {
+      "transaction": {
+        "amount": 1395,
+        "amount_unused": 0,
+        "currency_code": "USD",
+        "customer_id": "__test__KyVnHhSBWlv242pN",
+        "date": 1517505921,
+        "deleted": false,
+        "exchange_rate": 1,
+        "gateway": "chargebee",
+        "gateway_account_id": "gw___test__KyVnGlSBWltEk29Z",
+        "id": "txn___test__KyVnHhSBWlv4j2pT",
+        "id_at_gateway": "cb___test__KyVnHhSBWlv4q2pU",
+        "linked_invoices": [
+          {
+            "applied_amount": 1395,
+            "applied_at": 1517505921,
+            "invoice_date": 1517505920,
+            "invoice_id": "__demo_inv__3",
+            "invoice_status": "paid",
+            "invoice_total": 1395
+          }
+        ],
+        "linked_refunds": [],
+        "masked_card_number": "************1111",
+        "object": "transaction",
+        "payment_method": "card",
+        "payment_source_id": "pm___test__KyVnHhSBWlv2z2pP",
+        "resource_version": 1517505921000,
+        "status": "success",
+        "subscription_id": "__test__KyVnHhSBWlv242pN",
+        "type": "payment",
+        "updated_at": 1517505921
+      }
+    }
+  ],
+  "next_offset": "[\"1600622718000\",\"266000001127\"]"
+}

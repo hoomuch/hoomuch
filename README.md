@@ -1,8 +1,9 @@
 # hoomuch
 
-All your subscription revenue under one roof. Connect **Stripe**, **Lemon Squeezy** and **RevenueCat** with
-read-only keys, and see total MRR, ARR, active subscriptions, trials and revenue, converted into one currency
-and broken down by connection.
+All your subscription revenue under one roof. Connect **Stripe**, **Paddle**, **Lemon Squeezy**, **Polar**,
+**RevenueCat**, **Chargebee**, **Dodo Payments**, **Gumroad**, **Adapty** and **Superwall**, and see total MRR,
+ARR, active subscriptions, trials and revenue, converted into one currency and broken down by connection.
+hoomuch only ever reads, and asks for read-only keys wherever the provider offers them.
 
 - One Cloudflare Worker: Hono routes, React 19 pages rendered on the server and hydrated in the
   browser, D1, Cron Triggers.
@@ -60,6 +61,13 @@ npm run deploy                          # applies D1 migrations, then deploys
   connection has to be re-keyed. Never rotate it in place.
 - **Single-user / self-hosted:** create your account, then set `"ALLOW_SIGNUP": "false"` in
   `wrangler.jsonc` and deploy again (with the button, commit that change to your copy of the repo).
+- **Updating an existing install:** deploys apply pending D1 migrations first. Some migrations rebuild
+  a table (`0003` does, to accept new provider ids), so before updating, note a restore point with
+  `npx wrangler d1 time-travel info hoomuch`. If anything looks wrong afterwards,
+  `npx wrangler d1 time-travel restore hoomuch --timestamp=<that time>` puts the database back.
+  Revenue from merchant-of-record providers now leaves out sales tax. Lemon Squeezy history synced
+  before this change and older than about 30 days keeps tax in; delete and re-add the connection to
+  recount it.
 - **Plan:** password hashing (PBKDF2, 100k iterations) and syncs can exceed the Free plan's 10 ms CPU
   limit. Workers Paid is recommended for production.
 
@@ -68,8 +76,15 @@ npm run deploy                          # applies D1 migrations, then deploys
 | Provider | Key | Permissions |
 |----------|-----|-------------|
 | Stripe | Restricted key `rk_live_…` | Read: Subscriptions, Prices, Coupons, Balance |
+| Paddle | API key `pdl_live_apikey_…` (expires; one year at most) | Read: Subscriptions, Transactions, Adjustments, Metrics; Discounts optional |
 | Lemon Squeezy | API key (can't be scoped, so it has full access) | — |
+| Polar | Organization access token `polar_oat_…` | `metrics:read`, `subscriptions:read`, `orders:read`, `refunds:read` |
 | RevenueCat | v2 secret key `sk_…` + Project ID | `charts_metrics:overview:read`; `charts_metrics:charts:read` is optional and enables daily revenue history |
+| Chargebee | Read-only API key + site name | Read-only key (All, or Restricted with transactional data) |
+| Dodo Payments | API key `dodo_live_…` | Read: Subscriptions, Balances |
+| Gumroad | Access token from your own Gumroad application (can't be scoped, so it has full access) | — |
+| Adapty | Secret API key `secret_live_…` (can't be scoped) | — |
+| Superwall | Organization API key + Organization ID | `charts:read`; `data:read` is optional and enables daily revenue, refunds and trials |
 
 Keys are checked live before they're saved. Syncs run every 30 minutes, with each connection synced at
 most once per `SYNC_INTERVAL_MINUTES` (default 60). You can also press **Sync now**. The first sync
@@ -96,7 +111,7 @@ src/
   index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
   lib/               crypto, auth, money, time, flash
   db/queries.ts      users, sessions, connections
-  providers/         adapter contract, registry, Stripe / Lemon Squeezy / RevenueCat / Demo
+  providers/         adapter contract, registry, one adapter per provider, Demo
   sync/              sync engine, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
   services/          connection use-cases: create, rotate key, sync now, delete
@@ -111,10 +126,22 @@ test/                Vitest suites and API fixtures
 
 ## Known limitations (v1)
 
-- Stripe: tiered prices count as 0 MRR, and customer-level discounts aren't applied.
-- Lemon Squeezy: discount codes aren't reflected in MRR, and refunds issued more than about 30 days
-  after purchase are missed.
-- RevenueCat: daily history is in USD only, and test mode can't be detected.
+Each provider's section in [SPEC.md](SPEC.md) §6 lists what was checked against its docs and what wasn't.
+The ones you'd notice:
+
+- Stripe: customer-level discounts aren't applied, and with Stripe Tax, tax-inclusive prices stay
+  tax-inclusive in MRR.
+- Lemon Squeezy: refunds issued more than about 30 days after purchase are missed, and several partial
+  refunds on one order show as one refund.
+- Paddle and Polar: MRR is the provider's own figure, in one currency (Paddle: your balance currency;
+  Polar: USD). Polar's version pin (`2026-10`) has to be updated before April 2027.
+- RevenueCat, Adapty, Superwall: daily history is in USD only, revenue is the stores' gross (tax and
+  store fees included), and test mode can't be detected.
+- Dodo Payments: revenue comes from the balance ledger, so it's daily totals with no transaction list.
+- Gumroad: MRR is an estimate. The API doesn't say what each subscriber pays, so hoomuch prices them
+  at their latest charge, or the tier's list price when it can't find one. Refunds land on the sale's
+  day, because Gumroad doesn't date them.
+- Creem isn't supported yet: its API has no date filter on transactions and no dated refunds (SPEC §6.9).
 - Past revenue is converted at today's FX rate. Day boundaries are UTC.
 - Amounts are ISO 4217 minor units, so HUF, IDR, COP and PKR count in hundredths (they used to show 100× too large;
   rows already stored now read correctly without a resync). Stripe sends ISK, UGX and MGA in its own units, which are

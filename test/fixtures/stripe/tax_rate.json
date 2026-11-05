@@ -1,0 +1,16 @@
+{
+  "id": "txr_1MzS4RLkdIwHu7ixwvpZ9c2i",
+  "object": "tax_rate",
+  "active": true,
+  "country": null,
+  "created": 1682114687,
+  "description": "VAT Germany",
+  "display_name": "VAT",
+  "inclusive": false,
+  "jurisdiction": "DE",
+  "livemode": false,
+  "metadata": {},
+  "percentage": 16,
+  "state": null,
+  "tax_type": null
+}

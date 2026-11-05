@@ -1,0 +1,6 @@
+{
+  "message": "Sorry, authentication failed. Invalid API Key.",
+  "api_error_code": "api_authentication_failed",
+  "error_code": "api_authentication_failed",
+  "http_status_code": 401
+}

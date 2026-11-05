@@ -12,7 +12,7 @@
 import { Check, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardPanel, CardTitle } from '@/components/ui/card';
 import type { ProviderMeta } from '../../providers/types';
-import { ProviderDot } from './badges';
+import { ProviderLogo } from './provider-logos';
 import { Alert, Button, Field, FormError, LinkButton, TextLink } from './ui';
 
 export interface ConnectionFormProps {
@@ -52,7 +52,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
     <Card render={<section aria-labelledby={props.headingId} />} className="bg-muted/60 text-body">
       <CardHeader className="px-5 pt-5 sm:px-6 sm:pt-6">
         <CardTitle render={<Heading id={props.headingId} />} className="flex items-center gap-2 text-base">
-          <ProviderDot dotClass={meta.dotClass} size="md" />
+          <ProviderLogo provider={meta.id} size="md" />
           Create a {meta.name} key
         </CardTitle>
       </CardHeader>

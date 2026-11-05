@@ -32,6 +32,24 @@ export interface RequestSpec {
   field?: string;
   timeoutMs?: number;
   maxAttempts?: number;
+  /**
+   * What a 429 does. 'retry' (default) sleeps through a short Retry-After / backoff and retries.
+   * 'yield' gives up at once and empties `ctx.pageBudget`, for providers whose limit is a per-minute
+   * window with no usable Retry-After (Lemon Squeezy), or that block for longer than we'd wait (Paddle:
+   * 60 s per IP). Resumable callers catch `RateLimitedError` and return their cursor.
+   */
+  rateLimit?: 'retry' | 'yield';
+  /**
+   * Provider-specific error mapping for non-2xx responses, tried before the generic status mapping.
+   * Return null to fall through. E.g. Paddle answers an invalid key with 403, not 401.
+   */
+  mapError?: (status: number, body: unknown, detail: string) => ProviderError | null;
+  /**
+   * JSON query for read endpoints that take their query as a POST body (Adapty's analytics export,
+   * Superwall's chart data query). Sent as `POST` with `Content-Type: application/json`. Only for
+   * endpoints documented as read-only queries: hoomuch never creates or changes anything at a provider.
+   */
+  readQuery?: unknown;
 }
 
 /** Thrown when `ctx.pageBudget` is exhausted. Adapters should check `hasBudget` first and return a cursor. */
@@ -39,6 +57,17 @@ export class BudgetExhaustedError extends ProviderError {
   constructor(provider: string) {
     super('upstream', `Stopped after the per-sync request limit for ${provider}.`);
     this.name = 'BudgetExhaustedError';
+  }
+}
+
+/**
+ * A 429 under `rateLimit: 'yield'`. The context's budget is already 0, so loops that check `hasBudget`
+ * stop on their own; a resumable adapter catches this and returns its cursor, keeping what it read.
+ */
+export class RateLimitedError extends ProviderError {
+  constructor(provider: string, status: number) {
+    super('rate_limit', `${provider} is rate-limiting requests. Try again in a minute.`, { status });
+    this.name = 'RateLimitedError';
   }
 }
 
@@ -78,7 +107,11 @@ export function buildUrl(base: string, path: string, query: Record<string, Query
 // ---------- sanitising ----------
 
 const MASKS: Array<[RegExp, string]> = [
-  [/Bearer\s+[^\s"',]+/gi, 'Bearer ***'],
+  [/(Bearer|Basic)\s+[^\s"',]+/gi, '$1 ***'],
+  // Paddle (pdl_live_apikey_…, pdl_sdbx_apikey_…), Polar (polar_oat_…, polar_pat_…), Dodo, Creem.
+  [/\b(pdl_(?:live|sdbx)_apikey|polar_[a-z]{2,4}|dodo_(?:live|test)|creem(?:_test)?)_[A-Za-z0-9_]+/g, '$1_***'],
+  // Adapty secret / public SDK keys: secret_live_XXXXXXXX.<32 chars>.
+  [/\b(secret|public)_([a-z]+)_[A-Za-z0-9._-]+/g, '$1_$2_***'],
   [/\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_***'],
   [/\b(sk|rk|atk|whsec)_[A-Za-z0-9_]{6,}/g, '$1_***'],
   [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*\.?[A-Za-z0-9_-]*/g, '[token]'],
@@ -149,12 +182,19 @@ function backoffMs(attempt: number): number {
 
 class RetryableNetworkError extends Error {}
 
-async function fetchWithTimeout(ctx: ProviderContext, url: string, headers: Record<string, string>, timeoutMs: number) {
+async function fetchWithTimeout(
+  ctx: ProviderContext,
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  body: string | undefined,
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // Never follow redirects: the request carries the provider key, and these APIs don't redirect.
-    const res = await ctx.fetch(url, { method: 'GET', headers, signal: controller.signal, redirect: 'manual' });
+    const method = body === undefined ? 'GET' : 'POST';
+    const res = await ctx.fetch(url, { method, headers, body, signal: controller.signal, redirect: 'manual' });
     const text = await res.text();
     return { res, text };
   } catch (err) {
@@ -174,8 +214,8 @@ function parseJsonOrNull(text: string): unknown {
 }
 
 /**
- * GETs `spec.url` and returns the parsed JSON body. Throws `ProviderError` on every failure.
- * Read-only by design: hoomuch never writes to a provider.
+ * GETs `spec.url` (or POSTs `spec.readQuery` to a read-only query endpoint) and returns the parsed JSON
+ * body. Throws `ProviderError` on every failure. Read-only by design: hoomuch never writes to a provider.
  */
 export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: RequestSpec): Promise<T> {
   if (!hasBudget(ctx)) throw new BudgetExhaustedError(spec.provider);
@@ -186,12 +226,14 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
   const maxAttempts = Math.max(1, spec.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
   const timeoutMs = spec.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const headers: Record<string, string> = { Accept: 'application/json', ...spec.headers };
+  const queryBody = spec.readQuery === undefined ? undefined : JSON.stringify(spec.readQuery);
+  if (queryBody !== undefined) headers['Content-Type'] = 'application/json';
 
   for (let attempt = 1; ; attempt++) {
     let res: Response;
     let text: string;
     try {
-      ({ res, text } = await fetchWithTimeout(ctx, spec.url, headers, timeoutMs));
+      ({ res, text } = await fetchWithTimeout(ctx, spec.url, headers, timeoutMs, queryBody));
     } catch (err) {
       const reason = err instanceof RetryableNetworkError ? err.message : 'network';
       if (attempt < maxAttempts) {
@@ -219,6 +261,11 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
     }
 
     const status = res.status;
+    if (status === 429 && spec.rateLimit === 'yield') {
+      ctx.pageBudget = 0;
+      ctx.log('http_rate_limited', { provider, path, attempt });
+      throw new RateLimitedError(provider, status);
+    }
     const retryable = status === 429 || status >= 500;
     if (retryable && attempt < maxAttempts) {
       const hinted = retryAfterMs(res, body, ctx.now());
@@ -232,7 +279,7 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
 
     const detail = sanitizeErrorText(extractProviderMessage(body, text));
     ctx.log('http_error', { provider, path, status, attempt, message: detail });
-    throw mapStatus(spec, status, detail);
+    throw spec.mapError?.(status, body, detail) ?? mapStatus(spec, status, detail);
   }
 }
 

@@ -1,0 +1,12 @@
+{
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "errors": [
+    {
+      "detail": "Too Many Attempts.",
+      "status": "429",
+      "title": "Too Many Requests"
+    }
+  ]
+}

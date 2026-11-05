@@ -6,6 +6,13 @@ import type { ConnectionConfig, Credentials, ProviderAdapter, ProviderId, Provid
 import { stripeAdapter } from './stripe';
 import { lemonSqueezyAdapter } from './lemonsqueezy';
 import { revenueCatAdapter } from './revenuecat';
+import { paddleAdapter } from './paddle';
+import { polarAdapter } from './polar';
+import { chargebeeAdapter } from './chargebee';
+import { dodoAdapter } from './dodo';
+import { gumroadAdapter } from './gumroad';
+import { adaptyAdapter } from './adapty';
+import { superwallAdapter } from './superwall';
 import { demoAdapter } from './demo';
 
 export const PROVIDERS: readonly ProviderMeta[] = [
@@ -34,6 +41,43 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     ],
     keyUrl: 'https://dashboard.stripe.com/apikeys/create',
     permissions: ['Subscriptions: Read', 'Prices: Read', 'Coupons: Read', 'Balance: Read'],
+    revenueHistory: 'transactions',
+  },
+  {
+    id: 'paddle',
+    name: 'Paddle',
+    // Paddle's yellow is taken (Lemon Squeezy's mustard) and fails contrast on white; this blue is
+    // 3.9:1 on white and 4.9:1 on the dark page.
+    color: '#2F80ED',
+    dotClass: 'bg-[#2F80ED]',
+    tagline: 'Merchant of record for software and SaaS',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'pdl_live_apikey_…',
+        help: 'Starts with pdl_live_apikey_ (or pdl_sdbx_apikey_ for a sandbox account). Keys created before May 2025 don’t work.',
+      },
+    ],
+    keySteps: [
+      'In your Paddle dashboard, go to Settings → Authentication and open the API keys tab.',
+      'Click “New API key” and name it “hoomuch”.',
+      'Grant Read on the permissions listed below and nothing else.',
+      'Set an expiry date (Paddle suggests 90 days, one year at most), save, and paste the key here. Paddle shows it only once.',
+    ],
+    keyUrl: 'https://vendors.paddle.com/authentication-v2',
+    permissions: [
+      'Subscriptions: Read',
+      'Transactions: Read',
+      'Adjustments: Read',
+      'Metrics: Read — not needed for sandbox keys',
+      'Discounts: Read — optional, used when Paddle’s MRR metric isn’t available',
+    ],
+    warning:
+      'Paddle API keys usually expire (90 days by default, one year at most), and an expired key can’t be renewed. When this one lapses, hoomuch shows an error on the connection and you can paste a new key there.',
     revenueHistory: 'transactions',
   },
   {
@@ -72,7 +116,37 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     // Lemon Squeezy keys can't be scoped, so there is no permission checklist to show.
     permissions: [],
     warning:
-      'Lemon Squeezy API keys can’t be limited, so this key has full access to your account. hoomuch only reads stores, subscriptions, orders and invoices, and stores the key encrypted. Treat it like a password.',
+      'Lemon Squeezy API keys can’t be limited, so this key has full access to your account. hoomuch only reads your stores, subscriptions, prices, discounts, orders and invoices, and stores the key encrypted. Treat it like a password.',
+    revenueHistory: 'transactions',
+  },
+  {
+    id: 'polar',
+    name: 'Polar',
+    color: '#0E9384',
+    dotClass: 'bg-[#0E9384]',
+    tagline: 'Merchant of record for developers',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'Organization access token',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'polar_oat_…',
+        help: 'Starts with polar_oat_. Sandbox tokens work too: hoomuch detects which environment the token belongs to.',
+      },
+    ],
+    keySteps: [
+      'Open Settings → Access Tokens in your Polar dashboard (on sandbox.polar.sh for a sandbox organization).',
+      'Create a new token and name it “hoomuch”.',
+      'Set Expiration to 365 days, or “No expiration” if you don’t want to replace it.',
+      'Under Scopes, select only the four read scopes listed below.',
+      'Create the token, copy it (Polar shows it only once) and paste it here.',
+    ],
+    keyUrl: 'https://polar.sh/to/dashboard/settings/access-tokens',
+    permissions: ['metrics:read', 'subscriptions:read', 'orders:read', 'refunds:read'],
+    warning:
+      'Polar access tokens stop working on their expiration date (the form defaults to 30 days). When this one lapses, hoomuch shows an error on the connection and you can paste a new token there.',
     revenueHistory: 'transactions',
   },
   {
@@ -114,6 +188,168 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'daily',
   },
   {
+    id: 'chargebee',
+    name: 'Chargebee',
+    color: '#E8590C',
+    dotClass: 'bg-[#E8590C]',
+    tagline: 'Subscription billing for SaaS',
+    fields: [
+      {
+        name: 'site',
+        label: 'Site',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: 'acme',
+        help: 'The part before .chargebee.com. Test sites end in -test. A pasted site URL works too.',
+      },
+      {
+        name: 'apiKey',
+        label: 'Read-only API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        help: 'Test and live sites have different keys: use one from the site above.',
+      },
+    ],
+    keySteps: [
+      'In Chargebee, open Settings → Configure Chargebee → API Keys and Events → API keys.',
+      'Click “+ Add API Key” and choose “Read-Only Key”.',
+      'Pick “All”, or “Restricted” with “Allow read-only access to transactional data” ticked.',
+      'Name it “hoomuch”, click “Create Key”, and paste it here with your site name.',
+    ],
+    keyUrl: null, // the API keys page lives on each site's own subdomain
+    permissions: ['Allow read-only access to transactional data'],
+    revenueHistory: 'transactions',
+  },
+  {
+    id: 'dodo',
+    name: 'Dodo Payments',
+    color: '#4E9418',
+    dotClass: 'bg-[#4E9418]',
+    tagline: 'Merchant of record for digital products',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'dodo_live_…',
+        help: 'Starts with dodo_live_ (or dodo_test_ for a test mode key).',
+      },
+    ],
+    keySteps: [
+      'Open Developer → API Keys in your Dodo Payments dashboard. Turn on Live Mode in the sidebar first, or leave it off for a test key.',
+      'Click “Create New Key” and name it “hoomuch”.',
+      'Set Subscriptions and Balances to Read and everything else to None. Leave the IP Allowlist empty.',
+      'Create the key, copy it (it is shown only once) and paste it here.',
+    ],
+    keyUrl: 'https://app.dodopayments.com/',
+    permissions: ['Subscriptions: Read', 'Balances: Read'],
+    revenueHistory: 'daily',
+  },
+  {
+    id: 'gumroad',
+    name: 'Gumroad',
+    // Gumroad's pink (#FF90E8) is 1.9:1 on white; this deeper pink keeps the hue at 4.6:1.
+    color: '#DB2777',
+    dotClass: 'bg-[#DB2777]',
+    tagline: 'Merchant of record for creators',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'Access token',
+        type: 'password',
+        required: true,
+        secret: true,
+        help: 'From “Generate access token” on your application, not the application ID or secret.',
+      },
+    ],
+    keySteps: [
+      'Open Settings → Advanced in Gumroad and scroll to Applications.',
+      'Create an application named “hoomuch”. For Redirect URI enter http://127.0.0.1; hoomuch never redirects.',
+      'Click “Create application”, then “Generate access token”.',
+      'Copy the access token and paste it here.',
+    ],
+    keyUrl: 'https://gumroad.com/settings/advanced#application-form',
+    // Tokens generated in Settings carry every scope of their application, so there is nothing to tick.
+    // hoomuch needs view_sales; verify names it if a token somehow lacks it.
+    permissions: [],
+    warning:
+      'Gumroad access tokens made in Settings can’t be limited, so this token has full access to your account, including refunds. hoomuch only reads your profile name, products, subscribers and sales, and stores the token encrypted. Treat it like a password; deleting the application revokes it.',
+    revenueHistory: 'transactions',
+  },
+  {
+    id: 'adapty',
+    name: 'Adapty',
+    color: '#0A86B4',
+    dotClass: 'bg-[#0A86B4]',
+    tagline: 'In-app subscriptions and paywalls for mobile apps',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'Secret API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'secret_live_…',
+        help: 'Starts with secret_live_. Not the Public SDK key (public_live_…). Each Adapty app has its own key.',
+      },
+    ],
+    keySteps: [
+      'In the Adapty dashboard, select the app, then open App settings → General.',
+      'Under API keys, copy the Secret key (it starts with secret_live_), not the Public SDK key.',
+      'Paste it here. Each Adapty app has its own key, so add one connection per app.',
+    ],
+    keyUrl: 'https://app.adapty.io/settings/general',
+    permissions: [],
+    warning:
+      'Adapty has no read-only keys: the Secret API key also opens Adapty’s server-side API (profiles, access levels, paywalls). hoomuch only uses it to read analytics, and stores it encrypted.',
+    revenueHistory: 'daily',
+  },
+  {
+    id: 'superwall',
+    name: 'Superwall',
+    color: '#858A00',
+    dotClass: 'bg-[#858A00]',
+    tagline: 'Paywalls and subscription revenue for mobile apps',
+    fields: [
+      {
+        name: 'apiKey',
+        label: 'Organization API key',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: 'sk_…',
+        help: 'From Settings → API Keys. Not an app’s public key (pk_…).',
+      },
+      {
+        name: 'organizationId',
+        label: 'Organization ID',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: '1234',
+        help: 'The number right after app.superwall.com/ in your dashboard’s address.',
+      },
+    ],
+    keySteps: [
+      'In the Superwall dashboard, open Settings → API Keys.',
+      'Create an organization API key named “hoomuch” with only the scopes listed below, and Project access set to All projects.',
+      'Copy the token (Superwall shows it only once) and paste it here.',
+      'Copy your Organization ID from the dashboard address (app.superwall.com/1234/…).',
+    ],
+    keyUrl: 'https://superwall.com/select-application?pathname=/applications/:app/settings/api-keys',
+    permissions: [
+      'charts:read — required (MRR and active subscriptions)',
+      'data:read — optional, enables daily revenue, refunds and active trials',
+    ],
+    warning:
+      'Superwall’s data:read scope can query all of your organization’s analytics data. hoomuch only runs aggregate revenue queries, but treat this key as sensitive and give it no other scopes.',
+    revenueHistory: 'daily',
+  },
+  {
     id: 'demo',
     name: 'Demo data',
     color: '#8A8F98',
@@ -129,8 +365,15 @@ export const PROVIDERS: readonly ProviderMeta[] = [
 
 const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
   stripe: stripeAdapter,
+  paddle: paddleAdapter,
   lemonsqueezy: lemonSqueezyAdapter,
+  polar: polarAdapter,
   revenuecat: revenueCatAdapter,
+  chargebee: chargebeeAdapter,
+  dodo: dodoAdapter,
+  gumroad: gumroadAdapter,
+  adapty: adaptyAdapter,
+  superwall: superwallAdapter,
   demo: demoAdapter,
 };
 

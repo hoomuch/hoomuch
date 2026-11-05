@@ -145,6 +145,13 @@ export function LandingPage(props: LandingPageProps) {
               read-only, so this one has full access. hoomuch only reads with it.
             </span>
           </li>
+          <li className="flex gap-3">
+            <ProviderDot dotClass="bg-faint" size="md" className="mt-2.5" />
+            <span>
+              <span className="font-semibold">Also:</span> Paddle, Polar, Chargebee, Dodo{NB}Payments, Gumroad, Adapty and
+              Superwall, each with the narrowest key it offers. The connect form lists exactly what to grant.
+            </span>
+          </li>
         </ul>
       </section>
 

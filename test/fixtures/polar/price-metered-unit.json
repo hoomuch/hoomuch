@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-06-02T08:00:00.000000Z",
+  "modified_at": null,
+  "id": "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a",
+  "source": "catalog",
+  "amount_type": "metered_unit",
+  "price_currency": "usd",
+  "tax_behavior": "location",
+  "is_archived": false,
+  "product_id": "d8dd2de1-21b7-4a41-8bc3-ce909c0cfe23",
+  "cap_amount": null,
+  "meter_id": "6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d",
+  "meter": {
+    "id": "6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d",
+    "name": "API calls",
+    "unit": "scalar",
+    "custom_label": null,
+    "custom_multiplier": null
+  },
+  "unit_amount": "0.05"
+}

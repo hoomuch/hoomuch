@@ -1,0 +1,6 @@
+{
+  "message": "Sorry, authorization failed. The key does not have the required permissions",
+  "api_error_code": "api_authorization_failed",
+  "error_code": "api_authorization_failed",
+  "http_status_code": 403
+}

@@ -1,0 +1,8 @@
+{
+  "_tag": "@superwall/api-schema/v2/errors/ResourceNotFound",
+  "type": "invalid_request_error",
+  "code": "resource_missing",
+  "message": "The requested resource was not found",
+  "resource_type": "organization",
+  "resource_id": "999999"
+}

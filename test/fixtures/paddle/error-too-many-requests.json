@@ -1,0 +1,8 @@
+{
+  "error": {
+    "type": "api_error",
+    "code": "too_many_requests",
+    "detail": "You have exceeded the allowed rate limit, please retry your request after the number of seconds in the Retry-After header.",
+    "documentation_url": "https://developer.paddle.com/errors/too_many_requests"
+  }
+}

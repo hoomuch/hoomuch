@@ -1,0 +1,11 @@
+{
+  "error": {
+    "type": "request_error",
+    "code": "paddle_billing_not_enabled",
+    "detail": "Paddle Billing isn't activated for this account.",
+    "documentation_url": "https://developer.paddle.com/errors/shared/paddle_billing_not_enabled"
+  },
+  "meta": {
+    "request_id": "00000000-0000-0000-0000-000000000000"
+  }
+}

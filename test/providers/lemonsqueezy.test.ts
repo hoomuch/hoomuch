@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyDiscount,
+  classifySubscription,
   decodeCursor,
   lemonSqueezyAdapter as ls,
   pageShift,
   parsePrice,
   priceAmountMinor,
 } from '../../src/providers/lemonsqueezy';
-import { BudgetExhaustedError } from '../../src/providers/http';
+import { BudgetExhaustedError, RateLimitedError } from '../../src/providers/http';
 import { ProviderError, type ConnectionConfig, type RevenueEvent, type RevenuePage } from '../../src/providers/types';
 import {
   expectNoSecretsInLogs,
@@ -17,8 +19,11 @@ import {
   type RecordedCall,
   type TestCtx,
 } from '../fixtures/harness';
+import redemptionsJson from '../fixtures/lemonsqueezy/discount-redemptions.json';
+import discountsJson from '../fixtures/lemonsqueezy/discounts.json';
 import error401 from '../fixtures/lemonsqueezy/error-401.json';
 import error404 from '../fixtures/lemonsqueezy/error-404.json';
+import error429 from '../fixtures/lemonsqueezy/error-429.json';
 import ordersJson from '../fixtures/lemonsqueezy/orders.json';
 import pricesJson from '../fixtures/lemonsqueezy/prices.json';
 import store101 from '../fixtures/lemonsqueezy/store-101.json';
@@ -50,6 +55,8 @@ const ORDERS = fx<ListFixture>(ordersJson).data;
 const INVOICES = fx<ListFixture>(invoicesJson);
 const PRICES = fx<ListFixture>(pricesJson).data;
 const STORES = fx<ListFixture>(storesJson).data;
+const DISCOUNTS = fx<ListFixture>(discountsJson).data;
+const REDEMPTIONS = fx<ListFixture>(redemptionsJson).data;
 
 const API = 'https://api.lemonsqueezy.com';
 // JWT-shaped like a real LS key, but fake.
@@ -108,27 +115,50 @@ interface ServerOpts {
   orders?: Row[];
   invoices?: Row[];
   stores?: Row[];
+  discounts?: Row[];
+  redemptions?: Row[];
+  /** Orders only reachable by id (GET /v1/orders/{id}), e.g. checkouts older than the scanned window. */
+  extraOrders?: Row[];
   pageSize?: number;
   me?: unknown;
+  /** Answer the first `times` requests to `path` with 429 (Lemon Squeezy sends no Retry-After). */
+  throttle?: { path: string; times: number };
 }
 
 function lsServer(o: ServerOpts = {}) {
   const state = {
     subscriptions: o.subscriptions ?? clone(SUBS),
     orders: o.orders ?? clone(ORDERS),
+    extraOrders: o.extraOrders ?? [],
     invoices: o.invoices ?? clone(INVOICES.data),
     included: clone(INVOICES.included ?? []),
     stores: o.stores ?? clone(STORES),
+    discounts: o.discounts ?? clone(DISCOUNTS),
+    redemptions: o.redemptions ?? clone(REDEMPTIONS),
   };
   const ps = o.pageSize;
+  let throttled = 0;
+  const throttle = (path: string, responder: (url: URL) => FakeResponse) => (url: URL): FakeResponse => {
+    if (o.throttle && o.throttle.path === path && throttled < o.throttle.times) {
+      throttled += 1;
+      return { status: 429, json: error429 };
+    }
+    return responder(url);
+  };
   const ff = fakeFetch([
     route('/v1/users/me', { json: o.me ?? usersMe }),
     route('/v1/stores', jsonApiList(() => state.stores)),
     route(/^\/v1\/stores\/[^/]+$/, (url) => single(state.stores)(url)),
     route(/^\/v1\/prices\/[^/]+$/, single(PRICES)),
-    route('/v1/subscriptions', jsonApiList(() => state.subscriptions, { pageSize: ps })),
-    route('/v1/orders', jsonApiList(() => state.orders, { pageSize: ps })),
-    route('/v1/subscription-invoices', jsonApiList(() => state.invoices, { pageSize: ps, included: () => state.included })),
+    route('/v1/subscriptions', throttle('/v1/subscriptions', jsonApiList(() => state.subscriptions, { pageSize: ps }))),
+    route('/v1/orders', throttle('/v1/orders', jsonApiList(() => state.orders, { pageSize: ps }))),
+    route(/^\/v1\/orders\/[^/]+$/, (url) => single([...state.orders, ...state.extraOrders])(url)),
+    route(
+      '/v1/subscription-invoices',
+      throttle('/v1/subscription-invoices', jsonApiList(() => state.invoices, { pageSize: ps, included: () => state.included })),
+    ),
+    route('/v1/discounts', jsonApiList(() => state.discounts, { pageSize: ps })),
+    route('/v1/discount-redemptions', jsonApiList(() => state.redemptions, { pageSize: ps })),
   ]);
   return { ...ff, state };
 }
@@ -137,6 +167,7 @@ const pathOf = (c: RecordedCall) => new URL(c.url).pathname;
 const callsTo = (calls: RecordedCall[], path: string) => calls.filter((c) => pathOf(c) === path);
 const pagesOf = (calls: RecordedCall[], path: string) =>
   callsTo(calls, path).map((c) => Number(new URL(c.url).searchParams.get('page[number]')));
+const orderLookups = (calls: RecordedCall[]) => calls.map(pathOf).filter((p) => /^\/v1\/orders\/.+/.test(p));
 const subsById = (...ids: number[]) => SUBS.filter((s) => ids.includes(Number(s.id)));
 
 /** Every end-customer (and merchant) name / e-mail in the fixtures. */
@@ -256,17 +287,25 @@ describe('lemonsqueezy verify', () => {
     const err = await catchErr(ls.verify({ credentials: { apiKey: KEY }, config: {} }, makeCtx(fetch)));
     expect(err.kind).toBe('upstream');
   });
+
+  it('a 429 is not retried in the same minute', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/users/me', { status: 429, json: error429 })]);
+    const err = await catchErr(ls.verify({ credentials: { apiKey: KEY }, config: {} }, makeCtx(fetch)));
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(calls).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
 
 describe('lemonsqueezy fetchSnapshot', () => {
-  async function snap(subs: Row[], config: ConnectionConfig = LIVE, pageSize?: number) {
+  async function snap(subs: Row[], config: ConnectionConfig = LIVE, pageSize?: number, budget = 30) {
     const server = lsServer({ subscriptions: subs, pageSize });
-    const ctx = makeCtx(server.fetch, { pageBudget: 30 });
+    const ctx = makeCtx(server.fetch, { pageBudget: budget });
     const s = await ls.fetchSnapshot(input(config), ctx);
     return { s, ctx, ...server };
   }
+  const priceCalls = (calls: RecordedCall[]) => calls.filter((c) => pathOf(c).startsWith('/v1/prices/')).map(pathOf).sort();
 
   it('monthly price: unit_price × 1', async () => {
     const { s } = await snap(subsById(1));
@@ -292,6 +331,20 @@ describe('lemonsqueezy fetchSnapshot', () => {
     expect(b.s.activeSubscriptions).toBe(0);
   });
 
+  it('a cancelled free trial is a trial, never MRR (LS clears trial_ends_at once it is cancelled)', async () => {
+    // #15: no subscription item ("null … if the subscription is currently in a free trial").
+    const noItem = await snap(subsById(15));
+    expect(noItem.s).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 1 });
+    expect(priceCalls(noItem.calls)).toEqual([]);
+    // #16: item present, but it ends exactly when its price's 14-day trial does.
+    const withItem = await snap(subsById(16));
+    expect(withItem.s).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 1 });
+    expect(priceCalls(withItem.calls)).toEqual(['/v1/prices/12']);
+    // #20: same trial price, but it converted and ends a year after the trial: still paying.
+    const converted = await snap(subsById(20));
+    expect(converted.s).toMatchObject({ mrr: { EUR: 1000 }, activeSubscriptions: 1, activeTrials: 0 });
+  });
+
   it('on_trial counts as a trial only, without fetching its price', async () => {
     const { s, calls } = await snap(subsById(6));
     expect(s).toMatchObject({ mrr: {}, activeSubscriptions: 0, activeTrials: 1 });
@@ -301,7 +354,7 @@ describe('lemonsqueezy fetchSnapshot', () => {
   it('usage-based items are active but add no MRR (and their price is not fetched)', async () => {
     const { s, calls } = await snap(subsById(7));
     expect(s).toMatchObject({ mrr: {}, activeSubscriptions: 1 });
-    expect(calls.filter((c) => pathOf(c).startsWith('/v1/prices/'))).toHaveLength(0);
+    expect(priceCalls(calls)).toHaveLength(0);
   });
 
   it('only asks for paying/trial statuses: paused, unpaid and expired never count', async () => {
@@ -310,6 +363,7 @@ describe('lemonsqueezy fetchSnapshot', () => {
     const statuses = callsTo(calls, '/v1/subscriptions').map((c) => new URL(c.url).searchParams.get('filter[status]'));
     expect(statuses).toEqual(['active', 'past_due', 'cancelled', 'on_trial']);
     for (const c of callsTo(calls, '/v1/subscriptions')) expect(new URL(c.url).searchParams.get('page[size]')).toBe('100');
+    expect(callsTo(calls, '/v1/discounts')).toHaveLength(0); // nothing paying: no discount lookups
   });
 
   it('a live key ignores test-mode records; a test-mode key sees only them', async () => {
@@ -319,19 +373,51 @@ describe('lemonsqueezy fetchSnapshot', () => {
     expect(test.s).toMatchObject({ mrr: { EUR: 9000 }, activeSubscriptions: 1, activeTrials: 1 });
   });
 
+  it('recurring discounts reduce MRR: forever, and repeating while it runs; once and elapsed ones do not', async () => {
+    const { s, calls, ctx } = await snap(subsById(17, 18, 19));
+    expect(s).toMatchObject({
+      // #17: 50% forever → 450. #18: €3 off each quarterly payment for 6 months (redeemed 2026-09-20) →
+      // (2700 − 300) / 3 = 800. #19: 20% for 1 month elapsed on 2026-10-01, plus a `once` discount → 900.
+      mrr: { EUR: 450 + 800 + 900 },
+      activeSubscriptions: 3,
+    });
+    expect(callsTo(calls, '/v1/discounts')).toHaveLength(1);
+    const redeemed = callsTo(calls, '/v1/discount-redemptions').map((c) => new URL(c.url).searchParams.get('filter[discount_id]'));
+    expect(redeemed.sort()).toEqual(['31', '32', '33', '35']); // never the `once` discount 34
+    expect(ctx.logs.find((l) => l.event === 'ls_snapshot')?.data).toMatchObject({ discounted: 2, discounts: 'applied' });
+  });
+
+  it('applies the terms as redeemed, falling back to the discount’s own terms', async () => {
+    const server = lsServer({ subscriptions: subsById(17) });
+    const r = server.state.redemptions.find((x) => x.id === '44')!;
+    Object.assign(r.attributes, { discount_amount: 25 }); // the discount was 25% when it was redeemed
+    const a = await ls.fetchSnapshot(input(), makeCtx(server.fetch));
+    expect(a.mrr).toEqual({ EUR: 675 });
+    Object.assign(r.attributes, { discount_amount: null, discount_amount_type: null });
+    const b = await ls.fetchSnapshot(input(), makeCtx(server.fetch));
+    expect(b.mrr).toEqual({ EUR: 450 }); // the discount's current 50%
+  });
+
+  it('applyDiscount: percent of the period amount, fixed off each payment, never below zero', () => {
+    expect(applyDiscount(2700, { type: 'percent', amount: 10 })).toBe(2430);
+    expect(applyDiscount(2700, { type: 'fixed', amount: 300 })).toBe(2400);
+    expect(applyDiscount(200, { type: 'fixed', amount: 300 })).toBe(0);
+    expect(applyDiscount(900, { type: 'percent', amount: 150 })).toBe(0);
+  });
+
   it('full account: multi-store, multi-currency MoneyMap, one /prices call per distinct price', async () => {
     const { s, calls, ctx } = await snap(SUBS);
     expect(s).toEqual({
-      // EUR: 900 (#1) + 1000 (#2) + 2700 (#3) + 900 (#4) + 900 (#11); USD: 1500 × 2 (#9, past_due)
-      mrr: { EUR: 6400, USD: 3000 },
-      activeSubscriptions: 7, // 1, 2, 3, 4, 7 (usage-based), 9, 11
-      activeTrials: 1, // 6 (14 is test mode)
+      // EUR: 900 (#1) + 1000 (#2) + 2700 (#3) + 900 (#4) + 900 (#11) + 450 (#17, 50% off) + 800 (#18, €3 off)
+      //      + 900 (#19) + 1000 (#20, cancelled after converting); USD: 1500 × 2 (#9, past_due)
+      mrr: { EUR: 9550, USD: 3000 },
+      activeSubscriptions: 11, // 1, 2, 3, 4, 7 (usage-based), 9, 11, 17, 18, 19, 20
+      activeTrials: 3, // 6, 15 and 16 (cancelled trials); 14 is test mode
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
     });
-    const priceCalls = calls.filter((c) => pathOf(c).startsWith('/v1/prices/')).map(pathOf).sort();
-    expect(priceCalls).toEqual(['/v1/prices/11', '/v1/prices/12', '/v1/prices/21', '/v1/prices/22']);
+    expect(priceCalls(calls)).toEqual(['/v1/prices/11', '/v1/prices/12', '/v1/prices/21', '/v1/prices/22']);
     expect(callsTo(calls, '/v1/users/me')).toHaveLength(0); // mode comes from config
     expect(calls.filter((c) => pathOf(c).startsWith('/v1/stores'))).toHaveLength(0); // currencies too
     expectClean(ctx, s);
@@ -339,27 +425,80 @@ describe('lemonsqueezy fetchSnapshot', () => {
 
   it('pages through each status listing', async () => {
     const { s, calls } = await snap(SUBS, LIVE, 2);
-    expect(s.mrr).toEqual({ EUR: 6400, USD: 3000 });
+    expect(s.mrr).toEqual({ EUR: 9550, USD: 3000 });
     expect(pagesOf(calls, '/v1/subscriptions').filter((p) => p > 1).length).toBeGreaterThan(0);
+    expect(pagesOf(calls, '/v1/discounts')).toEqual([1, 2, 3]);
   });
 
   it('respects the Store ID filter', async () => {
     const { s, calls } = await snap(SUBS, { ...LIVE, storeId: '102' });
     expect(s).toMatchObject({ mrr: { USD: 3000 }, activeSubscriptions: 1, activeTrials: 0 });
     for (const c of callsTo(calls, '/v1/subscriptions')) expect(new URL(c.url).searchParams.get('filter[store_id]')).toBe('102');
+    for (const c of callsTo(calls, '/v1/discounts')) expect(new URL(c.url).searchParams.get('filter[store_id]')).toBe('102');
   });
 
   it('works for connections without discovered config (looks up mode and store currencies lazily)', async () => {
     const { s, calls } = await snap(SUBS, {});
-    expect(s.mrr).toEqual({ EUR: 6400, USD: 3000 });
+    expect(s.mrr).toEqual({ EUR: 9550, USD: 3000 });
     expect(callsTo(calls, '/v1/users/me')).toHaveLength(1);
     expect(callsTo(calls, '/v1/stores/101')).toHaveLength(1);
     expect(callsTo(calls, '/v1/stores/102')).toHaveLength(1);
   });
 
+  it('discount lookups that don’t fit in the budget: MRR before discounts, logged, not a failure', async () => {
+    // 4 listings + 4 prices + the discount list + one redemption listing, then the budget is gone.
+    const { s, ctx, calls } = await snap(SUBS, LIVE, undefined, 10);
+    expect(calls).toHaveLength(10);
+    expect(s).toMatchObject({ mrr: { EUR: 10100, USD: 3000 }, activeSubscriptions: 11, activeTrials: 3 });
+    expect(ctx.logs.find((l) => l.event === 'ls_discounts_skipped')?.data).toMatchObject({ reason: 'budget' });
+    expect(ctx.logs.find((l) => l.event === 'ls_snapshot')?.data).toMatchObject({ discounts: 'skipped', discounted: 0 });
+  });
+
   it('lets BudgetExhaustedError propagate', async () => {
     const { fetch } = lsServer();
     await expect(ls.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 3 }))).rejects.toBeInstanceOf(BudgetExhaustedError);
+  });
+
+  it('a 429 fails the snapshot at once: no retry in the same minute, no partial snapshot', async () => {
+    const server = lsServer({ throttle: { path: '/v1/subscriptions', times: 1 } });
+    const ctx = makeCtx(server.fetch, { pageBudget: 30 });
+    await expect(ls.fetchSnapshot(input(), ctx)).rejects.toBeInstanceOf(RateLimitedError);
+    expect(server.calls).toHaveLength(1);
+    expect(ctx.pageBudget).toBe(0);
+  });
+});
+
+describe('lemonsqueezy classifySubscription', () => {
+  const NOW = Date.parse('2026-11-05T12:00:00Z');
+  const trialPrice = parsePrice(PRICES.find((p) => p.id === '12')!); // yearly, 14-day trial
+  const noTrialPrice = parsePrice(PRICES.find((p) => p.id === '11')!);
+  const item = { price_id: 12, quantity: 1 };
+  const cancelled = (a: Record<string, unknown>) => ({ status: 'cancelled', trial_ends_at: null, first_subscription_item: item, ...a });
+
+  it('reads the trial from the price', () => {
+    expect(trialPrice.trial).toEqual({ interval: 'day', count: 14 });
+    expect(noTrialPrice.trial).toBeNull();
+  });
+
+  it('cancelled: ended → none; no item → trial; ends at the trial end → trial; ends later → paying', () => {
+    const created = '2026-10-30T00:00:00Z';
+    expect(classifySubscription(cancelled({ ends_at: '2026-11-01T00:00:00Z' }), NOW)).toBe('none');
+    expect(classifySubscription(cancelled({ ends_at: '2026-11-13T00:00:00Z', first_subscription_item: null }), NOW)).toBe('trial');
+    const inTrial = cancelled({ created_at: created, ends_at: '2026-11-13T00:00:00Z' });
+    expect(classifySubscription(inTrial, NOW, trialPrice)).toBe('trial');
+    expect(classifySubscription(inTrial, NOW, noTrialPrice)).toBe('paying');
+    expect(classifySubscription(inTrial, NOW)).toBe('paying'); // without the price there is no evidence
+    const converted = cancelled({ created_at: '2025-11-01T00:00:00Z', ends_at: '2026-11-15T00:00:00Z' });
+    expect(classifySubscription(converted, NOW, trialPrice)).toBe('paying');
+    // An undocumented-but-harmless trial_ends_at still wins.
+    expect(classifySubscription(cancelled({ ends_at: '2026-11-13T00:00:00Z', trial_ends_at: '2026-11-13T00:00:00Z' }), NOW)).toBe('trial');
+  });
+
+  it('other statuses', () => {
+    expect(classifySubscription({ status: 'active', first_subscription_item: null }, NOW)).toBe('paying');
+    expect(classifySubscription({ status: 'past_due' }, NOW)).toBe('paying');
+    expect(classifySubscription({ status: 'on_trial' }, NOW)).toBe('trial');
+    for (const status of ['paused', 'unpaid', 'expired', 'nope']) expect(classifySubscription({ status }, NOW)).toBe('none');
   });
 });
 
@@ -386,7 +525,7 @@ describe('lemonsqueezy price schemes', () => {
 
   it('graduated: each tier prices its own units (+ its flat fee)', () => {
     const p = parsePrice(docsExample);
-    expect(p).toMatchObject({ interval: 'year', intervalCount: 1, usageBased: false });
+    expect(p).toMatchObject({ interval: 'year', intervalCount: 1, usageBased: false, trial: null });
     expect(priceAmountMinor(p, 1)).toBe(11000);
     expect(priceAmountMinor(p, 5)).toBe(2 * 10000 + 1000 + 3 * 1000 + 1000);
   });
@@ -395,6 +534,13 @@ describe('lemonsqueezy price schemes', () => {
     const p = withAttrs({ scheme: 'volume' });
     expect(priceAmountMinor(p, 2)).toBe(2 * 10000 + 1000);
     expect(priceAmountMinor(p, 5)).toBe(5 * 1000 + 1000);
+  });
+
+  it('volume / graduated without tiers are unpriced: unit_price is not used for them', () => {
+    for (const scheme of ['volume', 'graduated']) {
+      expect(priceAmountMinor(withAttrs({ scheme, tiers: [] }), 3)).toBeNull();
+      expect(priceAmountMinor(withAttrs({ scheme, tiers: null }), 3)).toBeNull();
+    }
   });
 
   it('package: whole packages of package_size', () => {
@@ -426,19 +572,20 @@ const refund = (externalId: string, amount: number, currency: string, iso: strin
   type: 'refund',
 });
 
+/** Net of tax: charges are total − tax, refunds scaled by (total − tax) / total. */
 const EXPECTED: RevenueEvent[] = [
-  charge('order:5001', 1199, 'EUR', '2026-11-04T10:00:00Z', 'Acme Pro · Monthly'),
-  charge('order:5002', 900, 'EUR', '2026-11-01T09:00:00Z', 'Acme Pro · Monthly'),
-  refund('order:5002:refund', 900, 'EUR', '2026-11-02T08:00:00Z', 'Acme Pro · Monthly'),
-  charge('order:5003', 2000, 'USD', '2026-10-30T15:00:00Z', 'Beta Sync'),
-  refund('order:5003:refund', 500, 'USD', '2026-10-31T10:00:00Z', 'Beta Sync'), // partial: refunded_at null → updated_at
-  refund('order:5008:refund', 300, 'EUR', '2026-11-03T12:00:00Z', 'Acme Pro · Monthly'), // late refund, order before since
-  charge('invoice:7001', 900, 'EUR', '2026-11-03T00:00:00Z', 'Acme Pro · Monthly'),
-  charge('invoice:7002', 450, 'EUR', '2026-11-02T12:00:00Z', 'Acme Pro · Monthly'),
-  charge('invoice:7004', 3000, 'USD', '2026-10-28T00:00:00Z', 'Beta Sync'),
-  refund('invoice:7004:refund', 3000, 'USD', '2026-10-29T00:00:00Z', 'Beta Sync'),
-  charge('invoice:7005', 12000, 'EUR', '2026-10-27T00:00:00Z', 'Acme Pro · Yearly'), // initial, after a 14-day trial
-  refund('invoice:7008:refund', 900, 'EUR', '2026-11-04T00:00:00Z', 'Acme Pro · Monthly'), // late partial refund
+  charge('order:5001', 999, 'EUR', '2026-11-04T10:00:00Z', 'Acme Pro · Monthly'), // 1199 − 200 VAT
+  charge('order:5002', 750, 'EUR', '2026-11-01T09:00:00Z', 'Acme Pro · Monthly'),
+  refund('order:5002:refund', 750, 'EUR', '2026-11-02T08:00:00Z', 'Acme Pro · Monthly'),
+  charge('order:5003', 1667, 'USD', '2026-10-30T15:00:00Z', 'Beta Sync'),
+  refund('order:5003:refund', 417, 'USD', '2026-10-31T10:00:00Z', 'Beta Sync'), // 500 × 1667 / 2000; refunded_at null → updated_at
+  refund('order:5008:refund', 250, 'EUR', '2026-11-03T12:00:00Z', 'Acme Pro · Monthly'), // late refund, order before since
+  charge('invoice:7001', 750, 'EUR', '2026-11-03T00:00:00Z', 'Acme Pro · Monthly'),
+  charge('invoice:7002', 375, 'EUR', '2026-11-02T12:00:00Z', 'Acme Pro · Monthly'),
+  charge('invoice:7004', 2500, 'USD', '2026-10-28T00:00:00Z', 'Beta Sync'),
+  refund('invoice:7004:refund', 2500, 'USD', '2026-10-29T00:00:00Z', 'Beta Sync'),
+  charge('invoice:7005', 10000, 'EUR', '2026-10-27T00:00:00Z', 'Acme Pro · Yearly'), // initial, after a $0 trial checkout
+  refund('invoice:7008:refund', 750, 'EUR', '2026-11-04T00:00:00Z', 'Acme Pro · Monthly'), // late partial refund
 ];
 
 const byId = (events: RevenueEvent[]) => new Map(events.map((e) => [e.externalId, e]));
@@ -452,8 +599,8 @@ async function revenue(opts: ServerOpts & { config?: ConnectionConfig; budget?: 
 }
 
 /** Calls fetchRevenue with a fresh budget per call until done; returns all events (later ones win). */
-async function drain(server: ReturnType<typeof lsServer>, budget: number, maxCalls = 50) {
-  let cursor: string | null = null;
+async function drain(server: ReturnType<typeof lsServer>, budget: number, maxCalls = 50, first: string | null = null) {
+  let cursor: string | null = first;
   const all = new Map<string, RevenueEvent>();
   const pages: RevenuePage[] = [];
   for (let i = 0; i < maxCalls; i++) {
@@ -466,6 +613,16 @@ async function drain(server: ReturnType<typeof lsServer>, budget: number, maxCal
     cursor = p.nextCursor;
   }
   throw new Error('fetchRevenue never finished');
+}
+
+/** Moves subscription 2's free-trial checkout out of the scanned window: only GET /orders/4990 knows it. */
+function oldCheckout(server: ReturnType<typeof lsServer>, total: number): void {
+  const sub = server.state.included.find((s) => s.id === '2')!;
+  Object.assign(sub.attributes, { order_id: 4990, created_at: '2026-08-01T00:00:00.000000Z' });
+  const order = clone(ORDERS.find((o) => o.id === '5011')!);
+  order.id = '4990';
+  Object.assign(order.attributes, { total, created_at: '2026-08-01T00:00:00.000000Z', updated_at: '2026-08-01T00:00:00.000000Z' });
+  server.state.extraOrders.push(order);
 }
 
 describe('lemonsqueezy fetchRevenue', () => {
@@ -482,30 +639,114 @@ describe('lemonsqueezy fetchRevenue', () => {
     expectClean(ctx, page);
   });
 
-  it('paid order → one charge with total, order currency and product name', async () => {
+  it('paid order → one charge, net of tax, in the order currency with the product name', async () => {
     const e = byId((await revenue()).page.events);
     expect(e.get('order:5001')).toEqual(EXPECTED[0]);
     for (const id of ['order:5004', 'order:5006', 'order:5007']) expect(e.has(id)).toBe(false); // pending, failed, $0 trial checkout
   });
 
-  it('refunded and partial_refund orders produce a charge and a separate negative refund', async () => {
+  it('revenue excludes tax (merchant of record): charge = total − tax, refunds scaled by (total − tax) / total', async () => {
     const e = byId((await revenue()).page.events);
-    expect(e.get('order:5002')?.amount).toBe(900);
-    expect(e.get('order:5002:refund')).toMatchObject({ type: 'refund', amount: -900, occurredAt: at('2026-11-02T08:00:00Z') });
-    expect(e.get('order:5003')?.amount).toBe(2000);
-    expect(e.get('order:5003:refund')).toMatchObject({ type: 'refund', amount: -500, currency: 'USD' });
+    expect(e.get('order:5001')?.amount).toBe(1199 - 200);
+    expect(e.get('invoice:7001')?.amount).toBe(900 - 150);
+    expect(e.get('order:5003:refund')?.amount).toBe(-Math.round((500 * (2000 - 333)) / 2000));
+    expect(e.get('invoice:7008:refund')?.amount).toBe(-Math.round((900 * (2700 - 450)) / 2700));
+    // A record without a tax field is all revenue.
+    const orders = clone(ORDERS);
+    delete orders.find((r) => r.id === '5001')!.attributes['tax'];
+    expect(byId((await revenue({ orders })).page.events).get('order:5001')?.amount).toBe(1199);
   });
 
-  it('initial invoices paid at checkout are not counted again; renewal and updated are', async () => {
+  it('refunded and partial_refund orders produce a charge and a separate negative refund', async () => {
     const e = byId((await revenue()).page.events);
-    expect(e.has('invoice:7003')).toBe(false); // initial, same money as order 5002
-    expect(e.has('invoice:7011')).toBe(false); // initial, subscription not included → assume checkout
-    expect(e.get('invoice:7001')).toMatchObject({ type: 'charge', amount: 900 }); // renewal
-    expect(e.get('invoice:7002')).toMatchObject({ type: 'charge', amount: 450 }); // updated
-    expect(e.get('invoice:7005')).toMatchObject({ type: 'charge', amount: 12000 }); // initial, charged at trial end
+    expect(e.get('order:5002')?.amount).toBe(750);
+    expect(e.get('order:5002:refund')).toMatchObject({ type: 'refund', amount: -750, occurredAt: at('2026-11-02T08:00:00Z') });
+    expect(e.get('order:5003')?.amount).toBe(1667);
+    expect(e.get('order:5003:refund')).toMatchObject({ type: 'refund', amount: -417, currency: 'USD' });
+  });
+
+  it('partial refunds: one event per record, the cumulative amount, dated refunded_at once there is one', async () => {
+    const orders = clone(ORDERS);
+    const o = orders.find((r) => r.id === '5003')!;
+    // A second partial refund: refunded_amount is cumulative, refunded_at stays null (docs example).
+    Object.assign(o.attributes, { refunded_amount: 800, updated_at: '2026-11-03T09:00:00.000000Z' });
+    let refunds = (await revenue({ orders })).page.events.filter((e) => e.externalId.startsWith('order:5003:'));
+    expect(refunds).toEqual([refund('order:5003:refund', Math.round((800 * 1667) / 2000), 'USD', '2026-11-03T09:00:00Z', 'Beta Sync')]);
+    // Then the rest: a full refund sets refunded_at, which wins over a later updated_at.
+    Object.assign(o.attributes, {
+      status: 'refunded',
+      refunded: true,
+      refunded_amount: 2000,
+      refunded_at: '2026-11-04T08:00:00.000000Z',
+      updated_at: '2026-11-04T09:30:00.000000Z',
+    });
+    refunds = (await revenue({ orders })).page.events.filter((e) => e.externalId.startsWith('order:5003:'));
+    expect(refunds).toEqual([refund('order:5003:refund', 1667, 'USD', '2026-11-04T08:00:00Z', 'Beta Sync')]);
+  });
+
+  it('initial invoices: skipped when the checkout order charged money, counted after a $0 (trial) checkout', async () => {
+    const { page, calls } = await revenue();
+    const e = byId(page.events);
+    expect(e.has('invoice:7003')).toBe(false); // initial; checkout order 5002 charged €9 → same money
+    expect(e.has('invoice:7011')).toBe(false); // initial, subscription not included → assume paid at checkout
+    expect(e.get('invoice:7001')).toMatchObject({ type: 'charge', amount: 750 }); // renewal
+    expect(e.get('invoice:7002')).toMatchObject({ type: 'charge', amount: 375 }); // updated
+    expect(e.get('invoice:7005')).toMatchObject({ type: 'charge', amount: 10000 }); // checkout order 5011 was $0
     for (const id of ['invoice:7006', 'invoice:7007']) expect(e.has(id)).toBe(false); // pending, void
     // The refunded initial invoice 7003 reports the same refund as order 5002: it lands once.
     expect([...e.keys()].filter((k) => k.startsWith('order:5002:refund'))).toHaveLength(1);
+    expect(orderLookups(calls)).toEqual([]); // both checkouts were in the order scan
+  });
+
+  it('decides by money, not by timing: a paid checkout means the later initial invoice is not counted', async () => {
+    const orders = clone(ORDERS);
+    Object.assign(orders.find((r) => r.id === '5011')!.attributes, { total: 12000, tax: 2000 });
+    const e = byId((await revenue({ orders })).page.events);
+    expect(e.has('invoice:7005')).toBe(false); // created 14 days after its subscription, but already paid
+  });
+
+  it('a checkout older than the scan is looked up once (GET /orders/{id})', async () => {
+    for (const [total, counted] of [
+      [0, true],
+      [12000, false],
+    ] as const) {
+      const server = lsServer();
+      oldCheckout(server, total);
+      const ctx = makeCtx(server.fetch, { pageBudget: 20 });
+      const page = await ls.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
+      expect(page.done).toBe(true);
+      expect(orderLookups(server.calls)).toEqual(['/v1/orders/4990']);
+      expect(byId(page.events).has('invoice:7005')).toBe(counted);
+    }
+  });
+
+  it('order lookups that don’t fit in the budget continue from the cursor (lookups first, then the page)', async () => {
+    const server = lsServer();
+    oldCheckout(server, 0);
+    const first = await ls.fetchRevenue(input(), { since: SINCE, cursor: null }, makeCtx(server.fetch, { pageBudget: 2 }));
+    expect(first.done).toBe(false);
+    expect(decodeCursor(first.nextCursor)).toMatchObject({ phase: 'invoices', page: 1, pending: ['4990'] });
+    expect(first.events.some((e) => e.externalId.startsWith('invoice:'))).toBe(false); // the page waits for its lookup
+
+    const second = await ls.fetchRevenue(input(), { since: SINCE, cursor: first.nextCursor }, makeCtx(server.fetch, { pageBudget: 1 }));
+    expect(server.calls.map(pathOf).slice(2)).toEqual(['/v1/orders/4990']);
+    expect(decodeCursor(second.nextCursor)).toMatchObject({ phase: 'invoices', page: 1, pending: [], orders: { '4990': 0 } });
+
+    const third = await ls.fetchRevenue(input(), { since: SINCE, cursor: second.nextCursor }, makeCtx(server.fetch, { pageBudget: 1 }));
+    expect(third.done).toBe(true);
+    expect(orderLookups(server.calls)).toEqual(['/v1/orders/4990']);
+    expect(sorted([...byId([...first.events, ...second.events, ...third.events]).values()])).toEqual(sorted(EXPECTED));
+  });
+
+  it('a cursor that had to drop carried orders looks every unseen checkout up instead of assuming it was paid', async () => {
+    const server = lsServer();
+    const cursor = JSON.stringify({ v: 2, since: SINCE, phase: 'invoices', page: 1, total: null, pending: [], orders: {}, complete: false });
+    const page = await ls.fetchRevenue(input(), { since: SINCE, cursor }, makeCtx(server.fetch));
+    expect(page.done).toBe(true);
+    expect(orderLookups(server.calls).sort()).toEqual(['/v1/orders/5002', '/v1/orders/5011']);
+    const e = byId(page.events);
+    expect(e.get('invoice:7005')?.amount).toBe(10000);
+    expect(e.has('invoice:7003')).toBe(false);
   });
 
   it('a refund reported only on the initial invoice is booked under its order', async () => {
@@ -513,26 +754,26 @@ describe('lemonsqueezy fetchRevenue', () => {
     const o = orders.find((r) => r.id === '5002')!;
     Object.assign(o.attributes, { status: 'paid', refunded: false, refunded_amount: 0, refunded_at: null });
     const e = byId((await revenue({ orders })).page.events);
-    expect(e.get('order:5002')?.amount).toBe(900);
-    expect(e.get('order:5002:refund')).toMatchObject({ amount: -900, occurredAt: at('2026-11-02T08:00:00Z') });
+    expect(e.get('order:5002')?.amount).toBe(750);
+    expect(e.get('order:5002:refund')).toMatchObject({ amount: -750, occurredAt: at('2026-11-02T08:00:00Z') });
   });
 
   it('invoice refunds become refund events (full and late partial)', async () => {
     const e = byId((await revenue()).page.events);
-    expect(e.get('invoice:7004')?.amount).toBe(3000);
-    expect(e.get('invoice:7004:refund')).toMatchObject({ amount: -3000, occurredAt: at('2026-10-29T00:00:00Z') });
+    expect(e.get('invoice:7004')?.amount).toBe(2500);
+    expect(e.get('invoice:7004:refund')).toMatchObject({ amount: -2500, occurredAt: at('2026-10-29T00:00:00Z') });
     expect(e.get('invoice:7008')).toBeUndefined(); // charged before `since`
-    expect(e.get('invoice:7008:refund')?.amount).toBe(-900);
+    expect(e.get('invoice:7008:refund')?.amount).toBe(-750);
   });
 
   it('since cut-off: older records only contribute refunds made after since; paging stops at the lookback floor', async () => {
     const { page, calls } = await revenue({ pageSize: 3 });
     const e = byId(page.events);
     expect(e.has('order:5008')).toBe(false);
-    expect(e.get('order:5008:refund')?.amount).toBe(-300);
+    expect(e.get('order:5008:refund')?.amount).toBe(-250);
     for (const id of ['order:5009', 'order:5010', 'order:5010:refund', 'order:5011', 'invoice:7010']) expect(e.has(id)).toBe(false);
     for (const ev of page.events) expect(ev.occurredAt).toBeGreaterThanOrEqual(SINCE);
-    // 14 orders in pages of 3: page 4 holds 2026-10-01 (< since − 14 days) → page 5 is never read.
+    // 14 orders in pages of 3: page 4 holds 2026-09-15 (< since − 30 days) → page 5 is never read.
     expect(pagesOf(calls, '/v1/orders')).toEqual([1, 2, 3, 4]);
     expect(pagesOf(calls, '/v1/subscription-invoices')).toEqual([1, 2, 3, 4]);
     expect(sorted(page.events)).toEqual(sorted(EXPECTED));
@@ -547,8 +788,8 @@ describe('lemonsqueezy fetchRevenue', () => {
   it('a test-mode key sees only test-mode records', async () => {
     const { page } = await revenue({ config: TEST });
     expect(sorted(page.events)).toEqual([
-      charge('invoice:7009', 9000, 'EUR', '2026-10-30T00:00:00Z', 'Acme Pro · Monthly'),
-      charge('order:5005', 4500, 'EUR', '2026-10-28T00:00:00Z', 'Acme Pro · Monthly'),
+      charge('invoice:7009', 7500, 'EUR', '2026-10-30T00:00:00Z', 'Acme Pro · Monthly'),
+      charge('order:5005', 3750, 'EUR', '2026-10-28T00:00:00Z', 'Acme Pro · Monthly'),
     ]);
   });
 
@@ -581,6 +822,26 @@ describe('lemonsqueezy fetchRevenue', () => {
     const { events, pages } = await drain(server, 1);
     expect(sorted(events)).toEqual(sorted(EXPECTED));
     expect(pages.length).toBe(8); // 4 order pages + 4 invoice pages
+    // The $0 checkout seen on order page 4 travels in the cursor to the invoice pages: no lookups.
+    expect(orderLookups(server.calls)).toEqual([]);
+    expect(decodeCursor(pages[4]!.nextCursor)?.orders).toEqual({ '5007': 0, '5011': 0 });
+  });
+
+  it('a 429 returns what was read plus a cursor at the unread page; the next sync finishes', async () => {
+    const server = lsServer({ throttle: { path: '/v1/subscription-invoices', times: 1 } });
+    const ctx = makeCtx(server.fetch, { pageBudget: 20 });
+    const first = await ls.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
+    expect(first.done).toBe(false);
+    expect(callsTo(server.calls, '/v1/subscription-invoices')).toHaveLength(1); // no retry in the same minute
+    expect(ctx.pageBudget).toBe(0);
+    expect(first.events.length).toBeGreaterThan(0);
+    expect(first.events.every((e) => e.externalId.startsWith('order:'))).toBe(true);
+    expect(decodeCursor(first.nextCursor)).toMatchObject({ phase: 'invoices', page: 1 });
+    expect(ctx.logs.find((l) => l.event === 'ls_revenue')?.data).toMatchObject({ rateLimited: true });
+
+    const second = await ls.fetchRevenue(input(), { since: SINCE, cursor: first.nextCursor }, makeCtx(server.fetch));
+    expect(second.done).toBe(true);
+    expect(sorted([...byId([...first.events, ...second.events]).values()])).toEqual(sorted(EXPECTED));
   });
 
   it('re-anchors the page number when records were removed between runs (no skipped records)', async () => {
@@ -592,7 +853,7 @@ describe('lemonsqueezy fetchRevenue', () => {
     const ctx = makeCtx(server.fetch, { pageBudget: 20 });
     const second = await ls.fetchRevenue(input(), { since: SINCE, cursor: first.nextCursor }, ctx);
     expect(second.done).toBe(true);
-    expect(byId(second.events).get('order:5008:refund')?.amount).toBe(-300);
+    expect(byId(second.events).get('order:5008:refund')?.amount).toBe(-250);
     expect(pagesOf(server.calls, '/v1/orders')).toEqual([1, 2, 3, 2, 3]);
     expect(ctx.logs.some((l) => l.event === 'ls_page_drift')).toBe(true);
   });
@@ -636,16 +897,16 @@ describe('lemonsqueezy cursor helpers', () => {
   });
 
   it('decodeCursor rejects malformed input', () => {
+    const ok = { v: 2, since: 1, phase: 'invoices', page: 2, total: 7, pending: ['9'], orders: { '5': 0, '6': -1, '7': 900 }, complete: true };
+    const enc = (patch: Record<string, unknown>) => JSON.stringify({ ...ok, ...patch });
     expect(decodeCursor(null)).toBeNull();
-    expect(decodeCursor('{"v":2,"since":1,"phase":"orders","page":1,"total":null}')).toBeNull();
-    expect(decodeCursor('{"v":1,"since":1,"phase":"refunds","page":1,"total":null}')).toBeNull();
-    expect(decodeCursor('{"v":1,"since":1,"phase":"invoices","page":0,"total":null}')).toBeNull();
-    expect(decodeCursor('{"v":1,"since":1,"phase":"invoices","page":2,"total":7}')).toEqual({
-      v: 1,
-      since: 1,
-      phase: 'invoices',
-      page: 2,
-      total: 7,
-    });
+    expect(decodeCursor(enc({ v: 1 }))).toBeNull(); // v1 cursors don't carry checkout orders: restart
+    expect(decodeCursor(enc({ phase: 'refunds' }))).toBeNull();
+    expect(decodeCursor(enc({ page: 0 }))).toBeNull();
+    expect(decodeCursor(enc({ pending: [5] }))).toBeNull();
+    expect(decodeCursor(enc({ orders: { '5': 'zero' } }))).toBeNull();
+    expect(decodeCursor(enc({ orders: { '5': -2 } }))).toBeNull();
+    expect(decodeCursor(enc({ complete: 'yes' }))).toBeNull();
+    expect(decodeCursor(enc({}))).toEqual(ok);
   });
 });

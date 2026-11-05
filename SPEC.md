@@ -8,8 +8,8 @@
 
 ## 1. Özet
 
-Indie geliştiriciler gelirlerini birden fazla platformdan alır: web ürünü Stripe veya Lemon Squeezy ile,
-mobil uygulama RevenueCat ile satılır. Her platformun paneli, para birimi ve metrik tanımı farklıdır;
+Indie geliştiriciler gelirlerini birden fazla platformdan alır: web ürünü Stripe, Paddle, Lemon Squeezy,
+Polar, Chargebee, Dodo Payments veya Gumroad ile, mobil uygulama RevenueCat, Adapty veya Superwall ile satılır. Her platformun paneli, para birimi ve metrik tanımı farklıdır;
 "bu ay toplam ne kazanıyorum?" sorusunun cevabı bir hesap tablosunda kaybolur.
 
 **hoomuch** bu hesapları **salt-okunur API anahtarlarıyla** bağlar, verileri düzenli olarak çeker ve
@@ -41,7 +41,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | ID | İhtiyaç | Öncelik |
 |----|---------|---------|
 | F-01 | E-posta + parola ile kayıt, giriş, çıkış. `ALLOW_SIGNUP=false` iken kayıt kapalı | P0 |
-| F-02 | Bağlantı ekleme: **Stripe** (restricted key), **Lemon Squeezy** (API key, opsiyonel Store ID), **RevenueCat** (v2 secret key + Project ID) | P0 |
+| F-02 | Bağlantı ekleme: **Stripe** (restricted key), **Paddle** (izinli API key), **Lemon Squeezy** (API key, opsiyonel Store ID), **Polar** (organization access token), **RevenueCat** (v2 secret key + Project ID), **Chargebee** (read-only key + site), **Dodo Payments** (read izinli API key), **Gumroad** (access token), **Adapty** (secret key), **Superwall** (organization API key + Organization ID) | P0 |
 | F-03 | Kaydetmeden önce anahtarı canlı doğrulama; anlaşılır hata mesajı (yetki eksik, geçersiz anahtar, vb.) | P0 |
 | F-04 | Bağlantıları listeleme, yeniden adlandırma, anahtar yenileme, silme (onaylı; demo veri onaysız silinir ve flash'ta "Geri ekle" sunulur) | P0 |
 | F-05 | **Demo bağlantısı**: anahtarsız, deterministik örnek veri (çoklu para birimi, 90 gün geçmiş). İlk gerçek bağlantı demo veriyi kaldırır, böylece toplamlar gerçek paradır | P0 |
@@ -75,8 +75,9 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 
 ### 3.3 Kapsam dışı (v1)
 
-Takım/organizasyon hesapları · App Store Connect / Google Play doğrudan entegrasyonu · Paddle, Polar,
-Gumroad (adaptör arayüzü bunlara hazır) · kohort/LTV analizi · e-posta raporları · webhook'lar ·
+Takım/organizasyon hesapları · App Store Connect / Google Play doğrudan entegrasyonu · Creem (API'si gelir
+geçmişine yetmiyor, §6.9) · Whop, Recurly, FastSpring (anahtar kapsamı, kişisel veri veya asenkron rapor
+zorunluluğu nedeniyle ertelendi) · kohort/LTV analizi · e-posta raporları · webhook'lar ·
 OAuth (Stripe Connect) ile bağlama · tarihsel döviz kuru ile geriye dönük çevrim.
 
 ---
@@ -90,8 +91,15 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
                     ├─ D1 (SQLite) ─ users, sessions, connections, snapshots,
                     │                transactions, daily_revenue, fx_rates, sync_runs
                     └─ scheduled()  ──▶ sync engine ──▶ Stripe API
+                                                   ├──▶ Paddle Billing API
                                                    ├──▶ Lemon Squeezy API
+                                                   ├──▶ Polar API
                                                    ├──▶ RevenueCat API v2
+                                                   ├──▶ Chargebee API v2
+                                                   ├──▶ Dodo Payments API
+                                                   ├──▶ Gumroad API
+                                                   ├──▶ Adapty Export Analytics API
+                                                   ├──▶ Superwall API (charts + query)
                                                    └──▶ frankfurter.dev (ECB kurları)
 ```
 
@@ -140,7 +148,7 @@ Günde bir kez FX kurları yenilenir.
 
 ## 5. Veri modeli (D1)
 
-Kaynak: [`migrations/0001_init.sql`](migrations/0001_init.sql). Özet:
+Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kaynağı; `0003` `connections.provider` üzerindeki CHECK'i kaldırır, geçerli kimlikleri `isProviderId` denetler). Özet:
 
 | Tablo | Anahtar | Amaç |
 |-------|---------|------|
@@ -188,7 +196,7 @@ yalnızca bugünün snapshot'ını ve son 2 günü yeniler; geçmişi düzeltmek
 | **ARR** | MRR × 12 |
 | **Aktif abonelik** | Ücretli aktif abonelik sayısı (past_due dahil, deneme hariç) |
 | **Aktif deneme** | Deneme süresindeki abonelik sayısı |
-| **Dönem geliri** | Seçili pencerede `daily_revenue` toplamı: brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). |
+| **Dönem geliri** | Seçili pencerede `daily_revenue` toplamı: brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
 | **Değişim %** | MRR/abonelik/deneme: pencerenin başındaki en yakın snapshot'a göre. Gelir: bir önceki eşit uzunluktaki pencereye göre. Veri yoksa `null` (UI'da "—"). |
 
 **Aylığa normalize:** `day → ×365/12`, `week → ×52/12`, `month → ×1`, `year → ×1/12`; hepsi `interval_count`'a bölünür.
@@ -201,17 +209,24 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
 
 - **Kimlik:** Restricted key (`rk_live_…`) önerilir; `sk_…` kabul edilir ama uyarı gösterilir. `*_test_*` anahtarlar test modu olarak etiketlenir.
 - **Sürüm:** `Stripe-Version: 2026-10-28.endive` sabitlenir.
-- **Gerekli izinler (read):** Subscriptions, Prices, Coupons, Balance (balance transactions). Coupons izni yoksa
-  MRR indirimsiz hesaplanır ve uyarı gösterilir.
-- **Doğrulama:** `GET /v1/subscriptions?limit=1` ve `GET /v1/balance_transactions?limit=1`.
-- **MRR:** `GET /v1/subscriptions?status=active` ve `status=past_due` (sayfalı, `limit=100`, `expand[]=data.discounts`).
-  Her item: `price.recurring.{interval, interval_count}`, `price.unit_amount` (yoksa `unit_amount_decimal`), `quantity`.
-  `usage_type=metered` olanlar hariç, kademeli (tiered) fiyatlar 0 sayılır. Bu API sürümünde indirim yalnızca kupon ID'si
-  taşır; kupon `GET /v1/coupons/{id}` ile çekilip (çalışma başına önbellek) `percent_off`/`amount_off` uygulanır.
-  Para birimi: `subscription.currency`. Sayfa bütçesiyle ~7.000 aktif aboneliğe kadar okunur.
-- **Deneme:** `status=trialing` sayısı.
+- **Gerekli izinler (read):** Subscriptions, Prices, Coupons, Balance (balance transactions). Coupons izni yoksa MRR indirimsiz hesaplanır ve doğrulamada uyarı gösterilir. Tax Rates izni gerekmez: vergi oranları aboneliğin içinde gelir.
+- **Doğrulama:** `GET /v1/subscriptions`, `/v1/prices`, `/v1/balance_transactions` ve `/v1/coupons` (hepsi `limit=1`). İlk üçünden 403 gelirse eksik izin adıyla hata verilir; coupons'tan 403 gelirse anahtar kabul edilir ve uyarı gösterilir.
+- **MRR:** `GET /v1/subscriptions?status=active` ve `status=past_due` (sayfalı, `limit=100`, `expand[]=data.discounts` ve `data.items.data.discounts`).
+  Her item: `price.recurring.{interval, interval_count}`, `price.unit_amount` (yoksa `unit_amount_decimal`), `quantity`. `usage_type=metered` olanlar ve deneme teklifi
+  süren (`current_trial`) item'lar hariç. Kademeli (tiered) fiyatlar `GET /v1/prices/{id}?expand[]=tiers` ile (çalışma başına önbellek) hesaplanır: `volume`: tüm adet,
+  düştüğü kademenin birim fiyatıyla + o kademenin `flat_amount`'u; `graduated`: her dilim kendi kademesinin fiyatıyla + ulaşılan her kademenin `flat_amount`'u (adet 0
+  ise ilk kademenin `flat_amount`'u). Bu API sürümünde indirim yalnızca kupon ID'si taşır; kupon `GET /v1/coupons/{id}` ile çekilip (çalışma başına önbellek)
+  `percent_off`/`amount_off` uygulanır. Vergi hariçtir: item'ın `tax_rates`'i (yoksa aboneliğin `default_tax_rates`'i) içindeki `inclusive` oranlar, indirimlerden sonra
+  `tutar / (1 + Σ oran)` ile çıkarılır. Stripe Tax (`automatic_tax`) açıksa oran bilinmez; vergi dahil fiyat olduğu gibi kalır ve loglanır. Müşteri düzeyindeki
+  indirimler uygulanmaz (Customers izni müşteri kişisel verisini açar). Para birimi: `subscription.currency`. Sayfa bütçesiyle ~7.000 aktif aboneliğe kadar okunur.
+- **Aktif abonelik:** MRR'ı 0'dan büyük `active` + `past_due` abonelikler (Stripe'ın tanımı). Ücretsiz plan, %100 indirimli, yalnızca metered ya da yalnızca deneme
+  teklifli abonelikler sayılmaz. Stripe müşteri sayar, hoomuch abonelik sayar.
+- **Deneme:** `status=trialing` abonelikler (eski `trial_end` denemesi 1 sayılır; ücretsiz deneme tekliflerinden oluşan abonelikte her teklifli item ayrı sayılır) +
+  `active`/`past_due` aboneliklerde deneme teklifi süren her item.
 - **Gelir:** `GET /v1/balance_transactions?created[gte]=…` — `charge`/`payment` → charge (brüt `amount`, `fee`);
-  `refund`/`payment_refund` → refund (negatif). Para birimi: bakiye (settlement) para birimi.
+  `refund`/`payment_refund` → refund (negatif). Para birimi: bakiye (settlement) para birimi. Tutar tahsil edildiği gibidir (vergi dahil; §6).
+  Kısmi capture'da tam yetkilendirme `charge`, yakalanmayan kısım `refund` (`partial_capture_reversal`) olarak gelir; brüt ve iadeler biraz yüksek, net doğrudur.
+  Test clock'a bağlı abonelikler listelenmez.
 - **Tutar birimi** ([currencies](https://docs.stripe.com/currencies#zero-decimal)): Stripe tamsayıları ISO minor unit ile
   aynıdır, üç istisna `fromStripeAmount` ile çevrilir: MGA Stripe'ın sıfır ondalıklı listesinde (ISO 2 → ×100); ISK ve UGX
   "geriye uyumluluk için" iki ondalıklı gönderilir, 5 ISK = `500` (ISO 0 → ÷100). UGX sıfır ondalıklı listede de geçiyor;
@@ -224,22 +239,45 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
 - **Taban:** `https://api.lemonsqueezy.com/v1`, JSON:API (`Accept: application/vnd.api+json`), `Authorization: Bearer`.
 - **Kimlik:** API key (tam yetkili — UI'da uyarı gösterilir). Opsiyonel Store ID; boşsa anahtarın erişebildiği tüm mağazalar.
 - **Doğrulama:** `GET /v1/users/me` + `GET /v1/stores` (mağaza para birimleri `config`'e yazılır).
-- **MRR:** `GET /v1/subscriptions?filter[store_id]=…` (sayfalı, `page[size]=100`);
+- **MRR:** `GET /v1/subscriptions?filter[store_id]=…&filter[status]=…` (sayfalı, `page[size]=100`);
   `status ∈ {active, past_due}` ve `status=cancelled` iken `ends_at > now` → `first_subscription_item.price_id` →
-  `GET /v1/prices/{id}` (çalışma başına önbellek) → `unit_price × quantity`, `renewal_interval_unit/quantity` ile normalize.
-  Para birimi: mağazanın para birimi (`config.storeCurrencies`). `test_mode=true` kayıtlar hariç.
+  `GET /v1/prices/{id}` (çalışma başına önbellek) → `unit_price × quantity` (package: paket sayısı × `unit_price`;
+  volume/graduated: `tiers`), `renewal_interval_unit/quantity` ile normalize. Kademesi olmayan volume/graduated ve
+  usage-based fiyatlar fiyatlandırılamaz (MRR'a eklenmez, abonelik aktif sayılır).
+  İptal edilmiş ama denemeden hiç çıkmamış abonelik (LS iptalde `trial_ends_at`'i boşaltır): `first_subscription_item = null`
+  ya da `ends_at`, `created_at` + fiyatın `trial_interval_*` süresine denk geliyorsa → deneme sayılır, MRR'a girmez.
+  **İndirim:** `GET /v1/discounts?filter[store_id]=…` → `duration ∈ {forever, repeating}` olanlar için
+  `GET /v1/discount-redemptions?filter[discount_id]=…`; redemption'ın `order_id`'si aboneliğin `order_id`'si ise
+  redemption'daki `discount_amount`/`discount_amount_type` (percent | fixed, her ödemeden) dönem tutarına uygulanır.
+  `repeating` yalnızca redemption'dan itibaren `duration_in_months` dolana kadar; `once` MRR'ı etkilemez.
+  Sayfa bütçesi yetmezse MRR indirimsiz hesaplanır ve loglanır (kısmi uygulama yok).
+  Para birimi: mağazanın para birimi (`config.storeCurrencies`). Anahtarın moduna uymayan `test_mode` kayıtları hariç.
 - **Test modu:** `GET /v1/users/me` yanıtındaki `meta.test_mode`.
-- **Deneme:** `status=on_trial`.
-- **Gelir:** `GET /v1/orders` (`status ∈ {paid, refunded, partial_refund}`) → charge (`total`); `refunded_amount > 0` → refund olayı (`refunded_at`).
-  `GET /v1/subscription-invoices` içinde `billing_reason ∈ {renewal, updated}` → charge. `initial` fatura siparişle aynı
-  tahsilattır ve hariç tutulur; **istisna:** abonelikten 1 saatten fazla sonra kesilen `initial` fatura (deneme sonrası ilk
-  tahsilat) sayılır. Geç gelen iadeleri yakalamak için her senkronizasyon 30 gün geriye bakar.
-- **Limit:** 300 istek/dk.
+- **Deneme:** `status=on_trial` + yukarıdaki iptal edilmiş denemeler.
+- **Gelir (vergi hariç):** LS satıcının yerine satış yapan taraftır (merchant of record); KDV/satış vergisi satıcının parası değildir.
+  `GET /v1/orders` (`status ∈ {paid, refunded, partial_refund}`) → charge (`total − tax`);
+  `GET /v1/subscription-invoices` içinde `billing_reason ∈ {renewal, updated}` → charge (`total − tax`).
+  `initial` fatura: aboneliğin checkout siparişi (`subscription.order_id`) `total > 0` ise aynı tahsilattır ve hariç
+  tutulur; `$0` checkout (ücretsiz deneme) ise deneme sonrası ilk gerçek tahsilattır ve sayılır. Sipariş taramada
+  görülmediyse `GET /v1/orders/{id}` ile bakılır (bütçe yetmezse imleç bir sonraki senkronizasyonda devam eder).
+  İade: kayıt başına tek olay, sabit kimlik; tutar kümülatif `refunded_amount × (total − tax) / total`; tarih
+  `refunded_at` (yalnızca tam iadede dolu), yoksa `updated_at`. Birden çok kısmi iade tek olayda birleşir ve son
+  değişiklik tarihine taşınır. Geç gelen iadeleri yakalamak için her senkronizasyon 30 gün geriye bakar.
+  Tutarlar mağaza para birimindedir; LS tahsilatı USD olarak işler (`*_usd` alanları), aradaki kur farkı yansıtılmaz.
+  Bu sürümden önce senkronize edilmiş ve 30 günlük geri bakışın dışında kalan LS geçmişi vergi dahil kalır (motor eski
+  satırları silmez); geçmişi yeniden hesaplamak için bağlantı silinip yeniden eklenir.
 - **Tutar birimi:** Belgeler yalnızca "in cents" der ve iki ondalıklı olmayan para birimleri için ne anlama geldiğini
   söylemez. Tutarlar ISO minor unit kabul edilir (JPY/KRW tam, HUF/IDR yüzde birlik); ISK, UGX ve MGA doğrulanmadı.
-- ✅ **Doğrulandı:** order ↔ `initial` invoice aynı para ([webhook olayları](https://docs.lemonsqueezy.com/help/webhooks/event-types));
-  `prices` alanları `scheme`, `unit_price`, `unit_price_decimal`, `package_size`, `tiers`, `renewal_interval_*`
-  ([price object](https://docs.lemonsqueezy.com/api/prices/the-price-object)).
+- **Limit:** 300 istek/dk, `Retry-After` yok. 429'da yeniden denenmez: gelir okuduğunu ve imleci döndürür, snapshot başarısız olur.
+- ✅ **Doğrulandı:** `prices` alanları `scheme`, `unit_price` (volume/graduated'da kullanılmaz), `unit_price_decimal`,
+  `package_size`, `tiers`, `renewal_interval_*`, `trial_interval_*` ([price object](https://docs.lemonsqueezy.com/api/prices/the-price-object));
+  denemede `trial_ends_at` / `first_subscription_item` davranışı ([subscription object](https://docs.lemonsqueezy.com/api/subscriptions/the-subscription-object));
+  indirim ve redemption alanları ([discount object](https://docs.lemonsqueezy.com/api/discounts/the-discount-object));
+  USD işleme ([para birimleri](https://docs.lemonsqueezy.com/help/payments/currencies)).
+- ⚠️ **Çıkarım (belgelenmemiş):** order ↔ `initial` invoice'ın aynı para olduğu, checkout webhook sırasından
+  (`order_created` + `subscription_created` + `subscription_payment_success`) çıkarılmıştır
+  ([webhook olayları](https://docs.lemonsqueezy.com/help/webhooks/event-types)); bu yüzden karar zamanlamaya değil checkout siparişinin tutarına dayanır.
+- **Durum (2026-01):** LS, satıcıları Stripe Managed Payments'a taşımayı hedeflediğini duyurdu; API için kapanış tarihi yok.
 
 ### 6.3 RevenueCat
 
@@ -259,6 +297,212 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
 Anahtar yok. `verify` sırasında üretilen `config.seed` ile tohumlanan deterministik veri: USD + EUR + GBP, 90 günlük geçmiş, yavaş büyüyen
 MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, daily_revenue) geçer.
 
+### 6.5 Paddle
+
+- **Taban:** `https://api.paddle.com` (canlı), `https://sandbox-api.paddle.com` (sandbox); ortam anahtarın önekinden seçilir. `Authorization: Bearer`, `Paddle-Version: 1` sabitlenir.
+- **Kimlik:** API key, `^pdl_(live|sdbx)_apikey_[a-z\d]{26}_[a-zA-Z\d]{22}_[a-zA-Z\d]{3}$` (69 karakter). `pdl_sdbx_` anahtarlar test modu olarak etiketlenir. 6 Mayıs 2025'ten önceki "legacy" anahtarlar (50 küçük harf/rakam) izinle sınırlandırılamadığı için reddedilir; Paddle.js client-side token'ları (`live_…`/`test_…`) ayrı mesajla açıklanır. Anahtarlar son kullanma tarihi taşıyabilir (varsayılan 90 gün, en fazla 1 yıl); süresi dolan anahtar yenilenemez, bağlantı hata gösterir ve yeni anahtar yapıştırılır.
+- **İzinler (read):** `subscription.read`, `transaction.read`, `adjustment.read` zorunlu; `metrics.read` canlıda zorunlu (sandbox'ta abonelik metrikleri yok). `discount.read` opsiyonel (yalnızca MRR tahmininde kullanılır; yoksa uyarı). `x.write`, `x.read`'i kapsar; anahtarda herhangi bir `.write` izni varsa "salt-okunur anahtar daha güvenli" uyarısı gösterilir.
+- **Doğrulama:** Tek istek: `GET /` (izin gerektirmez) → `data.caller.account` (null ise anahtar geçersiz), `data.caller.permissions`, `data.api.environment`. Eksik zorunlu izinlerin hepsi tek mesajda sayılır. Etiket: `caller.account.name` (sandbox'ta "(sandbox)" eki). `GET /account` kullanılmaz: hesap e-postasını döner ve `account.read` ister.
+- **Hatalar:** Geçersiz/iptal edilmiş anahtar 401 değil **403 `invalid_token`** döner → `auth`; `forbidden` → eksik izin adıyla `permission`; `paddle_billing_not_enabled` → "Paddle Classic desteklenmez"; `not_available_in_sandbox` (404) → `not_found`.
+- **MRR (canlı):** `GET /metrics/monthly-recurring-revenue?from=<bugün−7>&to=<yarın>` → zaman damgası `data.updated_at`'i geçmeyen en yeni nokta (henüz hesaplanmamış günler 0 sayılmaz). Paddle'ın kendi tanımıdır: hesabın bakiye para biriminde (tek para birimi), tek seferlik ödemeler hariç, veri 24 saatte bir yenilenir (en fazla ~1 gün eski). past_due ve vergi muamelesi belgelenmemiştir. Yenilenmiş bir `"0"` noktası MRR 0 demektir; seri boşsa ya da uç nokta 403/404/400 dönerse tahmine düşülür.
+- **MRR (tahmin: sandbox, `metrics.read` yok ya da veri yok):** `GET /subscriptions?status=active,past_due&per_page=200` (sayfalı, `after`, `Skip-Count: true`). Her item: `recurring=false`, `status ∈ {trialing, inactive}` ve `billing_cycle=null` olanlar hariç; `price.unit_price.amount × quantity`, `price.billing_cycle {interval, frequency}` ile normalize. Fiyat aboneliğin `currency_code`'unda değilse, o para birimindeki `unit_price_overrides` tek bir tutarda birleşiyorsa o kullanılır; aksi hâlde item hariç tutulur ve loglanır (müşterinin ülkesi adreste, adres okunmaz). İndirim: `subscription.discount` (`type=one-off` ve `ends_at ≤ now` hariç) → `GET /discounts?id=…&status=active,archived` (50'lik gruplar; bulunamayanlar için bir kez `mode=custom`). `recur=false` yok sayılır; `percentage` oranla, `flat` her yenilemede (aylığa normalize, tutarla sınırlı, oransal dağıtılır), `flat_per_seat` adet başına uygulanır; `restrict_to` ürün/fiyat ID'leriyle sınırlar; başka para birimindeki flat indirim uygulanmaz. `discount.read` yoksa MRR indirimsiz hesaplanır ve loglanır. **Sınır:** vergi dahil fiyatlarda (`tax_mode=internal` vb.) liste fiyatı vergiyi içerir; bu yolda "MRR vergi hariç" kuralı tam sağlanamaz. Bütçe biterse hata verilir (kısmi MRR yazılmaz).
+- **Aktif abonelik:** Canlıda `GET /subscriptions?status=active,past_due&per_page=1` → `meta.pagination.estimated_total` (100.000'e kadar tam; `-1` gelirse sayfalayarak sayılır). Tahmin yolunda Stripe gibi MRR'ı 0'dan büyük abonelikler sayılır (fiyatlanamayan item'ı olan abonelik de sayılır; ücretsiz, %100 indirimli ve yalnızca deneme item'lı olanlar sayılmaz). Metrik yolu Paddle'ın sayısını kullandığından ücretsiz/%100 indirimli abonelikleri de içerir.
+- **Deneme:** `status=trialing` → `estimated_total`.
+- **Gelir:** Faz 1: `GET /transactions?status=completed&updated_at[GTE]=<since>&order_by=id[DESC]&per_page=30` (`Skip-Count: true`, `include` yok) → charge: `details.totals.grand_total − grand_total_tax` (kredi uygulanmışsa vergi de orantılı düşer), `fee` = `details.totals.fee`, para birimi `details.totals.currency_code`, tarih = son `captured` ödemenin `captured_at`'i (yoksa `billed_at`). `billed_at` yerine `updated_at` ile süzülür: dunning'de geç tahsil edilen yenileme eski `billed_at`'ini korur ama tamamlanınca `updated_at` güncellenir. `since`'ten önce tahsil edilmiş ya da tutarı ≤ 0 olanlar atlanır. Açıklama: ilk katalog (`standard`) ürünün adı; `custom` ürün adları satışa özel olduğu için kullanılmaz. Faz 2: `GET /adjustments?action=refund,chargeback,chargeback_reverse&status=approved,reversed&per_page=50` (tarih filtresi yok, en yeniden) → `refund`/`chargeback` negatif, `chargeback_reverse` pozitif; tutar `totals.total − totals.tax` (yalnızca vergi iadesi atlanır). İade tarihi `updated_at` (onay anı), chargeback tarihi `created_at` (geri alınınca `updated_at` değişir; `reversed` chargeback ile ayrı gelen geri alma birbirini netler). `credit` sayılmaz (müşteri bakiyesine gider, sonraki işlemin `grand_total`'ını düşürür). `created_at < since − 30 gün` olan kayda ulaşınca durulur. Cursor `{since, phase, after}`; 429'da o ana kadar okunan olaylar ve cursor döner.
+- **Limit:** IP başına 240 istek/dk; aşılınca IP 60 sn bloklanır → `rateLimit: 'yield'` (bekleme/yeniden deneme yok). Cloudflare Workers çıkış IP'leri paylaşımlıdır.
+- ✅ **Doğrulandı (2026-11-05):** anahtar biçimi ve taban URL'ler ([authentication](https://developer.paddle.com/api-reference/about/authentication)), `GET /` alanları ([api root](https://developer.paddle.com/api-reference/api-root/get-api-root)), izin adları ([permissions](https://developer.paddle.com/api-reference/about/permissions)), hata kodları ([invalid_token](https://developer.paddle.com/errors/shared/invalid_token)), rate limit ([rate limiting](https://developer.paddle.com/api-reference/about/rate-limiting)), sayfalama / `Skip-Count` / `estimated_total` ([pagination](https://developer.paddle.com/api-reference/about/pagination)), MRR uç noktası ([metrics](https://developer.paddle.com/api-reference/metrics/get-metrics-monthly-recurring-revenue)), transaction / adjustment / discount / subscription alanları. **Doğrulanmadı:** metrik MRR'ın past_due ve vergi muamelesi; gelecekteki `to` tarihinin kabulü (400 dönerse tahmine düşülür); `GET /discounts?id=` varsayılanının custom indirimleri döndürüp döndürmediği; chargeback kayıtlarının `status` değeri ve `chargeback_reverse` tutar işareti (mutlak değer alınır).
+
+### 6.6 Polar
+
+- **Taban:** `https://api.polar.sh/v1` (production) ve `https://sandbox-api.polar.sh/v1` (sandbox), `Authorization: Bearer polar_oat_…`. Yollar `/` ile biter.
+- **Sürüm:** `Polar-Version: 2026-10` sabitlenir. Polar her çeyrek (Ocak/Nisan/Temmuz/Ekim'in ilk haftası) yeni sürüm çıkarır ve "Deprecated" sürümü kaldırır;
+  2026-10 Nisan 2027'nin ilk haftasında kalkar. Kaldırılmış sürüm 404 döner ve "hoomuch'u güncelleyin" hatası gösterilir; sabit sürüm o tarihten önce yükseltilmelidir.
+- **Kimlik:** Organization Access Token (`polar_oat_…`), tek organizasyona bağlıdır. Token sandbox/production ayrımını göstermez: doğrulama önce production'ı,
+  401 alırsa sandbox'ı dener ve sonucu `config.environment`'a yazar; sandbox test modu olarak etiketlenir. Kişisel token (`polar_pat_…`) reddedilir.
+- **Gerekli izinler (scope):** `metrics:read`, `subscriptions:read`, `orders:read`, `refunds:read`. Eksik scope 403 `insufficient_scope` döner; hata scope adıyla gösterilir.
+- **Doğrulama:** `GET /v1/subscriptions/?limit=1` (ortam tespiti), `GET /v1/metrics/` (bugün), `GET /v1/orders/?limit=1`, `GET /v1/refunds/?limit=1`: 4 istek (sandbox'ta 5).
+- **MRR:** `GET /v1/metrics/?start_date=bugün&end_date=bugün&interval=day&timezone=UTC&metrics=monthly_recurring_revenue` → son periyodun değeri (yoksa `totals`).
+  Polar'ın panel MRR'ıdır: indirim sonrası, vergi dahil fiyatlarda KDV çıkarılmış net tutar, aylığa normalize; denemeler hariç, `past_due` ve dönem sonu iptaller dahil.
+  Polar tutarları settlement para birimine (bugün tüm organizasyonlarda USD) kendi kayıtlı kurlarıyla çevirir → MRR `{USD: …}`. **Fark:** Polar `paused`
+  abonelikleri de sayar (net tutarları API'de olmadığından çıkarılamaz). Eksik metrik yanıtı sıfır MRR snapshot'ı **yazmaz**. Abonelik `amount` alanı vergi dahil
+  fiyatlarda KDV içerdiği için (Polar'ın varsayılan "location-based" ayarı ABD/Kanada/Hindistan dışında fiyatı vergi dahil yapar) MRR abonelik listesinden hesaplanmaz.
+- **Aktif abonelik:** `GET /v1/subscriptions/?status=active&status=past_due&sorting=amount&sorting=started_at&limit=100` → `pagination.total_count` − `amount = 0`
+  olanlar. Liste tutara göre sıralı olduğundan yalnızca 0 tutarlı abonelik içeren sayfalar okunur (genelde 1 istek). Stripe'taki gibi ücretsiz, %100 indirimli ve
+  yalnızca metered abonelikler sayılmaz. Metrics'teki `active_subscriptions` denemeleri ve 0 tutarlıları da saydığı için kullanılmaz.
+- **Deneme:** `GET /v1/subscriptions/?status=trialing&limit=1` → `pagination.total_count`.
+- **Gelir:** `GET /v1/orders/?created_after=…&created_before=…&status=paid&status=refunded&status=partially_refunded&sorting=created_at` → charge
+  (`net_amount + applied_balance_amount`: indirim sonrası, vergi öncesi, müşteri bakiyesinden ödenen kısım düşülmüş; Polar'ın iade tabanıyla aynı, tam iade sıfırlar),
+  `fee` = `platform_fee_amount` (yalnızca sipariş para birimindeyse), açıklama = ürün adı. `GET /v1/refunds/?sorting=-created_at` → `status=succeeded` iadeler
+  refund olur (`amount`, vergi öncesi, negatif); yalnızca vergi iadeleri (`amount = 0`) sayılmaz. Para birimi: kaydın kendi para birimi. Polar başarısız yenileme
+  siparişini 21 güne kadar yeniden dener (sipariş `pending` kalır) ve iadeler bekleyebilir; bu yüzden her senkronizasyon siparişlerde ve iadelerde 30 gün geriye bakar.
+  Sipariş penceresi ilk çağrıda dondurulur (eskiden yeniye; sayfalar kaymaz), iadeler yeniden eskiye okunur ve `total_count` ile sayfa yeniden konumlanır.
+  Bütçe bitince ya da 429'da imleç döner.
+- **Kişisel veri:** abonelik, sipariş ve iade yanıtları müşteri e-postası, adı ve adresini içerir; yalnızca id, tutar, para birimi, zaman ve ürün adı okunur.
+- **Limit:** 500 istek/dk (sandbox 100); 429'da `Retry-After`.
+- ✅ **Doğrulandı:** uç noktalar, filtreler, scope adları ve alanlar ([OpenAPI 2026-10](https://polar.sh/docs/openapi/2026-10.openapi.json),
+  [API Overview](https://polar.sh/docs/api-reference/2026-10/introduction), [Versioning](https://polar.sh/docs/api-reference/2026-10/versioning),
+  [Analytics](https://polar.sh/docs/features/analytics), [Failed payments](https://polar.sh/docs/features/subscriptions/failed-payments)).
+  MRR'ın USD'ye çevrildiği ve abonelik `amount`'unun vergi dahil olduğu Polar'ın açık kaynak sunucusundan ([polarsource/polar](https://github.com/polarsource/polar))
+  doğrulandı. Canlı API çağrısı yapılmadı.
+
+### 6.7 Dodo Payments
+
+- **Taban:** `https://live.dodopayments.com` (canlı) ve `https://test.dodopayments.com` (test), `Authorization: Bearer`.
+  Liste uçları `page_number` (0'dan) + `page_size` (en çok 100) ile sayfalanır, yalnızca `{items}` döner; kısa sayfa son sayfadır.
+- **Kimlik:** Kaynak bazında None/Read/Write izinli API anahtarı. `dodo_live_…` / `dodo_test_…` öneki modu belirler. Önekten
+  önceki eski anahtarlarda önce canlı, 401 gelirse test sunucusu denenir; mod `config.testMode`'a yazılır ve bu anahtarlar yazma
+  yetkili olabileceği için uyarı gösterilir. IP allowlist'li anahtarlar çalışmaz (Workers'ın sabit IP'si yok).
+- **Gerekli izinler (read):** Subscriptions, Balances.
+- **Doğrulama:** `GET /subscriptions?page_size=1` + `GET /balances/ledger?page_size=1` (eski anahtarda en çok 3 istek).
+  403 `INSUFFICIENT_PERMISSION` mesajındaki kapsam (ör. `balances:read`) gösterilir; `IP_ADDRESS_NOT_ALLOWED` ve
+  `MERCHANT_NOT_LIVE` (canlı ödemeleri açılmamış işletme) için ayrı mesaj.
+- **MRR:** `GET /subscriptions?status=active` ve `status=past_due` (`page_size=100`). `recurring_pre_tax_amount` (minor unit,
+  vergi öncesi, ödeme başına; `quantity` ile çarpılmaz) `payment_frequency_interval/count` ile normalize edilir
+  (`subscription_period_*` vadedir, fatura sıklığı değil). `past_due` (işletmenin açtığı grace period: müşteri erişimi sürer,
+  yeniden denemeler devam eder) dahil; `on_hold` (yenileme durdu, erişim kesildi), `paused`, `pending`, `cancelled`, `failed`,
+  `expired` hariç. `cancel_at_next_billing_date=true` olan aktif abonelik dönem sonuna kadar sayılır. Tutarı 0 olanlar
+  (salt kullanım bazlı, %100 indirim) ve `on_demand` abonelikler MRR'a ve aktif sayıya girmez. `tax_inclusive=true` tutarlar
+  vergi dahildir ve olduğu gibi sayılır (API oran vermez; log'lanır). Para birimi: `subscription.currency`.
+  Sayfa bütçesiyle ~8.000 aboneliğe kadar okunur.
+- **Deneme:** `trialing` durumu yoktur. `trial_period_days > 0` ve `next_billing_date ≤ created_at + trial_period_days (+1 saat)`
+  → deneme (ücretli deneme dahil; belgelerin önerdiği kontrol). `next_billing_date` ileri alınarak uzatılan deneme ücretli sayılır.
+- **Gelir:** `revenueHistory = 'daily'`. Ödeme listesinde vergi yoktur (yalnızca `GET /payments/{id}`), bu yüzden kaynak bakiye
+  defteridir: `GET /balances/ledger?created_at_gte=…&created_at_lte=…`, `since`'in UTC gece yarısından itibaren 7 günlük
+  dilimlerle yeniden eskiye. Dilim tamamen okununca günleri yazılır; cursor dilimin ara toplamlarını taşır; 429'da çağrı
+  cursor'la biter. Gün × cüzdan para birimi (USD/EUR/GBP): `gross = payment − tax`,
+  `refunds = refund − refund_reversal + dispute − dispute_reversal − tax_reversal`; negatif kalan taraf diğerine aktarılır
+  (`gross − refunds` değişmez). Açık/kaybedilen itirazlar iade sayılır, kazanılanın reversal'ı bunu geri alır. Komisyonlar,
+  payout, Dodo kredileri, düzeltmeler, kur farkı ve rezervler hariç. Hareketsiz okunan günler 0 USD yazılır. Transactions
+  sayfasında satır yoktur.
+- **Limit:** İşletme başına (tüm anahtarlar ortak) 40 istek/sn, 240 istek/dk; 429'da `Retry-After` yok.
+- ✅ **Doğrulandı:** hostlar, önekler, izin hataları ([API reference](https://docs.dodopayments.com/api-reference/introduction),
+  [error codes](https://docs.dodopayments.com/api-reference/error-codes)); abonelik alanları ve durumları
+  ([list subscriptions](https://docs.dodopayments.com/api-reference/subscriptions/get-subscriptions-1),
+  [subscriptions](https://docs.dodopayments.com/features/subscription)); ödeme listesinde vergi olmadığı
+  ([list payments](https://docs.dodopayments.com/api-reference/payments/get-payments)); defter olay türleri ve yönleri
+  ([ledger](https://docs.dodopayments.com/api-reference/balance-ledger/list-ledger-entries),
+  [balances](https://docs.dodopayments.com/features/account-summary-payout-wallet), [reports](https://docs.dodopayments.com/features/reports)).
+- ⚠️ **Doğrulanmadı:** defter `amount` biriminin minor unit olduğu; izin adının "Balances" olduğu; test modunda defterin dolu
+  olduğu; `recurring_pre_tax_amount`'un eklenti/indirim içerdiği; sayfalama sırasının kararlılığı.
+
+### 6.8 Chargebee
+
+- **Taban:** `https://{site}.chargebee.com/api/v2`, HTTP Basic (kullanıcı adı = API anahtarı, parola boş). API v2, Product Catalog 2.0.
+  `site` alanı tek bir DNS etiketine indirgenir (`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`; yapıştırılan `https://acme.chargebee.com/…` → `acme`),
+  böylece anahtar başka bir hosta gidemez. `-test` ile biten site test modu olarak etiketlenir.
+- **Kimlik:** Read-Only Key: "All" ya da "Restricted" + "Allow read-only access to transactional data". Yalnızca GET yaptığımız için
+  tam yetkili bir anahtar ayırt edilemez; form salt-okunur anahtar ister.
+- **Doğrulama:** `GET /subscriptions?limit=1` + `GET /transactions?limit=1`. 401 → apiKey; 403 `api_authorization_failed` → apiKey
+  (eksik izin adıyla); 404 `site_not_found` (ya da yönlendirme) → site alanı. Etiket: `Chargebee: acme (test)`.
+- **MRR:** `GET /subscriptions?status[in]=["active","non_renewing"]` (sayfalı, `limit=100`, `offset` = önceki `next_offset`) →
+  Chargebee'nin kendi `subscription.mrr` değeri toplanır (abonelik para birimi; vergi, kurulum ücreti ve tek seferlik ücretler hariç;
+  indirimler sitenin MRR ayarlarına göre). Böylece rakam satıcının Chargebee panelindekiyle aynıdır. `mrr` alanı hiç yoksa kalemlerden
+  hesaplanır: `plan` + `addon` kalemlerinin `amount` değeri, kalemin (multi-frequency) ya da aboneliğin `billing_period(_unit)` değeriyle
+  normalize edilir; `charge` kalemleri ve kalem denemesindekiler hariç, indirimler uygulanmaz. Chargebee'de past_due yoktur: dunning'deki
+  abonelik `active` kalır ve sayılır. `mrr = 0` olanlar ($0 plan, %100 indirim) ne MRR'a ne aktif aboneliğe girer. Liste sonuçları
+  eventually consistent olduğundan nesnenin kendi `status` değeri filtreye üstün gelir.
+- **Deneme:** `status[is]=in_trial` sayısı (API toplam vermez, sayfa sayfa sayılır).
+- **Gelir:** Chargebee merchant of record değildir: tahsil edildiği haliyle (vergi dahil, işlem para biriminde, gateway komisyonu yok —
+  API vermez). `GET /transactions?type[in]=["payment","refund","payment_reversal"]&updated_at[between]=[from,to]&date[after]=from−30 gün&sort_by[asc]=updated_at`
+  (Chargebee'nin önerdiği artımlı senkron). `payment` + `success` → charge; `refund` / `payment_reversal` + `success` → refund (negatif);
+  `payment` + `late_failure` → charge + `<txn>:late_failure` refund (`updated_at` anında). `in_progress`, `failure`, `voided`,
+  `needs_attention`, `timeout` ve `authorization` hariç. Kredi notları okunmaz (iade her zaman bir refund transaction'ıdır, çift sayım yok).
+  `date` yerine `updated_at` ile süzmek, 2–7 günde netleşen direct debit'leri ve geç başarısızlıkları yakalar. Pencere cursor'da donar;
+  429'da okunanlar korunur ve cursor döner.
+- **Para birimi:** Tutarlar "in cents" (ana birimin 1/100'ü); sıfır ondalıklı para birimleri (CLP, ISK, JPY, KRW, MGA, PYG, VND, XAF, XOF,
+  XPF) ana birimdedir. Hepsi hoomuch'un ISO 4217 minor unit'ine (`currencyExponent`) çevrilir: HUF, IDR gibi iki ondalıklılar olduğu gibi kalır; MGA (ISO 2) ×100.
+- **Limit:** Test siteleri ve Starter 150 istek/dk (Performance 1000, Enterprise 3500), satıcının kendi entegrasyonuyla paylaşılır.
+  Snapshot 429'da kısa Retry-After'ı bekler; gelir hemen bırakır ve sonraki senkronda devam eder.
+- ✅ **Doğrulandı:** filtreler, operatörler ve sayfalama ([list subscriptions](https://apidocs.chargebee.com/docs/api/subscriptions/list-subscriptions),
+  [list transactions](https://apidocs.chargebee.com/docs/api/transactions/list-transactions), [list operations](https://apidocs.chargebee.com/docs/api/list-ops));
+  `mrr` ve statüler ([subscription object](https://apidocs.chargebee.com/docs/api/subscriptions/subscription-object)); hata kodları ve
+  limitler ([error handling](https://apidocs.chargebee.com/docs/api/error-handling)); birimler ([currencies](https://apidocs.chargebee.com/docs/api/currencies),
+  [supported currencies](https://www.chargebee.com/docs/2.0/supported-currencies.html)); MRR tanımı
+  ([monthly recurring revenue](https://www.chargebee.com/docs/billing/2.0/reports-and-analytics/monthly-recurring-revenue));
+  geç başarısızlık davranışı ([late payment failures](https://www.chargebee.com/docs/payments/2.0/kb/billing/handling-chargebacks-and-late-payment-failures-in-chargebee)).
+- ⚠️ **Doğrulanmadı:** `updated_at[between]` + `date[after]` + `sort_by[asc]=updated_at` birleşimi canlı denenmedi (filtreler tek tek belgeli).
+
+### 6.9 Creem
+
+- **Durum:** v1'de **desteklenmiyor**; sağlayıcı listesinde yok. Belgeler doğru bir gelir hesabına yetmiyor:
+  - `GET /v1/transactions/search` yalnızca `customer_id`, `order_id`, `product_id`, `page_number`, `page_size` alır; tarih ve
+    durum filtresi yok (açıklama "date range, and status" dese de parametre tanımlı değil), sıralama belgelenmemiş.
+  - İadeler tarihlenemiyor: işlemde yalnızca `status` (`refunded`, `partialRefund`, `chargedBack`) ve `refunded_amount` var,
+    `refunded_at`/`updated_at` yok; iade listeleme ucu yok (yalnızca `POST /v1/refunds`); tarih yalnızca `refund.created` webhook'unda.
+  - `GET /v1/stats/summary?interval=day` günlük `grossRevenue`/`netRevenue` verir; net "komisyon ve vergi sonrası" (SPEC §6
+    komisyonu düşmez), brütün vergi/iade içeriği belgelenmemiş, para birimi yalnızca EUR/USD.
+- **Bilinenler:** `x-api-key`; `https://api.creem.io` / `https://test-api.creem.io`; geçersiz anahtar 403 döner; tahsilat
+  `amount_paid − tax_amount` (cent), `created_at` ms; abonelik durumları `active`, `trialing`, `past_due`, `scheduled_cancel`,
+  `unpaid`, `paused`, `canceled`; anahtarlar kısıtlanamaz (tam yetki).
+- **Açmak için:** işlemlerde tarih filtresi + belgelenmiş sıralama, ya da tarihli iade listesi; ya da `stats/summary` için
+  vergi hariç, komisyon dahil gelir tanımı.
+
+### 6.10 Gumroad
+
+- **Taban:** `https://api.gumroad.com/v2`, `Authorization: Bearer <access token>` (dokümandaki `access_token=` parametresi yerine başlık; token URL'ye ve loglara girmez).
+- **Kimlik:** Settings → Advanced → Applications'ta oluşturulan uygulamada "Generate access token" ile üretilen token. Bu formdan oluşturulan uygulama tüm public scope'ları alır (`account`, `edit_products`, `edit_sales` = iade, `view_sales`, …) ve token bunları taşır; daraltılamaz → **tam yetkili**, UI'da uyarı gösterilir. Token iptal edilene kadar geçerlidir. Gereken scope: `view_sales`.
+- **Doğrulama:** `GET /v2/user` (etiket: satıcının adı, yoksa profil URL'si) + `GET /v2/sales?after=<bugün>` (`view_sales` kontrolü). 401 → geçersiz token, 403 → eksik scope (gövde boş). Sandbox yok (`testMode=false`); test satın alımları ve test abonelikleri API'de listelenmez.
+- **Para:** Satıştaki tüm tutarlar **kanonik USD cent**'tir; `currency` yalnızca listeleme para birimidir. `price`, Gumroad'un merchant of record olarak tahsil ettiği vergiyi **içermez** (alıcıya üstüne eklenir). `tax_included_in_price=true` ise (eski, satıcının topladığı dahil vergi) `tax_cents` düşülür.
+- **MRR:** `GET /v2/products` (sayfalı) → üyelik ürünleri (`is_tiered_membership` ya da eski `subscription_duration`'lı abonelik) → her biri için `GET /v2/products/{id}/subscribers?paginated=true` (yalnızca aktif abonelikler, 100/sayfa). Abone nesnesinde **fiyat yoktur**; her ücretli abone **son tahsilatının** tutarıyla (USD) fiyatlanır: önce ürünün son 35 günlük satışları (`GET /v2/sales?product_id=…&after=…`, istek başına 10 satış; aylık yenilemeleri kapsar), bulunamayanlar için `GET /v2/sales/{son purchase_id}`. Son tahsilat upgrade proration'ı, $0 ya da başka periyottaysa veya bütçe yetmezse kademenin liste fiyatı kullanılır (`recurrence_prices.<recurrence>.price_cents`, ürün para birimi, indirimsiz); kademe bilinmiyor ve fiyatlar farklıysa en ucuz kademe (alt sınır) alınır ve loglanır. Liste fiyatı belirsiz aboneler önce sorgulanır. Normalize: `monthly ×1`, `quarterly ÷3`, `biannually ÷6`, `yearly ÷12`, `every_two_years ÷24`. Ürün/abone listeleri bütçeye sığmazsa snapshot yazılmaz.
+- **Aktif abonelik:** `alive`, `pending_cancellation` (dönem sonuna kadar), `pending_failure` (yenileme yeniden deneniyor; past_due gibi) ve `payment_method_update_required` durumundaki, tutarı > 0 olan aboneler. Ücretsiz kademeler ve `cancelled_at`/`ended_at`/`failed_at`'i geçmişte olanlar sayılmaz.
+- **Deneme:** `free_trial_ends_at > now` olan aboneler.
+- **Gelir:** `GET /v2/sales?after=<gün>` en yeniden eskiye, `page_key` ile (sabit 10 satış/sayfa, devam ettirilebilir cursor). `price > 0` her satış → charge (USD, `fee = gumroad_fee`, açıklama = ürün adı). `refunded`/`chargedback` → tam iade; `partially_refunded` → `price − amount_refundable_in_currency` (yalnızca USD listelemede; diğerlerinde atlanır ve loglanır). **API'de iade tarihi yok:** iade, ait olduğu satışın gününe yazılır (`<sale id>:refund`); satış günü bazında net doğrudur. Artımlı senkronizasyonlar geç iadeler için 30 gün geriye bakar; ilk backfill (pencere > 45 gün) bakmaz. $0 satışlar (ücretsiz ürün, deneme kaydı, paket kalemi) ve hediye kopyaları atlanır.
+- **Limit:** Okuma uçları için belgelenmiş limit yok; gelir 429'da cursor döndürür, snapshot kısa Retry-After'ı bekler.
+- ⚠️ **Yaklaşık:** MRR tam hesaplanamaz, çünkü abonenin ödediği tutar API'de yok. Son tahsilat tek seferlik indirimi, ilk tahsilattaki bahşişi veya bekleyen fiyat değişikliğini taşıyabilir; liste fiyatı yedeği indirim/PPP/PWYW/adet'i görmez. `purchase_ids` sırası belgelenmemiştir (son eleman en yeni kabul edilir).
+- ✅ **Doğrulandı:** uç noktalar, alanlar, abone durumları ([API](https://gumroad.com/api)); USD/vergi anlamı, sayfa boyutları, varsayılan scope'lar ve aktif abone filtresi açık kaynak koddan ([antiwork/gumroad](https://github.com/antiwork/gumroad)).
+
+### 6.11 Adapty
+
+- **Taban:** `POST https://api-admin.adapty.io/api/v1/client-api/metrics/analytics/` (Export Analytics API, "Retrieve analytics data"),
+  `Authorization: Api-Key secret_live_…`, `Adapty-Tz: UTC`. Belgelenmiş salt-okunur bir dışa aktarma uç noktasıdır; sorgu JSON gövdesinde
+  gider (`readQuery`). İstek başına tek grafik: `chart_id`, `filters.date: [başlangıç, bitiş]`, `period_unit: day`, `date_type: purchase_date`.
+- **Kimlik:** Uygulamaya özel Secret API key (`secret_live_…`, App settings → General). Salt-okunur anahtar yoktur: aynı anahtar sunucu
+  API'sini (profil, erişim seviyesi, paywall) de açar, formda uyarı gösterilir. Public SDK key (`public_live_…`) ağ çağrısı yapılmadan
+  reddedilir. Her Adapty uygulaması ayrı bağlantıdır. Limit: uygulama başına saniyede 2 istek (anahtarlar paylaşır); 429'da Retry-After yok.
+- **Doğrulama:** `mrr` + `revenue` (bugün). Gelir grafiği okunamazsa bağlantı kurulur, uyarı gösterilir (`revenueHistory='none'`).
+- **Snapshot:** bugün için `mrr` (brüt `revenue` metriği), `subscriptions_active`, `trials_active` + son 30 günün `revenue` toplamı (`value`).
+  MRR veya aktif abonelik okunamazsa snapshot **yazılmaz**; deneme ve 30 günlük gelir okunamazsa `null`. Adapty'nin tanımları aynen
+  kullanılır: MRR denemeleri ve tek seferlik satın almaları içermez; aktif abonelik denemeleri **ve yenilemesi kapatılmış** abonelikleri
+  hariç tutar (§6'dan farklı).
+- **Gelir geçmişi:** ≤ 92 günlük pencerelerde günlük `revenue` ve `refund_money` → `daily_revenue` (`source='provider'`, USD).
+  Adapty Revenue = kullanıcının ödediği brüt tutar (mağaza komisyonu düşülmeden, vergi dahil; RevenueCat Revenue grafiğiyle aynı) −
+  işlendiği gün düşülen iadeler. Gün başına `gross = revenue + refund_money`, `refunds = refund_money`, `count = 0` (Adapty günlük işlem
+  sayısı vermez). Günlük seri ancak günlerin toplamı belgelenmiş `value` ile tutarsa kullanılır; tutmazsa aynı iki grafik gün gün
+  sorgulanıp `value` okunur (günde 2 istek, imleçle devam). Gelir grafiği hiç kullanılamazsa snapshot'taki 30 günlük gelir gösterilir.
+- **Para birimi / gün / test modu:** Tüm parasal grafikler USD (işlem anındaki kurla). Günler `Adapty-Tz: UTC` ile UTC'dir.
+  Sandbox satın almaları Adapty grafiklerine hiç girmez, bu yüzden test modu yoktur.
+- ✅ **Doğrulandı:** uç nokta, kimlik başlığı, `chart_id` listesi, `revenue`/`proceeds`/`net_revenue` metrikleri, USD, sandbox hariç,
+  2 istek/sn ([export API](https://adapty.io/docs/api-export-analytics/operations/retrieveAnalyticsData),
+  [revenue](https://adapty.io/docs/revenue), [refund money](https://adapty.io/docs/refund-money)). İç `data` dizisindeki günlük nokta
+  şekli belgelenmemiştir (`{type:'total', values:[{x, y}]}` varsayılır); toplamla doğrulanır, tutmazsa gün gün `value` okunur.
+
+### 6.12 Superwall
+
+- **Taban:** `https://api.superwall.com`, `Authorization: Bearer sk_…` (organization API key) + Organization ID
+  (dashboard adresindeki `app.superwall.com/{organization_id}/…` sayısı).
+- **İzinler:** `charts:read` (zorunlu: MRR, aktif abonelik), `data:read` (opsiyonel: günlük gelir/iade ve aktif
+  deneme). Proje erişimi "All projects" önerilir; kısıtlı anahtarda doğrulama uyarı verir.
+- **Doğrulama:** `GET /v2/charts/definitions?organization_id=` + MRR grafiği + bugünün gelir sorgusu (`data:read`
+  yoklaması). `data:read` yoksa bağlantı uyarıyla kurulur, `revenueHistory='none'` yazılır.
+- **Snapshot:** grafik anahtarları sabit yazılmaz; `definitions.chart_types` içinden "MRR" ve "Active Subscriptions"
+  adıyla bulunur. `POST /v2/charts/data` (salt okunur sorgu uç noktası, `readQuery`) → `breakdown: null`, son 7 gün, günlük,
+  `environment: PRODUCTION`, organizasyon geneli. Değer son gün noktasıdır; bugünün noktası boşsa ya da dün >0 iken
+  0 görünüyorsa son tamamlanmış gün kullanılır (sahte sıfır yazılmaz). Aktif abonelik = "unexpired, paid" (deneme
+  hariç). **Aktif deneme** Superwall metriği değildir: `data:read` ile SQL'den türetilir (son olayı TRIAL dönemi,
+  `expiration` değil, bitişi gelecekte olan abonelik; iptal edilmiş deneme bitene kadar sayılır). Entegrasyon olayı
+  hiç yoksa `null`. Para birimi USD.
+- **Gelir geçmişi:** `GET /v2/organizations/{id}/query?query=…` (ClickHouse, salt okunur; ham SQL gövdeli POST yerine
+  belgelenmiş GET kullanılır) ile `open_revenue.attributed_events_by_ts_rep FINAL` üzerinde gün bazında toplanır →
+  `daily_revenue` (`source='provider'`, USD). Brüt = pozitif `price` toplamı, iade = negatif `price` toplamının mutlak
+  değeri (iade günü). `price` Superwall'un "Sales" tabanıdır: **KDV ve mağaza komisyonu dahil** (RevenueCat ve Adapty
+  ile aynı). Aynı mağaza işlemi (mağaza + RevenueCat + SDK kopyaları) `transactionId` ile bir kez sayılır; sandbox,
+  Family Sharing ve RevenueCat'in Stripe kopyaları hariç. SQL sabit tek bir SELECT'tir; tarihler `param_*` ile geçer;
+  yalnızca toplamlar döner (kullanıcı verisi çekilmez). 31 günlük pencereler, cursor ile devam; 429'da cursor döner.
+- ⚠️ **Doğrulanmadı:** grafik adları/anahtarları ve nokta anlamı canlı denenmedi; grafik değerlerinin USD olduğu
+  varsayımdır (yanıtta para birimi yok). Tablo şeması Superwall'un resmî ajan becerisinden
+  ([superwall/skills](https://github.com/superwall/skills)) alındı. Uygulamanın "revenue provider" seçimi API'de yok;
+  mağaza ile RevenueCat aynı `transactionId`'yi taşımıyorsa çift sayım olabilir. Test modu yok (sandbox hariç tutulur).
+
 ---
 
 ## 7. Arayüz (UX/UI)
@@ -268,7 +512,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 1. **Cevap önce:** Dashboard'ın ilk satırı toplam MRR. Süs yok.
 2. **Tek vurgu rengi** (marka mavisi), geri kalan nötr gri tonları. coss ui'nin ince gölgeleri ve 1px kenarlıkları, bol boşluk.
 3. **Geist Sans + Geist Mono**, aynı kökenden; sayılarda `tabular-nums`. Harici font isteği yok.
-4. Sağlayıcılar küçük renkli nokta ile ayrılır: Stripe `#635BFF`, Lemon Squeezy `#FFC233`, RevenueCat `#F2545B`, Demo nötr.
+4. Grafiklerde ve listelerde sağlayıcılar küçük renkli nokta ile ayrılır (veri renkleri `design/system.md` §3.1): Stripe `#635BFF`, Paddle `#2F80ED`, Lemon Squeezy `#AD7D00`, Polar `#0E9384`, RevenueCat `#F2545B`, Chargebee `#E8590C`, Dodo Payments `#4E9418`, Gumroad `#DB2777`, Adapty `#0A86B4`, Superwall `#858A00`, Demo nötr. Bağlantılar bölümünde (sağlayıcı seçimi, liste, form ve bağlantı başlığı) sağlayıcının kendi kare logosu gösterilir (`provider-logos.tsx`, kaynaklar dosyada).
 5. Açık/koyu tema `prefers-color-scheme` ile otomatik (coss token'ları, hoomuch'un AA ölçülmüş paleti; `src/styles/app.css`).
 6. **Formlar hydrate olmadan da çalışır:** Post/Redirect/Get, flash mesajlar çerezle. Hydrate olduktan sonra gönderilen formun butonunda spinner ve çift gönderim engeli, flash ve ilk-sayı şeridi Motion ile kapanır.
 7. **Grafikler shadcn Charts / Recharts** ile tarayıcıda çizilir; sunucu HTML'inde metin açıklaması ve "Show data" altında veri tablosu bulunur.
@@ -284,7 +528,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | `/signup`, `/login` | Tek kart, iki alan. Kayıt kapalıysa `/signup` bunu söyler |
 | `/dashboard?range=7\|30\|90` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği, MRR trendi, kırılım tablosu, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
-| `/connections/new` | Sağlayıcı seçimi (4 seçenek) |
+| `/connections/new` | Sağlayıcı seçimi (10 logolu kart + demo satırı) |
 | `/connections/new?provider=…` | Dinamik form (`ProviderMeta.fields`), anahtar oluşturma adımları, gerekli izinler, uyarı |
 | `/connections/:id` | Detay: durum, son hata, son snapshot'lar, katlanmış senkronizasyon geçmişi. Birincil eylem Sync now; son senkronizasyon hatalıysa "Replace key". Yeniden adlandır, anahtar yenile ve sil (onay kutusu ile) tek bir "Manage" bölümünde, gerekmedikçe kapalı. Demo bağlantı başlıktan tek tıkla kaldırılır |
 | `/transactions?provider=&page=` | Birleşik işlem tablosu |
@@ -323,7 +567,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 hoomuch/
 ├─ SPEC.md                       Lead
 ├─ wrangler.jsonc, package.json, tsconfig.json, vitest.config.ts   Lead
-├─ migrations/0001_init.sql      Lead
+├─ migrations/000N_*.sql         Lead
 ├─ public/                       Experience (app.css derlenir, elle düzenlenmez)
 ├─ src/
 │  ├─ index.tsx                  Lead — uygulama kablolaması, middleware, scheduled()
@@ -332,7 +576,7 @@ hoomuch/
 │  ├─ db/queries.ts              Lead — users/sessions/connections temel sorguları
 │  ├─ providers/types.ts         Lead — ADAPTÖR KONTRATI
 │  ├─ providers/registry.ts      Lead — sağlayıcı meta verisi + adaptör eşlemesi
-│  ├─ providers/{http,stripe,lemonsqueezy,revenuecat,demo}.ts   Data Plane
+│  ├─ providers/{http,stripe,paddle,lemonsqueezy,polar,revenuecat,chargebee,dodo,gumroad,adapty,superwall,demo}.ts   Data Plane
 │  ├─ sync/                      Data Plane — engine, fx, repo
 │  ├─ data/types.ts              Lead — OKUMA MODELİ KONTRATI
 │  ├─ data/{dashboard,transactions,connections}.ts   Data Plane
@@ -377,14 +621,14 @@ Kurallar:
 | # | Kilometre taşı | Bitti sayılır, eğer… |
 |---|----------------|----------------------|
 | M0 | İskelet | `npm run dev` açılıyor, migration uygulanıyor, `/healthz` 200 |
-| M1 | Data Plane | 4 adaptör + sync engine + FX + okuma modelleri; testler yeşil |
+| M1 | Data Plane | 11 adaptör (10 sağlayıcı + demo) + sync engine + FX + okuma modelleri; testler yeşil |
 | M2 | Experience | Tüm sayfalar, boş durumlar, açık/koyu tema; fixture verisiyle dashboard |
 | M3 | Entegrasyon | Kayıt → demo bağlantı → dolu dashboard uçtan uca; `npm run check` yeşil |
 | M4 | Dağıtım | D1 oluşturuldu, migration, secret, `wrangler deploy` (kullanıcı onayıyla) |
 
 **Definition of Done (v1):**
 - Yeni kullanıcı kayıt olur, demo bağlantı ekler ve dashboard birkaç saniye içinde dolar.
-- Geçersiz Stripe/LS/RC anahtarı kaydedilmez; kullanıcı sebebi görür.
+- Hiçbir sağlayıcının geçersiz anahtarı kaydedilmez; kullanıcı sebebi görür.
 - Dashboard 7/30/90 gün arasında geçiş yapar; para birimi değişince tüm tutarlar çevrilir.
 - Bir bağlantının hatası dashboard'ı bozmaz; hata bağlantı satırında görünür.
 - Hiçbir sayfada inline script yok; CSP ihlali konsolda görünmez.

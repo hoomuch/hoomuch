@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BudgetExhaustedError } from '../../src/providers/http';
 import { formatMoney } from '../../src/lib/money';
 import {
+  COUPONS_PERMISSION_WARNING,
   fromStripeAmount,
   SECRET_KEY_WARNING,
   STRIPE_API_VERSION,
@@ -15,6 +16,7 @@ import subscriptionFx from '../fixtures/stripe/subscription.json';
 import discountFx from '../fixtures/stripe/discount.json';
 import couponFx from '../fixtures/stripe/coupon.json';
 import priceFx from '../fixtures/stripe/price.json';
+import taxRateFx from '../fixtures/stripe/tax_rate.json';
 import balanceTransactionFx from '../fixtures/stripe/balance_transaction.json';
 import listFx from '../fixtures/stripe/list.json';
 import errorInvalidKeyFx from '../fixtures/stripe/error_invalid_key.json';
@@ -46,7 +48,9 @@ interface PriceOpts {
   interval?: string;
   count?: number;
   usage?: 'licensed' | 'metered';
-  tiered?: boolean;
+  /** true = graduated. */
+  tiered?: boolean | 'volume' | 'graduated';
+  taxBehavior?: 'inclusive' | 'exclusive' | 'unspecified';
   product?: string;
   id?: string;
   transform?: { divide_by: number; round: 'up' | 'down' };
@@ -61,9 +65,10 @@ function price(o: PriceOpts = {}): Json {
   p.recurring.interval_count = o.count ?? 1;
   p.recurring.usage_type = o.usage ?? 'licensed';
   p.transform_quantity = o.transform ?? null;
+  p.tax_behavior = o.taxBehavior ?? p.tax_behavior;
   if (o.tiered) {
     p.billing_scheme = 'tiered';
-    p.tiers_mode = 'graduated';
+    p.tiers_mode = o.tiered === true ? 'graduated' : o.tiered;
     p.unit_amount = null;
     p.unit_amount_decimal = null;
   } else {
@@ -73,7 +78,38 @@ function price(o: PriceOpts = {}): Json {
   return p;
 }
 
-function item(p: Json, o: { quantity?: number | null; discounts?: Json[]; trialEnd?: number } = {}): Json {
+/** A tier as the Price object returns it (with expand[]=tiers). `upTo` null = inf. */
+function tier(upTo: number | null, unit: number | null, flat: number | null = null): Json {
+  return {
+    flat_amount: flat,
+    flat_amount_decimal: flat === null ? null : String(flat),
+    unit_amount: unit,
+    unit_amount_decimal: unit === null ? null : String(unit),
+    up_to: upTo,
+  };
+}
+
+/** GET /v1/prices/{id}?expand[]=tiers for the tiered price `p`: the docs' Price object with `tiers` included. */
+function tieredFull(p: Json, tiers: Json[]): Json {
+  return {
+    ...clone(priceFx),
+    id: p.id,
+    currency: p.currency,
+    product: p.product,
+    recurring: clone(p.recurring),
+    billing_scheme: 'tiered',
+    tiers_mode: p.tiers_mode,
+    unit_amount: null,
+    unit_amount_decimal: null,
+    tiers,
+  };
+}
+
+function taxRate(percentage: number, inclusive: boolean): Json {
+  return { ...clone(taxRateFx), id: nextId('txr'), percentage, inclusive };
+}
+
+function item(p: Json, o: { quantity?: number | null; discounts?: Json[]; trialEnd?: number; taxRates?: Json[] } = {}): Json {
   const it = clone(subscriptionFx.items.data[0]);
   it.id = nextId('si');
   it.price = p;
@@ -91,15 +127,28 @@ function item(p: Json, o: { quantity?: number | null; discounts?: Json[]; trialE
   it.quantity = o.quantity === undefined ? 1 : o.quantity;
   it.discounts = o.discounts ?? [];
   it.current_trial = o.trialEnd ? { end_date: o.trialEnd, start_date: o.trialEnd - 14 * DAY_S, trial_offer: 'trlo_Fake1' } : null;
+  it.tax_rates = o.taxRates ?? [];
   return it;
 }
 
-function sub(items: Json[], o: { currency?: string; status?: string; discounts?: Json[]; moreItems?: boolean } = {}): Json {
+interface SubOpts {
+  currency?: string;
+  status?: string;
+  discounts?: Json[];
+  moreItems?: boolean;
+  defaultTaxRates?: Json[];
+  /** Stripe Tax on. */
+  automaticTax?: boolean;
+}
+
+function sub(items: Json[], o: SubOpts = {}): Json {
   const s = clone(subscriptionFx);
   s.id = nextId('sub');
   s.currency = o.currency ?? 'usd';
   s.status = o.status ?? 'active';
   s.discounts = o.discounts ?? [];
+  s.default_tax_rates = o.defaultTaxRates ?? [];
+  if (o.automaticTax) s.automatic_tax = { enabled: true, liability: { type: 'self' } };
   s.items.data = items.map((i) => ({ ...i, subscription: s.id }));
   s.items.has_more = o.moreItems ?? false;
   s.items.total_count = items.length;
@@ -108,7 +157,7 @@ function sub(items: Json[], o: { currency?: string; status?: string; discounts?:
 }
 
 /** Shorthand: one licensed monthly item. */
-const simple = (amount: number, o: Parameters<typeof sub>[1] & PriceOpts = {}) =>
+const simple = (amount: number, o: SubOpts & PriceOpts = {}) =>
   sub([item(price({ amount, currency: o.currency, interval: o.interval, count: o.count }))], o);
 
 function discount(couponId: string, end: number | null = null): Json {
@@ -172,7 +221,13 @@ describe('stripe verify', () => {
     route('/v1/subscriptions', { json: list([sub([item(price())])]) }, { query: { limit: '1' } }),
     route('/v1/prices', { json: list([clone(priceFx)], false, '/v1/prices') }, { query: { limit: '1' } }),
     route('/v1/balance_transactions', { json: list([clone(balanceTransactionFx)], false, '/v1/balance_transactions') }, { query: { limit: '1' } }),
+    route('/v1/coupons', { json: list([clone(couponFx)], false, '/v1/coupons') }, { query: { limit: '1' } }),
   ];
+  const forbidden = (scope: string): Json => {
+    const err = clone(errorPermissionFx);
+    err.error.message = err.error.message.replace('rak_subscription_read', scope);
+    return err;
+  };
 
   it.each([
     ['empty', ''],
@@ -199,14 +254,42 @@ describe('stripe verify', () => {
     expect(!res.ok && res.error).toMatch(/publishable/);
   });
 
-  it('accepts a restricted test key with 3 pinned, authenticated reads', async () => {
+  it('accepts a restricted test key with 4 pinned, authenticated reads', async () => {
     const { fetch, calls } = fakeFetch(okRoutes());
     const ctx = makeCtx(fetch, { pageBudget: 5 });
     const res = await stripeAdapter.verify(input(`  ${RK_TEST}  `), ctx);
     expect(res).toEqual({ ok: true, accountLabel: 'Stripe (test mode)', config: {}, testMode: true, warnings: [] });
-    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions']);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions', '/v1/coupons']);
     expectStripeHeaders(calls);
-    expect(ctx.pageBudget).toBe(2);
+    expect(ctx.pageBudget).toBe(1);
+  });
+
+  it('accepts a key without Coupons: Read, with a warning that MRR is before discounts', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/coupons'));
+    const { fetch, calls } = fakeFetch([route('/v1/coupons', { status: 403, json: forbidden('rak_coupon_read') }), ...routes]);
+    const ctx = makeCtx(fetch);
+    const res = await stripeAdapter.verify(input(RK_LIVE), ctx);
+    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [COUPONS_PERMISSION_WARNING] });
+    expect(COUPONS_PERMISSION_WARNING).toMatch(/before discounts.*Coupons: Read/);
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/v1/subscriptions', '/v1/prices', '/v1/balance_transactions', '/v1/coupons']);
+    expectNoSecretsInLogs(ctx, [RK_LIVE, RK_TEST.slice(8)]);
+  });
+
+  it('keeps the secret-key warning next to the coupons warning', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/coupons'));
+    const { fetch } = fakeFetch([route('/v1/coupons', { status: 403, json: forbidden('rak_coupon_read') }), ...routes]);
+    const res = await stripeAdapter.verify(input(SK_TEST), makeCtx(fetch));
+    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, COUPONS_PERMISSION_WARNING] });
+  });
+
+  it('treats other failures of the coupons probe like any other request', async () => {
+    const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/coupons'));
+    const down = fakeFetch([route('/v1/coupons', { status: 503, json: { error: { message: 'down' } } }), ...routes]);
+    expect((await catchErr(stripeAdapter.verify(input(), makeCtx(down.fetch)))).kind).toBe('upstream');
+
+    const revoked = fakeFetch([route('/v1/coupons', { status: 401, json: errorInvalidKeyFx }), ...okRoutes()]);
+    const res = await stripeAdapter.verify(input(), makeCtx(revoked.fetch));
+    expect(res).toMatchObject({ ok: false, field: 'apiKey', error: expect.stringMatching(/Stripe rejected this key/) });
   });
 
   it('labels a live restricted key as live', async () => {
@@ -251,13 +334,11 @@ describe('stripe verify', () => {
   });
 
   it.each([
-    ['/v1/prices', 'Products & Prices: Read', 'rak_plan_read'],
+    ['/v1/prices', 'Prices: Read', 'rak_plan_read'],
     ['/v1/balance_transactions', 'Balance: Read', 'rak_balance_read'],
   ])('names the missing permission when %s is forbidden', async (path, permission, scope) => {
-    const err = clone(errorPermissionFx);
-    err.error.message = err.error.message.replace('rak_subscription_read', scope);
     const routes = okRoutes().filter((r) => !r.label.startsWith(path));
-    const { fetch } = fakeFetch([route(path, { status: 403, json: err }), ...routes]);
+    const { fetch } = fakeFetch([route(path, { status: 403, json: forbidden(scope) }), ...routes]);
     const res = await stripeAdapter.verify(input(), makeCtx(fetch));
     expect(res).toEqual({ ok: false, field: 'apiKey', error: `The Stripe key is missing the “${permission}” permission (${scope}).` });
   });
@@ -327,19 +408,168 @@ describe('stripe fetchSnapshot', () => {
     expectStripeHeaders(calls);
   });
 
-  it('excludes metered items and counts tiered prices as 0, logging once without PII', async () => {
-    const { snap, ctx } = await snapshot({
+  // The docs' examples (https://docs.stripe.com/subscriptions/pricing-models/tiered-pricing).
+  const FONT_TIERS = [tier(5, 700), tier(10, 650), tier(null, 600)];
+  const FLAT_TIERS = [tier(5, 500, 1000), tier(10, 400, 2000), tier(15, 300, 3000), tier(20, 200, 4000), tier(null, 100, 5000)];
+
+  it('prices licensed tiered items from their tiers: volume, graduated, flat amounts, decimals, up_to inf', async () => {
+    const vol = price({ id: 'price_FakeVolume', tiered: 'volume' });
+    const grad = price({ id: 'price_FakeGraduated', tiered: 'graduated' });
+    const volFlat = price({ id: 'price_FakeVolumeFlat', tiered: 'volume' });
+    const gradFlat = price({ id: 'price_FakeGraduatedFlat', tiered: 'graduated' });
+    const decimal = price({ id: 'price_FakeDecimal', tiered: 'volume', interval: 'year' });
+    // Unsorted on purpose; amounts only as decimal strings.
+    const decimalTiers = [
+      { ...tier(null, null), unit_amount_decimal: '12.5', flat_amount_decimal: '99.5' },
+      { ...tier(10, null), unit_amount_decimal: '20.25' },
+    ];
+    const { snap, calls, ctx } = await snapshot({
+      prices: [
+        tieredFull(vol, FONT_TIERS),
+        tieredFull(grad, FONT_TIERS),
+        tieredFull(volFlat, FLAT_TIERS),
+        tieredFull(gradFlat, FLAT_TIERS),
+        tieredFull(decimal, decimalTiers),
+      ],
       active: [
-        sub([item(price({ amount: 2000 })), item(price({ amount: 5, usage: 'metered' }), { quantity: null })]),
-        sub([item(price({ tiered: true })), item(price({ amount: 500 }))]),
-        sub([item(price({ tiered: true }), { quantity: 40 })]),
+        sub([item(vol, { quantity: 6 })]), // 6 × 6.50 = 39 USD
+        sub([item(vol, { quantity: 20 })]), // 20 × 6 = 120 USD
+        sub([item(grad, { quantity: 6 })]), // 5 × 7 + 1 × 6.50 = 41.50 USD
+        sub([item(grad, { quantity: 25 })]), // 35 + 32.50 + 15 × 6 = 157.50 USD
+        sub([item(volFlat, { quantity: 12 })]), // 12 × 3 + 30 = 66 USD
+        sub([item(gradFlat, { quantity: 12 })]), // (25 + 10) + (20 + 20) + (6 + 30) = 111 USD
+        sub([item(gradFlat, { quantity: 0 }), item(price({ amount: 100 }))]), // quantity 0 bills the first flat fee: 10 + 1 USD
+        sub([item(volFlat, { quantity: 0 })]), // 10 USD
+        sub([item(decimal, { quantity: 24 })]), // yearly, 24 × 12.5 + 99.5 = 399.5 → 400 / 12 → 33
+      ],
+    });
+    expect(snap.mrr).toEqual({ USD: 3900 + 12000 + 4150 + 15750 + 6600 + 11100 + 1100 + 1000 + 33 });
+    expect(snap.activeSubscriptions).toBe(9);
+
+    const priceCalls = calls.filter((c) => pathOf(c).startsWith('/v1/prices/'));
+    expect(priceCalls.map(pathOf).sort()).toEqual([vol, grad, volFlat, gradFlat, decimal].map((p) => `/v1/prices/${p['id']}`).sort()); // cached
+    for (const c of priceCalls) expect(new URL(c.url).searchParams.getAll('expand[]')).toEqual(['tiers']);
+    expect(ctx.logs.some((l) => l.event === 'stripe_tiered_prices_unpriced')).toBe(false);
+  });
+
+  it('reads tiers in the subscription’s currency from currency_options (once per price and currency)', async () => {
+    const p = price({ id: 'price_FakeTieredMulti', tiered: 'volume', currency: 'usd' });
+    const eurTiers = [tier(5, 600), tier(null, 500)];
+    const withEur = {
+      ...tieredFull(p, FONT_TIERS),
+      currency_options: {
+        eur: { custom_unit_amount: null, tax_behavior: 'unspecified', unit_amount: null, unit_amount_decimal: null, tiers: eurTiers },
+        usd: { custom_unit_amount: null, tax_behavior: 'unspecified', unit_amount: null, unit_amount_decimal: null, tiers: FONT_TIERS },
+      },
+    };
+    const { snap, calls } = await snapshot({
+      extra: [
+        route('/v1/prices/price_FakeTieredMulti', { json: withEur }, { query: { 'expand[]': ['currency_options', 'currency_options.eur.tiers'] } }),
+        route('/v1/prices/price_FakeTieredMulti', { json: tieredFull(p, FONT_TIERS) }, { query: { 'expand[]': ['tiers'] } }),
+      ],
+      active: [
+        sub([item(p, { quantity: 4 })], { currency: 'eur' }), // 4 × 6 EUR
+        sub([item(p, { quantity: 6 })], { currency: 'eur' }), // 6 × 5 EUR
+        sub([item(p, { quantity: 6 })], { currency: 'usd' }), // default currency: 6 × 6.50 USD
+      ],
+    });
+    expect(snap.mrr).toEqual({ EUR: 2400 + 3000, USD: 3900 });
+    const expands = calls.filter((c) => pathOf(c) === '/v1/prices/price_FakeTieredMulti').map((c) => new URL(c.url).searchParams.getAll('expand[]'));
+    expect(expands).toEqual([['currency_options', 'currency_options.eur.tiers'], ['tiers']]);
+  });
+
+  it('leaves out metered items and the tiered items it can’t price, logging once without PII instead of failing', async () => {
+    const noTiers = price({ id: 'price_FakeNoTiers', tiered: 'graduated' });
+    const noMode = price({ id: 'price_FakeNoMode', tiered: 'volume' });
+    noMode.tiers_mode = null;
+    const eurOnly = price({ id: 'price_FakeTieredEur', tiered: 'volume', currency: 'usd' });
+    const badExpand = { error: { message: 'This property cannot be expanded (currency_options.eur.tiers).', type: 'invalid_request_error' } };
+    const { snap, ctx, calls } = await snapshot({
+      prices: [{ ...tieredFull(noTiers, FONT_TIERS), tiers: null }, tieredFull(noMode, FONT_TIERS)],
+      extra: [route('/v1/prices/price_FakeTieredEur', { status: 400, json: badExpand })],
+      active: [
+        sub([item(price({ amount: 2000 })), item(price({ amount: 5, usage: 'metered' }), { quantity: null })]), // 2000
+        sub([item(noTiers, { quantity: 3 }), item(price({ amount: 500 }))]), // 500
+        sub([item(noMode, { quantity: 40 })]), // 0: not active
+        sub([item(eurOnly, { quantity: 2 })], { currency: 'eur' }), // 0
+        sub([item(eurOnly, { quantity: 9 })], { currency: 'eur' }), // 0, and no second request
       ],
     });
     expect(snap.mrr).toEqual({ USD: 2500 });
-    expect(snap.activeSubscriptions).toBe(3);
-    const tiered = ctx.logs.filter((l) => l.event === 'stripe_tiered_prices_excluded');
-    expect(tiered).toEqual([{ event: 'stripe_tiered_prices_excluded', data: { items: 2 } }]);
-    expect(JSON.stringify(ctx.logs)).not.toMatch(/cus_|sub_|si_|price_|prod_/);
+    expect(snap.activeSubscriptions).toBe(2);
+    expect(calls.filter((c) => pathOf(c) === '/v1/prices/price_FakeTieredEur')).toHaveLength(1);
+    const unpriced = ctx.logs.filter((l) => l.event === 'stripe_tiered_prices_unpriced');
+    expect(unpriced).toEqual([{ event: 'stripe_tiered_prices_unpriced', data: { items: 4 } }]);
+    const ownLogs = ctx.logs.filter((l) => l.event.startsWith('stripe_'));
+    expect(JSON.stringify(ownLogs)).not.toMatch(/cus_|sub_|si_|price_|prod_/);
+    expect(JSON.stringify(ctx.logs)).not.toMatch(/cus_|sub_|si_/);
+  });
+
+  it('counts only subscriptions with positive MRR as active, like Stripe', async () => {
+    const { snap, ctx } = await snapshot({
+      coupons: [coupon('FREE100', { percent_off: 100 })],
+      active: [
+        simple(1000),
+        simple(0), // free plan
+        simple(2000, { discounts: [discount('FREE100')] }), // 100% off forever
+        sub([item(price({ amount: 5, usage: 'metered' }), { quantity: null })]), // metered only
+        sub([item(price({ amount: 100 }), { trialEnd: NOW_S + DAY_S })]), // only a running (paid) trial offer
+      ],
+      pastDue: [simple(0, { status: 'past_due' }), simple(500, { status: 'past_due' })],
+    });
+    expect(snap.mrr).toEqual({ USD: 1500 });
+    expect(snap.activeSubscriptions).toBe(2);
+    expect(snap.activeTrials).toBe(1);
+    expect(ctx.logs.find((l) => l.event === 'stripe_snapshot')?.data).toEqual({ subscriptions: 2, zeroMrr: 5, trials: 1, currencies: ['USD'] });
+  });
+
+  it('counts trial offers per item on active, past_due and trialing subscriptions, legacy trials once', async () => {
+    const running = NOW_S + 7 * DAY_S;
+    const { snap } = await snapshot({
+      active: [
+        sub([
+          item(price({ amount: 3000 }), { trialEnd: running }),
+          item(price({ amount: 1000 }), { trialEnd: running }),
+          item(price({ amount: 2000 }), { trialEnd: NOW_S - DAY_S }), // trial over: paid
+        ]),
+      ],
+      pastDue: [sub([item(price({ amount: 500 })), item(price({ amount: 900 }), { trialEnd: running })], { status: 'past_due' })],
+      trialing: [
+        simple(1000, { status: 'trialing' }), // legacy trial_end
+        sub([item(price({ amount: 0 }), { trialEnd: running }), item(price({ amount: 0 }), { trialEnd: running })], { status: 'trialing' }),
+      ],
+    });
+    expect(snap.activeTrials).toBe(2 + 1 + 1 + 2);
+    expect(snap.mrr).toEqual({ USD: 2500 });
+    expect(snap.activeSubscriptions).toBe(2);
+  });
+
+  it('backs inclusive manual tax rates out of MRR after discounts, and leaves exclusive rates and Stripe Tax alone', async () => {
+    const vat20 = taxRate(20, true);
+    const salesTax = taxRate(8.25, false);
+    const { snap, ctx, calls } = await snapshot({
+      coupons: [coupon('OFF120', { amount_off: 120, currency: 'usd' })],
+      active: [
+        // price tax_behavior is "unspecified" (docs object): the rate's `inclusive` decides → 1200 / 1.2
+        simple(1200, { defaultTaxRates: [vat20] }),
+        // the item's own rates replace the subscription's: 1100 / 1.1 + 2400 / 1.2
+        sub([item(price({ amount: 1100 }), { taxRates: [taxRate(10, true)] }), item(price({ amount: 2400 }))], { defaultTaxRates: [vat20] }),
+        // exclusive tax is added on top of the price → 1000
+        simple(1000, { defaultTaxRates: [salesTax] }),
+        // several inclusive rates add up; the exclusive one doesn't count → 1150 / 1.15
+        sub([item(price({ amount: 1150 }), { taxRates: [taxRate(5, true), taxRate(10, true), salesTax] })]),
+        // discount first, then tax: (1200 − 120) / 1.2 = 900, not 1200 / 1.2 − 120 = 880
+        simple(1200, { defaultTaxRates: [vat20], discounts: [discount('OFF120')] }),
+        // Stripe Tax: the rate isn't on the subscription → left in, counted
+        sub([item(price({ amount: 1200, taxBehavior: 'inclusive' }))], { automaticTax: true }),
+        sub([item(price({ amount: 1200, taxBehavior: 'exclusive' }))], { automaticTax: true }),
+      ],
+    });
+    expect(snap.mrr).toEqual({ USD: 1000 + (1000 + 2000) + 1000 + 1000 + 900 + 1200 + 1200 });
+    expect(ctx.logs.filter((l) => l.event === 'stripe_inclusive_tax_unknown')).toEqual([
+      { event: 'stripe_inclusive_tax_unknown', data: { items: 1 } },
+    ]);
+    expect(calls.map(pathOf).filter((p) => !p.startsWith('/v1/subscriptions') && !p.startsWith('/v1/coupons/'))).toEqual([]); // tax rates are embedded
   });
 
   it('applies percent_off and amount_off discounts per coupon duration, order, scope and end date', async () => {
@@ -379,7 +609,7 @@ describe('stripe fetchSnapshot', () => {
       ],
     });
     expect(snap.mrr).toEqual({ USD: 3000 + 958 + 1500 + 700 + 1700 + 1900 + 3500 });
-    expect(snap.activeSubscriptions).toBe(8);
+    expect(snap.activeSubscriptions).toBe(7); // the one discounted to 0 has no MRR, so it isn't active
 
     const couponCalls = calls.filter((c) => pathOf(c).startsWith('/v1/coupons/'));
     expect(couponCalls.map(pathOf).sort()).toEqual(coupons.map((c) => `/v1/coupons/${c['id']}`).sort()); // cached, no EXPIRED50
@@ -458,6 +688,8 @@ describe('stripe fetchSnapshot', () => {
       ],
     });
     expect(snap.mrr).toEqual({ USD: 3000 });
+    expect(snap.activeTrials).toBe(1);
+    expect(snap.activeSubscriptions).toBe(1);
   });
 
   it('reads currency_options (once per price) when a multi-currency price bills in another currency', async () => {
@@ -514,16 +746,18 @@ describe('stripe fetchSnapshot', () => {
     const first = item(price({ amount: 1000 }));
     const s = sub([first], { moreItems: true });
     const rest = item(price({ amount: 2000 }), { discounts: [discount('PCT25')] });
+    const trial = item(price({ amount: 9000 }), { trialEnd: NOW_S + DAY_S });
     const { snap } = await snapshot({
       coupons: [coupon('PCT25', { percent_off: 25 })],
       active: [s],
       extra: [
-        route('/v1/subscription_items', { json: list([rest], false, '/v1/subscription_items') }, {
+        route('/v1/subscription_items', { json: list([rest, trial], false, '/v1/subscription_items') }, {
           query: { subscription: s['id'], starting_after: first['id'], limit: '100', 'expand[]': 'data.discounts' },
         }),
       ],
     });
     expect(snap.mrr).toEqual({ USD: 1000 + 1500 });
+    expect(snap.activeTrials).toBe(1);
   });
 
   it('lets BudgetExhaustedError propagate instead of returning a partial MRR', async () => {

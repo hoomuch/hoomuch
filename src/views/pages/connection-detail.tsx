@@ -14,7 +14,8 @@ import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/compon
 import type { ConnectionDetail, SyncRunRow } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { getProviderMeta } from '../../providers/registry';
-import { ProviderDot, StatusBadge, TestModeBadge } from '../components/badges';
+import { StatusBadge, TestModeBadge } from '../components/badges';
+import { ProviderLogo } from '../components/provider-logos';
 import { ConnectionForm } from '../components/connection-form';
 import { DangerZone } from '../components/danger-zone';
 import { RelativeTime } from '../components/relative-time';
@@ -159,7 +160,7 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
         title={d.name}
         description={
           <span className="inline-flex flex-wrap items-center gap-2">
-            <ProviderDot dotClass={d.dotClass} size="md" />
+            <ProviderLogo provider={d.provider} size="md" />
             {meta.name}
             <StatusBadge status={d.status} />
             {d.testMode ? <TestModeBadge /> : null}

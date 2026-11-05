@@ -1,0 +1,20 @@
+{
+  "data": {
+    "common": {
+      "data": [{ "title": "Total", "type": "total", "value": 34, "values": [{ "x": "2026-11-05", "y": 34 }] }],
+      "value": 34,
+      "value_from": 34,
+      "value_to": 34,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "trials_active",
+      "type": "multi",
+      "default_aggregation": "last",
+      "description": "<div>Free trials that have not yet expired.</div>",
+      "metric_name": "Active trials",
+      "is_json": true,
+      "unit": "count",
+      "recommended_period": null
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "_tag": "@superwall/api-schema/v2/errors/BadRequest",
+  "type": "invalid_request_error",
+  "code": "parameter_invalid",
+  "message": "Unknown y_axis metric 'mrrValue' for this chart scope",
+  "param": "y_axis"
+}

@@ -1,0 +1,7 @@
+{
+  "message": "Sorry, access has been blocked temporarily due to request count exceeding acceptable limits. Please try after some time.",
+  "type": "operation_failed",
+  "api_error_code": "api_request_limit_exceeded",
+  "error_code": "api_request_limit_exceeded",
+  "http_status_code": 429
+}

@@ -1,0 +1,180 @@
+{
+  "created_at": "2026-09-14T10:21:07.412893Z",
+  "modified_at": "2026-10-14T10:21:09.118204Z",
+  "id": "e5149aae-e521-42b9-b24c-abb3d71eea2e",
+  "amount": 1500,
+  "currency": "usd",
+  "recurring_interval": "month",
+  "recurring_interval_count": 1,
+  "status": "active",
+  "current_period_start": "2026-10-14T10:21:07.412893Z",
+  "current_period_end": "2026-11-14T10:21:07.412893Z",
+  "current_meter_period_start": null,
+  "current_meter_period_end": null,
+  "trial_start": null,
+  "trial_end": null,
+  "cancel_at_period_end": false,
+  "canceled_at": null,
+  "started_at": "2026-09-14T10:21:07.412893Z",
+  "ends_at": null,
+  "ended_at": null,
+  "past_due_at": null,
+  "pause_at_period_end": false,
+  "paused_at": null,
+  "resumes_at": null,
+  "customer_id": "992fae2a-2a17-4b7a-8d9e-e287cf90131b",
+  "product_id": "d8dd2de1-21b7-4a41-8bc3-ce909c0cfe23",
+  "discount_id": null,
+  "checkout_id": "0a9cf6e6-0f3a-4a1b-9c8b-3b6a2c3a8f11",
+  "seats": null,
+  "units": null,
+  "customer_cancellation_reason": null,
+  "customer_cancellation_comment": null,
+  "metadata": {},
+  "custom_field_data": {},
+  "customer": {
+    "id": "992fae2a-2a17-4b7a-8d9e-e287cf90131b",
+    "created_at": "2026-09-14T10:20:51.000000Z",
+    "modified_at": null,
+    "metadata": {},
+    "external_id": "usr_1337",
+    "email": "customer@example.com",
+    "email_verified": true,
+    "type": "individual",
+    "name": "John Doe",
+    "billing_name": "John Doe",
+    "billing_address": {
+      "line1": "string",
+      "line2": "string",
+      "postal_code": "string",
+      "city": "string",
+      "state": "string",
+      "country": "US"
+    },
+    "tax_id": [
+      "911144442",
+      "us_ein"
+    ],
+    "locale": "string",
+    "organization_id": "1dbfc517-0bbf-4301-9ba8-555ca42b9737",
+    "default_payment_method_id": "00000000-0000-4000-8000-000000000000",
+    "deleted_at": null,
+    "first_user_event_at": "2026-01-01T00:00:00.000000Z",
+    "avatar_url": "https://www.gravatar.com/avatar/xxx?d=404"
+  },
+  "product": {
+    "id": "d8dd2de1-21b7-4a41-8bc3-ce909c0cfe23",
+    "created_at": "2026-06-02T08:00:00.000000Z",
+    "modified_at": null,
+    "trial_interval": null,
+    "trial_interval_count": null,
+    "name": "Pro",
+    "description": "Everything in Pro.",
+    "visibility": "public",
+    "recurring_interval": "month",
+    "recurring_interval_count": 1,
+    "meter_interval": null,
+    "meter_interval_count": null,
+    "is_recurring": true,
+    "is_archived": false,
+    "organization_id": "1dbfc517-0bbf-4301-9ba8-555ca42b9737",
+    "metadata": {},
+    "is_deletable": false,
+    "prices": [
+      {
+        "created_at": "2026-06-02T08:00:00.000000Z",
+        "modified_at": null,
+        "id": "9c0f1d3e-7b2a-4c5d-8e6f-1a2b3c4d5e6f",
+        "source": "catalog",
+        "amount_type": "fixed",
+        "price_currency": "usd",
+        "tax_behavior": "location",
+        "is_archived": false,
+        "product_id": "d8dd2de1-21b7-4a41-8bc3-ce909c0cfe23",
+        "price_amount": 1500
+      }
+    ],
+    "benefits": [
+      {
+        "id": "00000000-0000-4000-8000-000000000000",
+        "created_at": "2026-01-01T00:00:00.000000Z",
+        "modified_at": "2026-01-01T00:00:00.000000Z",
+        "type": "custom",
+        "description": "string",
+        "selectable": false,
+        "deletable": false,
+        "is_deleted": false,
+        "organization_id": "00000000-0000-4000-8000-000000000000",
+        "metadata": {},
+        "visibility": "draft",
+        "properties": {
+          "note": "string"
+        },
+        "visibility_configurable": false
+      }
+    ],
+    "medias": [
+      {
+        "id": "00000000-0000-4000-8000-000000000000",
+        "organization_id": "00000000-0000-4000-8000-000000000000",
+        "name": "string",
+        "path": "string",
+        "mime_type": "string",
+        "size": 0,
+        "storage_version": "string",
+        "checksum_etag": "string",
+        "checksum_sha256_base64": "string",
+        "checksum_sha256_hex": "string",
+        "last_modified_at": "2026-01-01T00:00:00.000000Z",
+        "version": "string",
+        "service": "product_media",
+        "is_uploaded": false,
+        "created_at": "2026-01-01T00:00:00.000000Z",
+        "size_readable": "string",
+        "public_url": "string"
+      }
+    ],
+    "attached_custom_fields": [
+      {
+        "custom_field_id": "00000000-0000-4000-8000-000000000000",
+        "custom_field": {
+          "created_at": "2026-01-01T00:00:00.000000Z",
+          "modified_at": "2026-01-01T00:00:00.000000Z",
+          "id": "00000000-0000-4000-8000-000000000000",
+          "metadata": {},
+          "type": "text",
+          "slug": "string",
+          "name": "string",
+          "organization_id": "1dbfc517-0bbf-4301-9ba8-555ca42b9737",
+          "properties": {
+            "form_label": "string",
+            "form_help_text": "string",
+            "form_placeholder": "string",
+            "textarea": false,
+            "min_length": 0,
+            "max_length": 0
+          }
+        },
+        "order": 0,
+        "required": false
+      }
+    ]
+  },
+  "discount": null,
+  "prices": [
+    {
+      "created_at": "2026-06-02T08:00:00.000000Z",
+      "modified_at": null,
+      "id": "9c0f1d3e-7b2a-4c5d-8e6f-1a2b3c4d5e6f",
+      "source": "catalog",
+      "amount_type": "fixed",
+      "price_currency": "usd",
+      "tax_behavior": "location",
+      "is_archived": false,
+      "product_id": "d8dd2de1-21b7-4a41-8bc3-ce909c0cfe23",
+      "price_amount": 1500
+    }
+  ],
+  "meters": [],
+  "pending_update": null
+}

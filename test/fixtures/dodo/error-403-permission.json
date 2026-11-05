@@ -1,0 +1,4 @@
+{
+  "code": "INSUFFICIENT_PERMISSION",
+  "message": "This API key does not have the required permission. Required: `balances:read`. Scopes: `[subscriptions:read]`"
+}
