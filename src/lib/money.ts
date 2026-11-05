@@ -1,6 +1,11 @@
 /**
  * Money helpers. All amounts are integer MINOR units of an ISO 4217 currency
- * (cents, kuruş; yen has no minor unit). Owner: Lead. See SPEC.md §6.
+ * (cents, kuruş, fillér; yen has no minor unit). Owner: Lead. See SPEC.md §6.
+ *
+ * "Minor unit" means the ISO 4217 minor unit (`currencyExponent`), which is what payment APIs use.
+ * It is NOT `Intl.NumberFormat`'s fraction digits: those are CLDR display precision, which shows
+ * HUF, IDR, COP and PKR with 0 decimals although ISO 4217 (and Stripe) count them in hundredths.
+ * Display rounding still follows CLDR (`formatMoney`).
  */
 
 /** Amounts per currency, e.g. { USD: 12300, EUR: 4500 }. */
@@ -22,22 +27,77 @@ export function normalizeCurrency(c: string): string {
   return c.trim().toUpperCase();
 }
 
-const exponentCache = new Map<string, number>();
+/**
+ * ISO 4217 minor units from SIX's list one, published 2026-09-17, grouped by digit count:
+ * https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml
+ * Funds and metals without a minor unit (XAU, XDR, …) are left out and fall back to Intl.
+ *
+ * Every active code is listed, not only the ones where CLDR disagrees: CLDR's digits change between ICU
+ * releases and differ between Node and workerd (older CLDR also gave RSD and AMD 0 digits), so nothing
+ * that decides how an integer is read may depend on them. Codes withdrawn since 2017 that old provider
+ * records can still carry are appended with their last ISO minor unit (list three has no digits column).
+ *
+ * Where CLDR 48 (Node 24) differs: AFN ALL COP HUF IDR IRR KPW LAK LBP MGA MMK PKR SOS SYP YER have 2
+ * (CLDR 0), IQD has 3 (CLDR 0); withdrawn MRO SLL STD have 2 (CLDR 0).
+ */
+const ISO_4217_BY_DIGITS: Readonly<Record<number, readonly string[]>> = {
+  0: [
+    'BIF CLP DJF GNF ISK JPY KMF KRW PYG RWF UGX UYI VND VUV XAF XOF XPF',
+    'BYR', // withdrawn 2017
+  ],
+  2: [
+    'AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BMD BND BOB BOV BRL BSD BTN BWP BYN BZD CAD CDF',
+    'CHE CHF CHW CNY COP COU CRC CUP CVE CZK DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD',
+    'GTQ GYD HKD HNL HTG HUF IDR ILS INR IRR JMD KES KGS KHR KPW KYD KZT LAK LBP LKR LRD LSL MAD MDL',
+    'MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD PAB PEN PGK PHP PKR',
+    'PLN QAR RON RSD RUB SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TOP',
+    'TRY TTD TWD TZS UAH USD USN UYU UZS VED VES WST XAD XCD XCG YER ZAR ZMW ZWG',
+    'ANG BGN CUC HRK MRO SLL STD VEF ZWL', // withdrawn 2017–2026
+  ],
+  3: ['BHD IQD JOD KWD LYD OMR TND'],
+  4: ['CLF UYW'],
+};
 
-/** Number of minor-unit digits (USD 2, JPY 0, KWD 3). Falls back to 2. */
-export function currencyExponent(currency: string): number {
-  const cur = normalizeCurrency(currency);
-  let e = exponentCache.get(cur);
-  if (e === undefined) {
+const ISO_4217_MINOR_UNITS: ReadonlyMap<string, number> = new Map(
+  Object.entries(ISO_4217_BY_DIGITS).flatMap(([digits, rows]) =>
+    rows.flatMap((row) => row.split(' ').map((code) => [code, Number(digits)] as const)),
+  ),
+);
+
+const cldrDigitsCache = new Map<string, number>();
+
+/** CLDR display precision (what `Intl` rounds to by default): HUF 0, USD 2. Falls back to 2. */
+function cldrDigits(cur: string): number {
+  let d = cldrDigitsCache.get(cur);
+  if (d === undefined) {
     try {
-      e = new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).resolvedOptions()
+      d = new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).resolvedOptions()
         .maximumFractionDigits ?? 2;
     } catch {
-      e = 2;
+      d = 2;
     }
-    exponentCache.set(cur, e);
+    cldrDigitsCache.set(cur, d);
   }
-  return e;
+  return d;
+}
+
+/**
+ * ISO 4217 minor-unit digits: USD 2, HUF 2, JPY 0, ISK 0, KWD 3, CLF 4. Codes outside ISO 4217 fall back
+ * to Intl's digits, then 2. Adapters whose provider counts differently convert at the boundary
+ * (Stripe: MGA, ISK, UGX).
+ */
+export function currencyExponent(currency: string): number {
+  const cur = normalizeCurrency(currency);
+  return ISO_4217_MINOR_UNITS.get(cur) ?? cldrDigits(cur);
+}
+
+/**
+ * Decimals shown for an amount: CLDR's display precision, capped at the minor unit (HUF 4,990.00 → "HUF 4,990").
+ * Rounds away minor units that CLDR doesn't display, e.g. 4,990.50 HUF shows as 4,991.
+ */
+export function displayDigits(currency: string): number {
+  const cur = normalizeCurrency(currency);
+  return Math.min(cldrDigits(cur), currencyExponent(cur));
 }
 
 export function toMajor(minor: number, currency: string): number {
@@ -128,15 +188,16 @@ export interface FormatMoneyOptions {
   whole?: boolean;
 }
 
+/** Reads `amountMinor` with the ISO minor unit; shows CLDR's decimals (`displayDigits`). */
 export function formatMoney(amountMinor: number, currency: string, opts: FormatMoneyOptions = {}): string {
   const cur = normalizeCurrency(currency);
-  const exp = currencyExponent(cur);
+  const digits = displayDigits(cur);
   const fmt = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: cur,
     notation: opts.compact ? 'compact' : 'standard',
-    maximumFractionDigits: opts.compact ? 1 : opts.whole ? 0 : exp,
-    minimumFractionDigits: opts.compact || opts.whole ? 0 : exp,
+    maximumFractionDigits: opts.compact ? 1 : opts.whole ? 0 : digits,
+    minimumFractionDigits: opts.compact || opts.whole ? 0 : digits,
     signDisplay: opts.signed ? 'exceptZero' : 'auto',
   });
   return fmt.format(toMajor(amountMinor, cur));

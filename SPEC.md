@@ -169,7 +169,26 @@ Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kayna�
 
 ## 6. Metrik tanımları
 
-Tüm tutarlar minor unit tamsayıdır. Görüntülemede `Intl.NumberFormat` kullanılır.
+Tüm tutarlar **ISO 4217 minor unit** cinsinden tamsayıdır. Görüntülemede `Intl.NumberFormat` kullanılır.
+
+**Minor unit hane sayısı** (`currencyExponent`, `src/lib/money.ts`): SIX'in ISO 4217 listesinden (list one, 2026-09-17)
+alınan sabit tablo. USD, EUR, HUF, IDR, COP, PKR 2 hane; JPY, KRW, ISK, UGX 0; KWD, BHD, IQD 3; CLF 4. Tablo tüm aktif
+kodları ve 2017'den beri kaldırılmış birkaç kodu (SLL, HRK, BGN, MRO…) içerir; `Intl` yalnızca ISO 4217 dışındaki kodlarda
+yedektir. `Intl.NumberFormat(...).resolvedOptions().maximumFractionDigits` hane sayısı olarak **kullanılmaz**: o CLDR'ın
+*gösterim* hassasiyetidir, ICU sürümüne ve çalışma ortamına (Node, workerd) göre değişir ve HUF, IDR, COP, PKR, AFN, ALL,
+IRR, KPW, LAK, LBP, MGA, MMK, SOS, SYP, YER (ISO: 2) ile IQD (ISO: 3) için 0 döner. Eskiden bu değer kullanıldığı için bu para
+birimlerindeki tutarlar 100× (IQD 1000×) büyük görünüyordu. Gösterim CLDR yuvarlamasını korur (`displayDigits` = CLDR
+haneleri, minor unit ile sınırlı): Stripe'tan gelen HUF 4.990,00 (499000) → "HUF 4,990".
+
+**Sağlayıcı birimleri:** Adaptörler tutarı ISO minor unit'e çevirip yazar. Sağlayıcının birimi ISO'dan ayrılıyorsa çevrim
+adaptörde yapılır (Stripe: §6.1). Ondalıklı major unit döndürenler (RevenueCat ve USD raporlayan diğerleri) `toMinor` kullanır.
+
+**Eski kayıtlar:** Saklanan tamsayılar yeniden yazılmadı, yalnızca okunuşları değişti. Stripe ve Lemon Squeezy'nin HUF, IDR,
+COP, PKR (ve yukarıdaki diğer) satırları zaten ISO birimindeydi: yeniden senkronizasyon **gerekmez**, düzeltme hemen görünür.
+Stripe'ın ISK, UGX ve MGA satırları Stripe biriminde yazılmıştı: ISK/UGX 100× büyük kalır, MGA (eskiden doğru görünen)
+artık 100× küçük okunur. "Sync now"
+yalnızca bugünün snapshot'ını ve son 2 günü yeniler; geçmişi düzeltmek için bağlantıyı kaldırıp yeniden eklemek gerekir
+(90 günlük gelir yeniden çekilir, eski snapshot'lar silinir). RevenueCat USD raporladığı için etkilenmez.
 
 | Metrik | Tanım |
 |--------|-------|
@@ -208,6 +227,12 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
   `refund`/`payment_refund` → refund (negatif). Para birimi: bakiye (settlement) para birimi. Tutar tahsil edildiği gibidir (vergi dahil; §6).
   Kısmi capture'da tam yetkilendirme `charge`, yakalanmayan kısım `refund` (`partial_capture_reversal`) olarak gelir; brüt ve iadeler biraz yüksek, net doğrudur.
   Test clock'a bağlı abonelikler listelenmez.
+- **Tutar birimi** ([currencies](https://docs.stripe.com/currencies#zero-decimal)): Stripe tamsayıları ISO minor unit ile
+  aynıdır, üç istisna `fromStripeAmount` ile çevrilir: MGA Stripe'ın sıfır ondalıklı listesinde (ISO 2 → ×100); ISK ve UGX
+  "geriye uyumluluk için" iki ondalıklı gönderilir, 5 ISK = `500` (ISO 0 → ÷100). UGX sıfır ondalıklı listede de geçiyor;
+  özel durum notu ve Stripe'ın kendi istemcisi (stripe-android `SERVER_DECIMAL_DIGITS`) 2 dediği için 2 kabul edilir. HUF ve
+  TWD tahsilatta iki ondalıklıdır (sıfır ondalık yalnızca payout için). Çevrim fiyat, kupon `amount_off`, `amount` ve `fee`
+  alanlarının hepsine uygulanır; MRR'da aylığa normalize etmeden önce yapılır.
 
 ### 6.2 Lemon Squeezy
 
@@ -241,6 +266,8 @@ Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı göst
   Tutarlar mağaza para birimindedir; LS tahsilatı USD olarak işler (`*_usd` alanları), aradaki kur farkı yansıtılmaz.
   Bu sürümden önce senkronize edilmiş ve 30 günlük geri bakışın dışında kalan LS geçmişi vergi dahil kalır (motor eski
   satırları silmez); geçmişi yeniden hesaplamak için bağlantı silinip yeniden eklenir.
+- **Tutar birimi:** Belgeler yalnızca "in cents" der ve iki ondalıklı olmayan para birimleri için ne anlama geldiğini
+  söylemez. Tutarlar ISO minor unit kabul edilir (JPY/KRW tam, HUF/IDR yüzde birlik); ISK, UGX ve MGA doğrulanmadı.
 - **Limit:** 300 istek/dk, `Retry-After` yok. 429'da yeniden denenmez: gelir okuduğunu ve imleci döndürür, snapshot başarısız olur.
 - ✅ **Doğrulandı:** `prices` alanları `scheme`, `unit_price` (volume/graduated'da kullanılmaz), `unit_price_decimal`,
   `package_size`, `tiers`, `renewal_interval_*`, `trial_interval_*` ([price object](https://docs.lemonsqueezy.com/api/prices/the-price-object));
@@ -383,7 +410,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   `date` yerine `updated_at` ile süzmek, 2–7 günde netleşen direct debit'leri ve geç başarısızlıkları yakalar. Pencere cursor'da donar;
   429'da okunanlar korunur ve cursor döner.
 - **Para birimi:** Tutarlar "in cents" (ana birimin 1/100'ü); sıfır ondalıklı para birimleri (CLP, ISK, JPY, KRW, MGA, PYG, VND, XAF, XOF,
-  XPF) ana birimdedir. Hepsi hoomuch minor unit'ine (`currencyExponent`) çevrilir: Intl'de 0 haneli HUF, IDR, COP, PKR ÷100.
+  XPF) ana birimdedir. Hepsi hoomuch'un ISO 4217 minor unit'ine (`currencyExponent`) çevrilir: HUF, IDR gibi iki ondalıklılar olduğu gibi kalır; MGA (ISO 2) ×100.
 - **Limit:** Test siteleri ve Starter 150 istek/dk (Performance 1000, Enterprise 3500), satıcının kendi entegrasyonuyla paylaşılır.
   Snapshot 429'da kısa Retry-After'ı bekler; gelir hemen bırakır ve sonraki senkronda devam eder.
 - ✅ **Doğrulandı:** filtreler, operatörler ve sayfalama ([list subscriptions](https://apidocs.chargebee.com/docs/api/subscriptions/list-subscriptions),

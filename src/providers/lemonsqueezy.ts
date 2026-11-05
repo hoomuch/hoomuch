@@ -40,6 +40,10 @@
  *    their own `currency` (the store currency, which sets what checkout and the dashboard show) with `*_usd`
  *    twins. We report that currency, as the merchant prices and sees it; the USD actually settled differs by
  *    the conversion at payment time.
+ *  - Units: money (`unit_price`, `total`, `tax`, `refunded_amount`, …) is "a positive integer in cents" of that
+ *    currency. Neither the API reference nor the currencies page says what "cents" means for a currency without
+ *    two decimals, so amounts are read as ISO 4217 minor units (`currencyExponent`): JPY and KRW whole, HUF and
+ *    IDR in hundredths. Unverified for ISK, UGX and MGA, where Stripe's units differ from ISO.
  *  - Refunds: orders and invoices carry `refunded_amount` (cumulative) and `refunded_at`, which the docs set only
  *    for a FULL refund (the partial-refund example keeps `refunded_at: null` and even `status: "paid"`).
  *

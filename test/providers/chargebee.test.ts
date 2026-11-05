@@ -186,19 +186,13 @@ describe('chargebee toMinorUnits', () => {
     expect(toMinorUnits(15000, 'KRW')).toBe(15000);
   });
 
-  it('rescales where Chargebee (cents) and hoomuch (Intl digits) disagree', () => {
-    // Literal expectations, derived by hand (not by re-running the formula under test). They assume the
-    // Intl/ICU digits pinned below: if Node's ICU changes them, the guard fails first and says why.
-    expect(['HUF', 'IDR', 'COP', 'CLF', 'ISK'].map(currencyExponent)).toEqual([0, 0, 0, 4, 0]);
-    // HUF / IDR / COP are "in cents" in Chargebee (150000 = 1,500.00) but whole units in hoomuch.
-    expect(toMinorUnits(150000, 'HUF')).toBe(1500);
-    expect(toMinorUnits(150000, 'IDR')).toBe(1500);
-    expect(toMinorUnits(150000, 'COP')).toBe(1500);
-    expect(toMinorUnits(150050, 'HUF')).toBe(1501); // 1,500.50 Ft → nearest forint
-    // CLF has 4 digits in hoomuch: 1,500.00 CLF = 15,000,000 ten-thousandths.
-    expect(toMinorUnits(150000, 'CLF')).toBe(15_000_000);
-    // ISK is zero-decimal in both: Chargebee's 100 is 100 kr.
-    expect(toMinorUnits(100, 'ISK')).toBe(100);
+  it('rescales only where Chargebee and ISO 4217 minor units disagree', () => {
+    // HUF / IDR / COP / PKR: two decimals in both, so Chargebee's cents pass through (12,500.00 Ft).
+    for (const cur of ['HUF', 'IDR', 'COP', 'PKR']) expect(toMinorUnits(1250000, cur)).toBe(1250000);
+    expect(toMinorUnits(5000, 'MGA')).toBe(500000); // Chargebee zero-decimal, ISO 2
+    expect(toMinorUnits(150000, 'CLF')).toBe(15000000); // Chargebee cents, ISO 4
+    expect(toMinorUnits(100, 'ISK')).toBe(100); // zero-decimal in both
+    expect(currencyExponent('HUF')).toBe(2);
   });
 });
 
@@ -346,7 +340,7 @@ describe('chargebee fetchSnapshot', () => {
       trials: [sub({ status: 'in_trial', mrr: 0 }), sub({ status: 'in_trial', mrr: 0 })],
     });
     expect(snap).toEqual({
-      mrr: { USD: 5900, EUR: 2500, JPY: 1500, HUF: 12500 }, // HUF: 12,500.00 Ft → 12500 whole forints
+      mrr: { USD: 5900, EUR: 2500, JPY: 1500, HUF: 1250000 }, // HUF: 12,500.00 Ft, two ISO decimals (fillér)
       activeSubscriptions: 5,
       activeTrials: 2,
       revenuePeriod: null,
@@ -559,7 +553,7 @@ describe('chargebee fetchRevenue', () => {
         ev('txn_FakeLate:late_failure', t - 3, 'refund', -3000),
         ev('txn_FakeSlowDD', SINCE_S - 5 * DAY_S, 'charge', 1500),
         ev('txn_FakeYen', t - 5, 'charge', 1500, 'JPY'),
-        ev('txn_FakeForint', t - 6, 'charge', 12500, 'HUF'), // 1250000 Chargebee cents = 12,500 Ft
+        ev('txn_FakeForint', t - 6, 'charge', 1250000, 'HUF'), // 12,500.00 Ft: Chargebee cents = ISO minor units
       ],
       daily: [],
       nextCursor: null,

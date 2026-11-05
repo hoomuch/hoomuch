@@ -16,8 +16,8 @@
  *     trials, future subscriptions, tax, setup fees and ad-hoc charges, and follows the site's MRR settings
  *     (recurring coupons applied; one-time coupons and non-recurring addons only if configured).
  *   - Money is an integer "in cents": 1/100 of the major unit, except Chargebee's zero-decimal currencies
- *     (CLP, ISK, JPY, KRW, MGA, PYG, VND, XAF, XOF, XPF: major units). hoomuch's minor unit is
- *     `currencyExponent` (Intl), which differs for e.g. HUF, IDR, COP, PKR (0 digits) and CLF (4), so every
+ *     (CLP, ISK, JPY, KRW, MGA, PYG, VND, XAF, XOF, XPF: major units). hoomuch's minor unit is the ISO 4217
+ *     one (`currencyExponent`), which differs from Chargebee's for MGA (ISO 2) and CLF (ISO 4), so every
  *     amount goes through `toMinorUnits`. Chargebee supports no three-decimal currency.
  *   - Transaction.type: authorization | payment | refund | payment_reversal. Transaction.status:
  *     in_progress | success | voided | failure | timeout | needs_attention | late_failure. A direct debit that

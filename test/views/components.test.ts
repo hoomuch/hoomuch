@@ -5,7 +5,11 @@
 
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { listConnectionSummaries } from '../../src/data/connections';
+import { getDashboardData } from '../../src/data/dashboard';
+import { listTransactions } from '../../src/data/transactions';
+import { createTestD1, seedConnection, seedUser, testEnv } from '../fixtures/d1';
 import { BreakdownTable } from '../../src/views/components/breakdown-table';
 import { ConnectionForm } from '../../src/views/components/connection-form';
 import { DangerZone } from '../../src/views/components/danger-zone';
@@ -916,6 +920,63 @@ function expectCspSafe(out: string, name: string): void {
 // against an empty map, and fail.)
 afterAll(() => {
   for (const [name, out] of Object.entries(rendered)) expectCspSafe(out, name);
+});
+
+describe('currencies whose ISO 4217 digits differ from CLDR', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('shows a HUF 4,990.00 Stripe subscription as HUF 4,990 and converts it at its real size', async () => {
+    // What the Stripe adapter stores for a HUF 4,990.00 monthly price (test/providers/stripe.test.ts):
+    // MRR { HUF: 499000 } and a 499000 HUF charge, both in fillér. Display currency EUR; 1 USD = 400 HUF = 0.9 EUR.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(FIXTURE_NOW);
+    const today = new Date(FIXTURE_NOW).toISOString().slice(0, 10);
+    const t = createTestD1();
+    seedUser(t, { id: 'u-huf', baseCurrency: 'EUR' });
+    seedConnection(t, { id: 'stripe-huf', userId: 'u-huf', provider: 'stripe', name: 'Budapest', status: 'ok', lastSyncedAt: FIXTURE_NOW - MINUTE });
+    t.exec('INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)', today, 'USD', JSON.stringify({ EUR: 0.9, HUF: 400 }), FIXTURE_NOW);
+    t.exec(
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, revenue_period, revenue_period_days, new_customers, captured_at)
+       VALUES (?, ?, ?, 1, 0, NULL, NULL, NULL, ?)`,
+      'stripe-huf', today, JSON.stringify({ HUF: 499000 }), FIXTURE_NOW,
+    );
+    t.exec(
+      `INSERT INTO transactions (connection_id, external_id, occurred_at, type, amount, currency, fee, description)
+       VALUES (?, ?, ?, 'charge', 499000, 'HUF', NULL, 'Pro')`,
+      'stripe-huf', 'txn_FakeHuf', FIXTURE_NOW - HOUR,
+    );
+    const env = testEnv(t.db);
+    const hufUser = { id: 'u-huf', email: 'u-huf@example.com', baseCurrency: 'EUR' };
+
+    const data = await getDashboardData(env, hufUser, 30);
+    expect(data.kpis.mrr.value).toBe(1123); // HUF 4,990 → $12.475 → €11.2275; the old reading was €1,122.75
+    const dashboard = await render(
+      'dashboard-huf',
+      h(DashboardPage, {
+        chrome: { user: hufUser, flash: null },
+        data,
+        connections: await listConnectionSummaries(env, hufUser.id),
+        sync: null,
+        now: FIXTURE_NOW,
+      }),
+    );
+    expect(dashboard).toMatch(/aria-label="MRR"[\s\S]*?€11[^,\d]/);
+    expect(dashboard).toContain('€135 ARR');
+    expect(dashboard).not.toContain('€1,123');
+
+    const transactions = await render(
+      'transactions-huf',
+      h(TransactionsPage, {
+        chrome: { user: hufUser, flash: null },
+        page: await listTransactions(env, hufUser, { provider: null, page: 1 }),
+        hasConnections: true,
+        filterProviders: ['stripe'],
+      }),
+    );
+    expect(transactions).toContain('HUF 4,990'); // the original amount, in whole forints
+    expect(transactions).toContain('€11.23');
+    expect(transactions).not.toContain('499,000');
+  });
 });
 
 describe('CSP', () => {
