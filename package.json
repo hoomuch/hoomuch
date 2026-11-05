@@ -45,6 +45,12 @@
       },
       "TURNSTILE_SECRET_KEY": {
         "description": "Optional secret. The secret key of the same Turnstile widget."
+      },
+      "MAIL_FROM": {
+        "description": "Optional. Sender of the sign-up confirmation email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set."
+      },
+      "RESEND_API_KEY": {
+        "description": "Optional secret. A Resend API key with sending access. When set, new accounts must confirm their email address before using hoomuch. Leave empty to keep it off."
       }
     }
   },

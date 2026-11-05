@@ -6,6 +6,7 @@ import {
   authenticate,
   clientIp,
   endSession,
+  normalizeEmail,
   registerUser,
   safeNext,
   signupAllowed,
@@ -21,11 +22,13 @@ import {
   verifyTurnstile,
   type BotAction,
 } from '../lib/bot-defense';
+import { sendVerificationLink, VERIFY_PATH, verificationRequired } from '../lib/email-verification';
 import { redirectWithFlash, setCelebrate } from '../lib/flash';
 import { RATE_LIMIT_PERIOD_SECONDS, withinAuthLimit } from '../lib/rate-limit';
 import { fixtureDashboard } from '../views/fixtures';
 import { syncCadence } from '../views/pages/shared';
 import { chrome, formLimit, readForm, type AppContext, type FormFields } from './util';
+import { MAIL_FAILED_MESSAGE } from './verify-email';
 import { renderPage } from '../views/render';
 
 const EMAIL_MAX = 254;
@@ -117,6 +120,12 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
       return renderPage(c, 'auth', { ...again, error: result.error, field: result.field }, result.throttled ? 429 : 400);
     }
     await startSession(c, result.userId);
+    if (verificationRequired(c.env)) {
+      // Held at check-your-inbox until the mailed link is used; the welcome waits for that.
+      const user = { id: result.userId, email: normalizeEmail(email) };
+      if (await sendVerificationLink(c.env, user, new URL(c.req.url).origin)) return c.redirect(VERIFY_PATH, 303);
+      return redirectWithFlash(c, VERIFY_PATH, 'error', MAIL_FAILED_MESSAGE);
+    }
     // No flash: the empty dashboard is the welcome (design/system.md §6). Just one confetti burst.
     setCelebrate(c);
     return c.redirect(safeNext(next), 303);

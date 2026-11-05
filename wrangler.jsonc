@@ -36,7 +36,11 @@
     "SYNC_INTERVAL_MINUTES": "60",
     // Cloudflare Turnstile on log in and sign up: put the widget's site key here and set the
     // TURNSTILE_SECRET_KEY secret. Empty (the default) leaves Turnstile off.
-    "TURNSTILE_SITE_KEY": ""
+    "TURNSTILE_SITE_KEY": "",
+    // Email verification: who the sign-up confirmation mail comes from, on a domain verified in
+    // Resend, e.g. "hoomuch <hello@example.com>". It's on once the RESEND_API_KEY secret is set;
+    // without that secret, nothing is mailed and new accounts don't need confirming.
+    "MAIL_FROM": ""
   },
 
   // Per-network request limits, checked before any D1 work (src/lib/rate-limit.ts). Counts are per
@@ -52,6 +56,6 @@
   "observability": {
     "enabled": true
   }
-  // Secrets (not in this file): ENCRYPTION_KEY, and TURNSTILE_SECRET_KEY if you turn Turnstile on.
-  // See .dev.vars.example
+  // Secrets (not in this file): ENCRYPTION_KEY, TURNSTILE_SECRET_KEY if you turn Turnstile on, and
+  // RESEND_API_KEY if you turn email verification on. See .dev.vars.example
 }

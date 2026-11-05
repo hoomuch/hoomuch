@@ -24,6 +24,13 @@ export interface Bindings {
   TURNSTILE_SITE_KEY?: string;
   /** Secret. Turnstile secret key for Siteverify. */
   TURNSTILE_SECRET_KEY?: string;
+  /**
+   * Secret. Resend API key (sending access). When set, hoomuch mails sign-up confirmation links
+   * and holds new accounts until their address is confirmed. Unset: no mail, no verification.
+   */
+  RESEND_API_KEY?: string;
+  /** Sender for that mail, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. */
+  MAIL_FROM?: string;
 }
 
 export interface SessionUser {
@@ -51,5 +58,7 @@ export type AppEnv = {
     flash: Flash | null;
     /** Throw confetti on this page (one-shot, set by sign-up). See lib/flash.ts. */
     celebrate: boolean;
+    /** The signed-in account hasn't confirmed its address (false when signed out). See lib/auth.ts. */
+    emailUnverified: boolean;
   };
 };

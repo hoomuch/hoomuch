@@ -12,6 +12,7 @@ import { DAY, MINUTE } from './time';
 import { cookieSpec } from './cookies';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
 import { isDisposableEmail } from './disposable-email';
+import { VERIFY_PATH, verificationRequired } from './email-verification';
 import {
   deleteOtherSessions,
   deleteSession,
@@ -21,6 +22,7 @@ import {
   getUserById,
   insertSession,
   insertUser,
+  purgeAbandonedAccounts,
   updateUserPassword,
 } from '../db/queries';
 
@@ -59,6 +61,13 @@ export const DAILY_KEY_PREFIX = 'day:';
  * against the account, not just the source). Generous, so a typo-prone owner never meets it.
  */
 const ACCOUNT_MAX_ATTEMPTS = 50;
+/**
+ * Confirmation links one account can ask to be sent again: a few per window, and a cap per day.
+ * Each one is a mail to an address that may not be the requester's, so this bounds what a
+ * squatted address receives (and the instance's mail quota).
+ */
+const RESEND_MAX_ATTEMPTS = 3;
+const RESEND_DAILY_MAX = 10;
 
 /** Well-formed hash that matches no password; verifying against it equalises timing for unknown emails. */
 const DUMMY_HASH = 'pbkdf2$100000$c29tZS1zYWx0LWZvci10aW1pbmc$2pX8YQ2yq1xS0bqgk5r4zC5N4bJt0bq0yq3s9m7vK1A';
@@ -198,6 +207,16 @@ export function ipBucket(ip: string): string {
     .join(':')}::/64`;
 }
 
+export type ResendAllowance = 'ok' | 'wait' | 'tomorrow';
+
+/** Counts one request for a new confirmation link, per account. */
+export async function allowVerificationResend(env: Bindings, userId: string): Promise<ResendAllowance> {
+  const now = Date.now();
+  if (!(await reserveAttempt(env, await sha256Hex(`verify-resend|${userId}`), now, RESEND_MAX_ATTEMPTS))) return 'wait';
+  const dayKey = DAILY_KEY_PREFIX + (await sha256Hex(`verify-resend-day|${userId}`));
+  return (await reserveAttempt(env, dayKey, now, RESEND_DAILY_MAX, DAILY_WINDOW_MS)) ? 'ok' : 'tomorrow';
+}
+
 /** One bucket per user for re-entering the current password (change password, delete account). */
 function passwordCheckKey(userId: string): Promise<string> {
   return sha256Hex(`password-check|${userId}`);
@@ -219,7 +238,12 @@ export async function registerUser(env: Bindings, emailRaw: string, password: st
   const pwErr = passwordProblem(password, email);
   if (pwErr) return { ok: false, error: pwErr, field: 'password' };
   const exists = { ok: false as const, error: 'An account with this email already exists. Log in instead.', field: 'email' as const };
-  if (await getUserByEmail(env.DB, email)) return exists;
+  const taken = await getUserByEmail(env.DB, email);
+  // An address someone signed up with but never confirmed is free again once every link mailed to
+  // it has expired, so typing in someone else's address can't lock its owner out.
+  if (taken && !(taken.email_verified_at === null && (await purgeAbandonedAccounts(env.DB, Date.now(), taken.id)) > 0)) {
+    return exists;
+  }
   // Counted only once the sign-up would go through, so typos and taken emails don't use it up.
   const dayKey = DAILY_KEY_PREFIX + (await sha256Hex(`signup-day|${ipBucket(ip)}`));
   if (!(await reserveAttempt(env, dayKey, Date.now(), SIGNUP_DAILY_MAX, DAILY_WINDOW_MS))) {
@@ -324,6 +348,7 @@ export async function endSession(c: Context<AppEnv>): Promise<void> {
 /** Populates c.var.user from the session cookie (null when signed out). Sliding expiry. */
 export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
   c.set('user', null);
+  c.set('emailUnverified', false);
   const token = readSessionToken(c);
   if (token) {
     const sessionId = await sha256Hex(token);
@@ -331,6 +356,7 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
     const row = await getSessionWithUser(c.env.DB, sessionId, now, now - SESSION_ABSOLUTE_MAX_MS);
     if (row) {
       c.set('user', { id: row.user_id, email: row.email, baseCurrency: row.base_currency });
+      c.set('emailUnverified', row.email_verified_at === null);
       if (row.expires_at - now < SESSION_REFRESH_BELOW_MS) {
         await extendSession(c.env.DB, sessionId, now + SESSION_TTL_MS);
         setSessionCookie(c, token);
@@ -340,16 +366,31 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
   await next();
 });
 
-/** Redirects to /login?next=… when signed out. */
-export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
-  if (!c.get('user')) {
-    const url = new URL(c.req.url);
-    return c.redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`, 303);
-  }
+function toLogin(c: Context<AppEnv>): Response {
+  const url = new URL(c.req.url);
+  return c.redirect(`/login?next=${encodeURIComponent(url.pathname + url.search)}`, 303);
+}
+
+/**
+ * Redirects to /login?next=… when signed out. Lets an unconfirmed account through: only the
+ * verification pages (check your inbox, send again) use this.
+ */
+export const requireSignedIn = createMiddleware<AppEnv>(async (c, next) => {
+  if (!c.get('user')) return toLogin(c);
   await next();
 });
 
-/** The signed-in user. Only call behind `requireUser`. */
+/**
+ * Every app page and action. Redirects to /login?next=… when signed out, and holds an account
+ * that hasn't confirmed its address at the check-your-inbox page while verification is on.
+ */
+export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
+  if (!c.get('user')) return toLogin(c);
+  if (c.get('emailUnverified') && verificationRequired(c.env)) return c.redirect(VERIFY_PATH, 303);
+  await next();
+});
+
+/** The signed-in user. Only call behind `requireUser` or `requireSignedIn`. */
 export function currentUser(c: Context<AppEnv>): SessionUser {
   const u = c.get('user');
   if (!u) throw new Error('currentUser() called without requireUser');

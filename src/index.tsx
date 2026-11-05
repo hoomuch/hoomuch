@@ -11,7 +11,7 @@ import { DAILY_KEY_PREFIX, DAILY_WINDOW_MS, loadUser, THROTTLE_WINDOW_MS } from 
 import { TURNSTILE_ORIGIN, turnstileSiteKey } from './lib/bot-defense';
 import { loadFlash } from './lib/flash';
 import { limitRequests } from './lib/rate-limit';
-import { deleteExpiredSessions, deleteStaleLoginAttempts } from './db/queries';
+import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
 import { runScheduledSync } from './sync/engine';
 
@@ -100,6 +100,8 @@ export default {
           dailyMs: DAILY_WINDOW_MS,
           dailyPrefix: DAILY_KEY_PREFIX,
         }),
+        // Accounts nobody confirmed before their links expired (lib/email-verification.ts).
+        purgeAbandonedAccounts(env.DB, now),
       ]).then((results) => {
         for (const r of results) {
           if (r.status === 'rejected') console.error(JSON.stringify({ event: 'cron_failed', message: String(r.reason) }));

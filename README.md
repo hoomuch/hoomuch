@@ -81,6 +81,8 @@ npm run deploy                       # applies D1 migrations, then deploys
 | `SYNC_INTERVAL_MINUTES` | `vars` in `wrangler.jsonc` | `"60"` | How often each connection syncs, rounded up to a multiple of the 30-minute cron. |
 | `TURNSTILE_SITE_KEY` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. A [Turnstile](https://developers.cloudflare.com/turnstile/) widget's site key. With the secret below, log in and sign up require the Turnstile check. |
 | `TURNSTILE_SECRET_KEY` | Secret (`wrangler secret put`) | none | Optional. The same widget's secret key. |
+| `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below). |
+| `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
 
 The cron schedule itself is `triggers.crons` in `wrangler.jsonc`.
@@ -102,6 +104,14 @@ the one before lets through:
   `npm run domains:update` refreshes it.
 - **A honeypot field** on both forms that people never see, so bots that fill every input give
   themselves away. It needs no JavaScript.
+- **Email verification**, if you set `RESEND_API_KEY` and `MAIL_FROM`. Without it, anyone can sign
+  up with an address they don't own. With it, a new account is held at a "check your inbox" page
+  until the person opens the link mailed to them. The link works once and expires after 24 hours,
+  and "Send the link again" is limited to 3 every 15 minutes and 10 a day per account. An account
+  nobody confirms is removed once all its links have expired, so the address is free for its real
+  owner. Accounts from before this feature (migration `0004`) count as confirmed; ones created later
+  while mail was off are asked to confirm the next time they're used. Verify your sending domain in
+  Resend and turn its click tracking off, so links reach people unchanged.
 - **Turnstile**, if you set both keys. Create a widget in the Cloudflare dashboard (Managed mode,
   your hostname), put the site key in `vars` and `wrangler secret put TURNSTILE_SECRET_KEY`. Log in and
   sign up then need JavaScript, and only those two pages allow `challenges.cloudflare.com` in their

@@ -13,6 +13,7 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import schema from '../../migrations/0001_init.sql?raw';
 import currencySource from '../../migrations/0002_currency_source.sql?raw';
 import providerIds from '../../migrations/0003_provider_ids.sql?raw';
+import emailVerification from '../../migrations/0004_email_verification.sql?raw';
 import type { Bindings } from '../../src/env';
 
 type Bindable = null | number | bigint | string | Uint8Array;
@@ -96,6 +97,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(schema);
   sqlite.exec(currencySource);
   sqlite.exec(providerIds);
+  sqlite.exec(emailVerification);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {

@@ -13,6 +13,8 @@ export interface UserRow {
   email: string;
   password_hash: string;
   base_currency: string;
+  /** When the address was confirmed through a mailed link (ms); null = never. */
+  email_verified_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -127,6 +129,7 @@ export interface SessionJoinRow {
   user_id: string;
   email: string;
   base_currency: string;
+  email_verified_at: number | null;
 }
 
 /** A live session: not expired, and created after `minCreatedAt` (absolute lifetime cap). */
@@ -138,7 +141,7 @@ export function getSessionWithUser(
 ): Promise<SessionJoinRow | null> {
   return db
     .prepare(
-      `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.base_currency
+      `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.base_currency, u.email_verified_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.id = ? AND s.expires_at > ? AND s.created_at > ?`,
     )
@@ -292,4 +295,71 @@ export function parseConfig(json: string | null | undefined): Record<string, str
   } catch {
     return {};
   }
+}
+
+// ---------- email verification ----------
+
+export async function insertEmailVerification(
+  db: D1Database,
+  id: string,
+  userId: string,
+  expiresAt: number,
+  now: number,
+): Promise<void> {
+  await db
+    .prepare('INSERT INTO email_verifications (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+    .bind(id, userId, expiresAt, now)
+    .run();
+}
+
+export function getEmailVerification(db: D1Database, id: string): Promise<{ user_id: string; expires_at: number } | null> {
+  return db
+    .prepare('SELECT user_id, expires_at FROM email_verifications WHERE id = ?')
+    .bind(id)
+    .first<{ user_id: string; expires_at: number }>();
+}
+
+/** Deletes a live link and returns its user, in one statement: a link can only be spent once. */
+export async function consumeEmailVerification(db: D1Database, id: string, now: number): Promise<string | null> {
+  const row = await db
+    .prepare('DELETE FROM email_verifications WHERE id = ? AND expires_at > ? RETURNING user_id')
+    .bind(id, now)
+    .first<{ user_id: string }>();
+  return row?.user_id ?? null;
+}
+
+/** Marks the address confirmed (first time only) and drops every other link of that user. */
+export async function markEmailVerified(db: D1Database, userId: string, now: number): Promise<void> {
+  await db.batch([
+    db
+      .prepare('UPDATE users SET email_verified_at = ?, updated_at = ? WHERE id = ? AND email_verified_at IS NULL')
+      .bind(now, now, userId),
+    db.prepare('DELETE FROM email_verifications WHERE user_id = ?').bind(userId),
+  ]);
+}
+
+const ABANDONED_PURGE_LIMIT = 500;
+
+/**
+ * Removes accounts nobody confirmed: never verified, every link mailed to them has expired, and no
+ * connections (so nothing is lost). It frees an address someone else typed in. An account that
+ * was never sent a link (created while mail was off) has no rows here and is never touched.
+ * Pass `userId` to check just one account (sign-up does, for the address being registered).
+ * Returns how many accounts were removed; FK cascades take their sessions and links.
+ */
+export async function purgeAbandonedAccounts(db: D1Database, now: number, userId?: string): Promise<number> {
+  const r = await db
+    .prepare(
+      `DELETE FROM users WHERE id IN (
+         SELECT u.id FROM users u
+          WHERE u.email_verified_at IS NULL
+            AND (? IS NULL OR u.id = ?)
+            AND EXISTS (SELECT 1 FROM email_verifications v WHERE v.user_id = u.id)
+            AND NOT EXISTS (SELECT 1 FROM email_verifications v WHERE v.user_id = u.id AND v.expires_at > ?)
+            AND NOT EXISTS (SELECT 1 FROM connections c WHERE c.user_id = u.id)
+          LIMIT ?)`,
+    )
+    .bind(userId ?? null, userId ?? null, now, ABANDONED_PURGE_LIMIT)
+    .run();
+  return r.meta.changes ?? 0;
 }
