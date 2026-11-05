@@ -15,7 +15,10 @@ export type AppContext = Context<AppEnv>;
 
 /** The request-derived bits every page needs. */
 export function chrome(c: AppContext): PageChrome {
-  return { user: c.get('user') ?? null, flash: c.get('flash') ?? null };
+  const chrome: PageChrome = { user: c.get('user') ?? null, flash: c.get('flash') ?? null };
+  // Only when set, so every other page's payload stays exactly as it was.
+  if (c.get('celebrate')) chrome.celebrate = true;
+  return chrome;
 }
 
 // ---------- forms ----------

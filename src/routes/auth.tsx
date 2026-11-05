@@ -12,7 +12,7 @@ import {
   startSession,
 } from '../lib/auth';
 import { parseRange } from '../data/types';
-import { redirectWithFlash } from '../lib/flash';
+import { redirectWithFlash, setCelebrate } from '../lib/flash';
 import { fixtureDashboard } from '../views/fixtures';
 import { syncCadence } from '../views/pages/shared';
 import { chrome, formLimit, readForm } from './util';
@@ -81,7 +81,8 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
         }, result.throttled ? 429 : 400);
     }
     await startSession(c, result.userId);
-    // No flash: the empty dashboard is the welcome (design/system.md §6).
+    // No flash: the empty dashboard is the welcome (design/system.md §6). Just one confetti burst.
+    setCelebrate(c);
     return c.redirect(safeNext(next), 303);
   });
 

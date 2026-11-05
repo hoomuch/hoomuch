@@ -39,5 +39,7 @@ export type AppEnv = {
   Variables: {
     user: SessionUser | null;
     flash: Flash | null;
+    /** Throw confetti on this page (one-shot, set by sign-up). See lib/flash.ts. */
+    celebrate: boolean;
   };
 };

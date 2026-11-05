@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react';
 import type { Flash as FlashMsg, SessionUser } from '../env';
 import { cn } from '../lib/utils';
+import { Celebration } from './components/celebration';
 import { Flash } from './components/flash';
 import { Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
@@ -25,6 +26,8 @@ export type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
 export interface PageChrome {
   user: SessionUser | null;
   flash: FlashMsg | null;
+  /** One confetti burst over the page (once, right after sign-up). */
+  celebrate?: boolean;
 }
 
 export interface LayoutProps extends PageChrome {
@@ -208,6 +211,7 @@ export function Layout(props: LayoutProps) {
             </div>
           )}
         </footer>
+        {props.celebrate ? <Celebration /> : null}
         <PagePayloadScript />
       </body>
     </html>

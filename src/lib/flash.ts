@@ -12,6 +12,8 @@ import { base64UrlToBytes, bytesToBase64Url } from './crypto';
 
 /** Base name; on HTTPS the cookie is `__Host-hm_flash` (see lib/cookies.ts). */
 const FLASH_COOKIE = 'hm_flash';
+/** A one-shot "throw confetti on the next page" marker (after sign-up). No message, no box. */
+const CELEBRATE_COOKIE = 'hm_celebrate';
 
 /** An Undo posts to one of our own paths: a single leading slash, then a plain path. */
 const UNDO_ACTION_RE = /^\/[a-z0-9][a-z0-9/_-]{0,95}$/i;
@@ -24,9 +26,21 @@ export function setFlash(c: Context<AppEnv>, type: FlashType, message: string, u
   setCookie(c, name, value, { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: 60 });
 }
 
-/** Reads (and clears) the flash cookie into c.var.flash. */
+/** Confetti on the next page, once. Rides the same Post/Redirect/Get as a flash. */
+export function setCelebrate(c: Context<AppEnv>): void {
+  const { name, secure } = cookieSpec(c, CELEBRATE_COOKIE);
+  setCookie(c, name, '1', { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: 60 });
+}
+
+/** Reads (and clears) the flash cookie into c.var.flash, and the celebrate cookie into c.var.celebrate. */
 export const loadFlash = createMiddleware<AppEnv>(async (c, next) => {
   c.set('flash', null);
+  c.set('celebrate', false);
+  const party = cookieSpec(c, CELEBRATE_COOKIE);
+  if (getCookie(c, party.name) !== undefined) {
+    deleteCookie(c, party.name, { path: '/', secure: party.secure });
+    c.set('celebrate', true);
+  }
   const { name, secure } = cookieSpec(c, FLASH_COOKIE);
   const raw = getCookie(c, name);
   if (raw && raw.length <= 1024) {

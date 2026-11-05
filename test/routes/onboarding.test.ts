@@ -89,3 +89,49 @@ describe('connecting', () => {
     expect(flashCookie(res)).not.toBeNull();
   });
 });
+
+function get(path: string, extraCookie = ''): Promise<Response> {
+  const req = new Request(`${ORIGIN}${path}`, {
+    headers: { cookie: `__Host-hm_session=${TOKEN}${extraCookie ? `; ${extraCookie}` : ''}` },
+    redirect: 'manual',
+  });
+  const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {} };
+  return worker.fetch!(req as never, testEnv(t.db), ctx as never) as Promise<Response>;
+}
+
+/** The page payload (JSON data block) the browser hydrates from. */
+async function payload(res: Response): Promise<{ props: { chrome: Record<string, unknown> } }> {
+  const html = await res.text();
+  const json = /<script id="hm-page" type="application\/json">(.*?)<\/script>/s.exec(html)?.[1];
+  if (!json) throw new Error('no page payload');
+  return JSON.parse(json);
+}
+
+describe('signing up', () => {
+  it('lands on the dashboard with one confetti burst and no flash', async () => {
+    const res = await post('/signup', { email: 'new@example.com', password: 'correct horse battery' });
+    expect(res.status).toBe(303);
+    expect(res.headers.get('location')).toBe('/dashboard');
+    expect(flashCookie(res)).toBeNull(); // the empty dashboard is the welcome
+    const party = res.headers.getSetCookie().find((c) => c.startsWith('__Host-hm_celebrate=1'));
+    expect(party).toMatch(/HttpOnly/i);
+    expect(party).toMatch(/Max-Age=60/);
+  });
+
+  it('celebrates on the next page only, and clears the marker so a reload does not repeat it', async () => {
+    const first = await get('/dashboard', '__Host-hm_celebrate=1');
+    expect(first.status).toBe(200);
+    expect(first.headers.getSetCookie().some((c) => c.startsWith('__Host-hm_celebrate=') && c.includes('Max-Age=0'))).toBe(true);
+    expect((await payload(first)).props.chrome.celebrate).toBe(true);
+
+    const reload = await get('/dashboard');
+    expect((await payload(reload)).props.chrome).not.toHaveProperty('celebrate');
+  });
+
+  it('does not celebrate a log-in', async () => {
+    await post('/signup', { email: 'back@example.com', password: 'correct horse battery' });
+    const res = await post('/login', { email: 'back@example.com', password: 'correct horse battery' });
+    expect(res.status).toBe(303);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith('__Host-hm_celebrate='))).toBe(false);
+  });
+});
