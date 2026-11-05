@@ -78,9 +78,16 @@ function ChartContainer({
   )
 }
 
+// The <style> below is raw CSS written into the page, so nothing reaches it unchecked: keys and
+// the chart id are plain tokens, colours are hex or a CSS variable. Anything else is dropped, so a
+// provider-supplied name or colour wired in later can't close the <style> or inject CSS.
+const SAFE_TOKEN = /^[A-Za-z0-9_-]+$/
+const SAFE_COLOR = /^(#[0-9a-f]{3,8}|var\(--[a-z0-9-]+\))$/i
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
+  if (!SAFE_TOKEN.test(id)) return null
   const colorConfig = Object.entries(config).filter(
-    ([, config]) => config.theme ?? config.color
+    ([key, config]) => SAFE_TOKEN.test(key) && (config.theme ?? config.color)
   )
 
   if (!colorConfig.length) {
@@ -99,7 +106,7 @@ ${colorConfig
     const color =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ??
       itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
+    return color && SAFE_COLOR.test(color) ? `  --color-${key}: ${color};` : null
   })
   .join("\n")}
 }

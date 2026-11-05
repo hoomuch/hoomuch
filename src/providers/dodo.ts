@@ -435,7 +435,7 @@ function addEntry(acc: Sums, raw: unknown, slice: Slice, to: string, end: number
     return;
   }
   const type = str(raw['event_type']) ?? 'unknown';
-  const rule = COUNTED[type];
+  const rule = Object.hasOwn(COUNTED, type) ? COUNTED[type] : undefined; // own keys only: `type` is Dodo's
   if (!rule) {
     stats.ignored[type] = (stats.ignored[type] ?? 0) + 1;
     return;

@@ -1,0 +1,8 @@
+# Headers for the static files in ./public, which Cloudflare serves before the Worker runs (so the
+# Worker's secureHeaders middleware never sees them). Pages get their headers in src/index.tsx.
+/*
+  X-Content-Type-Options: nosniff
+  Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Cross-Origin-Resource-Policy: same-origin

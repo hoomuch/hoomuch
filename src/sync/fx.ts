@@ -5,6 +5,7 @@
  * Read models call `getLatestFx` and convert at display time with today's rate (SPEC §6).
  */
 
+import { readTextBounded } from '../providers/http';
 import { convertMinor, normalizeCurrency, type FxTable, type MoneyMap } from '../lib/money';
 import { HOUR } from '../lib/time';
 
@@ -13,6 +14,9 @@ export const FX_BASE = 'USD';
 /** ECB publishes once per working day (~16:00 CET); one fetch per ~day is plenty. */
 export const FX_MAX_AGE_MS = 20 * HOUR;
 const FX_TIMEOUT_MS = 10_000;
+const FX_RATE_MIN = 1e-6;
+const FX_RATE_MAX = 1e7;
+const FX_MAX_BYTES = 256 * 1024;
 
 interface FxRow {
   day: string;
@@ -27,7 +31,10 @@ function parseRates(json: string): Record<string, number> {
     if (!v || typeof v !== 'object') return {};
     const out: Record<string, number> = {};
     for (const [k, n] of Object.entries(v as Record<string, unknown>)) {
-      if (typeof n === 'number' && Number.isFinite(n) && n > 0) out[normalizeCurrency(k)] = n;
+      // ISO 4217 codes and plausible magnitudes only (units of CUR per 1 base span roughly 0.3 for
+      // KWD to ~1e5 for IRR or VND; the bounds leave wide margin). Anything else is a corrupt response.
+      const code = normalizeCurrency(k);
+      if (/^[A-Z]{3}$/.test(code) && typeof n === 'number' && Number.isFinite(n) && n >= FX_RATE_MIN && n <= FX_RATE_MAX) out[code] = n;
     }
     return out;
   } catch {
@@ -67,7 +74,8 @@ export async function refreshFx(db: D1Database, fetchImpl: typeof fetch, now: nu
   try {
     const res = await fetchImpl(FX_URL, { headers: { Accept: 'application/json' }, signal: controller.signal });
     if (!res.ok) throw new Error(`fx: HTTP ${res.status}`);
-    body = await res.json();
+    // The real payload is ~1 KB; never buffer an unbounded body from a third party.
+    body = JSON.parse(await readTextBounded(res, FX_MAX_BYTES)) as unknown;
   } finally {
     clearTimeout(timer);
   }

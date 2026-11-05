@@ -388,6 +388,24 @@ export function getAdapter(id: ProviderId): ProviderAdapter {
 }
 
 /**
+ * Key formats that unmistakably belong to one provider. A secret pasted into another provider's
+ * form is refused before anything is sent: a live Stripe key must never reach, say, Chargebee's
+ * servers just because it was pasted in the wrong box (several adapters accept opaque keys).
+ */
+const KEY_OWNERS: ReadonlyArray<readonly [RegExp, ProviderId]> = [
+  [/^(sk|rk)_(live|test)_[A-Za-z0-9]{20,}$/, 'stripe'],
+  [/^pdl_(live|sdbx)_apikey_/, 'paddle'],
+  [/^polar_(oat|pat)_/, 'polar'],
+  [/^dodo_(live|test)_/, 'dodo'],
+  [/^secret_(live|test)_/, 'adapty'],
+];
+
+/** The provider a secret visibly belongs to, when that isn't `self`. */
+export function foreignKeyOwner(self: ProviderId, secret: string): ProviderId | null {
+  return KEY_OWNERS.find(([re, id]) => id !== self && re.test(secret))?.[1] ?? null;
+}
+
+/**
  * Splits raw form input into encrypted credentials vs plain config, trimming values
  * and checking required fields. Unknown keys are ignored.
  */
@@ -406,6 +424,11 @@ export function splitInput(
     }
     if (v.length > 4096) {
       errors[f.name] = `${f.label} is too long.`;
+      continue;
+    }
+    const owner = f.secret ? foreignKeyOwner(meta.id, v) : null;
+    if (owner) {
+      errors[f.name] = `That looks like a ${getProviderMeta(owner).name} key. Paste your ${meta.name} key here.`;
       continue;
     }
     (f.secret ? credentials : config)[f.name] = v;

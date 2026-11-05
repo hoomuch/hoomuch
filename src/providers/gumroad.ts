@@ -148,6 +148,14 @@ const RECURRENCES: Readonly<Record<string, { interval: BillingInterval; count: n
   every_two_years: { interval: 'year', count: 2 },
 };
 
+/**
+ * Own keys only: `recurrence` comes from Gumroad, and a plain lookup of "constructor" or
+ * "__proto__" would return Object's own members (NaN MRR, then every USD amount dropped).
+ */
+function recurrenceOf(rec: string | null | undefined): { interval: BillingInterval; count: number } | undefined {
+  return rec && Object.hasOwn(RECURRENCES, rec) ? RECURRENCES[rec] : undefined;
+}
+
 /** Statuses of a subscription that is still collecting (or about to collect) money. */
 const PAYING_STATUSES: ReadonlySet<string> = new Set([
   'alive',
@@ -338,7 +346,7 @@ function toMembership(p: Json): MembershipProduct | null {
   if (!id || p['deleted'] === true) return null;
   const tiered = p['is_tiered_membership'] === true;
   const legacy = str(p['subscription_duration']);
-  const legacyRecurrence = !tiered && legacy && RECURRENCES[legacy] ? legacy : null;
+  const legacyRecurrence = !tiered && recurrenceOf(legacy) ? legacy : null;
   if (!tiered && !legacyRecurrence) return null;
   const options: TierOption[] = [];
   for (const cat of Array.isArray(p['variants']) ? p['variants'].filter(isObject) : []) {
@@ -590,7 +598,7 @@ function listPrice(product: MembershipProduct, recurrence: string, option: TierO
 /** What a paying subscriber is billed per period: its newest charge if usable, else a list price. */
 function priceMember(m: Member): Priced | null {
   const rec = m.sub.recurrence;
-  if (!rec || !RECURRENCES[rec]) return null;
+  if (!rec || !recurrenceOf(rec)) return null;
   const s = m.latest;
   if (s && !s.upgrade && !s.noMoney && s.net > 0 && (s.recurrence === null || s.recurrence === rec)) {
     return { amount: s.net, currency: CURRENCY_USD, source: 'charge' };
@@ -718,7 +726,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   const priced = { charge: 0, list: 0, list_estimated: 0, unpriced: 0, zero: 0 };
   for (const m of members) {
     const p = priceMember(m);
-    const rec = m.sub.recurrence ? RECURRENCES[m.sub.recurrence] : undefined;
+    const rec = recurrenceOf(m.sub.recurrence);
     if (!p || !rec) {
       priced.unpriced += 1;
       continue;

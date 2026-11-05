@@ -1,6 +1,6 @@
 /** Settings (GET /settings): display currency, password, session (log out), account deletion. Owner: Experience (pages). */
 
-import { PASSWORD_MIN } from '../../lib/auth';
+import { PASSWORD_MIN } from '../../lib/password-policy';
 import { SUPPORTED_CURRENCIES } from '../../lib/money';
 import { DangerZone } from '../components/danger-zone';
 import { Button, Card, ConfirmCheckbox, Field, FormError, PageHeader, SelectField } from '../components/ui';

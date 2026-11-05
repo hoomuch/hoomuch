@@ -16,9 +16,11 @@ import {
   type ConnectionRow,
 } from '../db/queries';
 import { createProviderContext } from '../providers/context';
+import { sanitizeErrorText } from '../providers/http';
 import { getAdapter, getProviderMeta, splitInput } from '../providers/registry';
 import { ProviderError, type ProviderId, type ProviderMeta, type VerifyResult } from '../providers/types';
 import { SYNC_LOCK_STALE_MS, syncConnection, type SyncResult } from '../sync/engine';
+import { acquireSyncLock } from '../sync/repo';
 
 export const MAX_CONNECTIONS_PER_USER = 25;
 export const MANUAL_SYNC_COOLDOWN_MS = 60_000;
@@ -46,7 +48,9 @@ export function describeProviderError(err: unknown, meta: ProviderMeta): string 
         return err.message; // permission / invalid_input / not_found carry specific, user-facing text
     }
   }
-  console.error(JSON.stringify({ event: 'provider_unexpected_error', provider: meta.id, message: String(err) }));
+  console.error(
+    JSON.stringify({ event: 'provider_unexpected_error', provider: meta.id, message: sanitizeErrorText(String(err)) }),
+  );
   return `Something went wrong while checking the key with ${meta.name}. Try again in a few minutes.`;
 }
 
@@ -142,7 +146,7 @@ export async function renameConnection(env: Bindings, userId: string, id: string
 }
 
 /** Config keys that identify *which* account/project a connection reads. */
-const SOURCE_KEYS = ['storeId', 'projectId'] as const;
+const SOURCE_KEYS = ['storeId', 'projectId', 'site', 'organizationId'] as const;
 /** Rows per DELETE statement when purging synced data (keeps each statement well under D1 limits). */
 const PURGE_CHUNK = 5_000;
 const PURGE_MAX_ROUNDS = 400;
@@ -192,34 +196,60 @@ export async function rotateCredentials(
   if (!row) return { ok: false, error: 'Connection not found.', fieldErrors: {} };
   // A running sync would still commit data fetched with the old key after the swap.
   if (isSyncing(row, Date.now())) return { ok: false, error: BUSY_ERROR, fieldErrors: {} };
+  // Every replacement verifies the key live and starts a sync: same cooldown as "Sync now", so a
+  // resubmit loop can't turn one connection into a stream of provider requests.
+  if (Date.now() - (row.last_sync_started_at ?? 0) < MANUAL_SYNC_COOLDOWN_MS) {
+    return { ok: false, error: 'Synced moments ago. Try again in a minute.', fieldErrors: {} };
+  }
   const meta = getProviderMeta(row.provider);
 
   const v = await verifyInput(meta, raw);
   if (!v.ok) return v;
 
-  // Verification takes a few seconds; re-check that no sync started meanwhile.
+  // Verification takes a few seconds. Take the sync lock for the swap itself: a sync that started
+  // meanwhile (cron, Sync now in another tab) would otherwise commit the old key's data after the
+  // purge below, or plan its backfill from the old high-water mark. Ownership was checked above.
   const fresh = await getConnection(env.DB, userId, id);
   if (!fresh) return { ok: false, error: 'Connection not found.', fieldErrors: {} };
-  if (isSyncing(fresh, Date.now())) return { ok: false, error: BUSY_ERROR, fieldErrors: {} };
+  const lockAt = Date.now();
+  const locked = await acquireSyncLock(env.DB, id, lockAt, lockAt - SYNC_LOCK_STALE_MS);
+  if (!locked) return { ok: false, error: BUSY_ERROR, fieldErrors: {} };
 
-  const config = { ...v.config, ...v.verified.config };
-  const oldConfig = parseConfig(fresh.config);
-  const sameSource =
-    (fresh.test_mode === 1) === v.verified.testMode &&
-    SOURCE_KEYS.every((k) => (oldConfig[k] ?? '') === (config[k] ?? ''));
+  let released = false;
+  let sameSource: boolean;
+  try {
+    const config = { ...v.config, ...v.verified.config };
+    const oldConfig = parseConfig(locked.config);
+    sameSource =
+      (locked.test_mode === 1) === v.verified.testMode &&
+      SOURCE_KEYS.every((k) => (oldConfig[k] ?? '') === (config[k] ?? ''));
 
-  const apiKey = v.credentials['apiKey'];
-  await updateConnectionCredentials(env.DB, userId, id, {
-    credentialsEnc: await encryptJson(env.ENCRYPTION_KEY, v.credentials),
-    keyHint: apiKey ? keyHint(apiKey) : null,
-    config,
-    testMode: v.verified.testMode,
-  });
-  if (sameSource) {
-    await env.DB.prepare('UPDATE connections SET revenue_cursor = NULL WHERE id = ? AND user_id = ?').bind(id, userId).run();
-  } else {
-    await purgeSyncedData(env.DB, userId, id);
+    // Clear first, swap the key last: the swap sets status 'pending', which releases the lock.
+    if (sameSource) {
+      await env.DB.prepare('UPDATE connections SET revenue_cursor = NULL WHERE id = ? AND user_id = ?').bind(id, userId).run();
+    } else {
+      await purgeSyncedData(env.DB, userId, id);
+    }
+    const apiKey = v.credentials['apiKey'];
+    released = await updateConnectionCredentials(env.DB, userId, id, {
+      credentialsEnc: await encryptJson(env.ENCRYPTION_KEY, v.credentials),
+      keyHint: apiKey ? keyHint(apiKey) : null,
+      config,
+      testMode: v.verified.testMode,
+    });
+  } finally {
+    if (!released) {
+      // Something threw (or the row vanished): give the lock back as it was, so the connection
+      // isn't stuck "syncing" for the stale-lock window.
+      await env.DB.prepare(
+        `UPDATE connections SET status = ?, last_sync_started_at = ?
+          WHERE id = ? AND status = 'syncing' AND last_sync_started_at = ?`,
+      )
+        .bind(fresh.status === 'syncing' ? 'pending' : fresh.status, fresh.last_sync_started_at, id, lockAt)
+        .run();
+    }
   }
+  if (!released) return { ok: false, error: 'Connection not found.', fieldErrors: {} };
   ctx.waitUntil(syncConnection(env, id, 'manual'));
   const warnings = sameSource
     ? v.verified.warnings

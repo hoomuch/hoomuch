@@ -168,11 +168,13 @@ export function cleanMoneyMap(input: unknown): { map: MoneyMap; dropped: number 
   for (const key of Object.keys(input).sort()) {
     const cur = cleanCurrency(key);
     const v = input[key];
-    if (!cur || typeof v !== 'number' || !Number.isFinite(v)) {
+    const sum = typeof v === 'number' ? (map[cur ?? ''] ?? 0) + Math.round(v) : NaN;
+    // Safe integers only (like events and daily points): beyond 2^53 money math silently rounds.
+    if (!cur || !Number.isSafeInteger(sum)) {
       dropped++;
       continue;
     }
-    map[cur] = (map[cur] ?? 0) + Math.round(v);
+    map[cur] = sum;
   }
   return { map, dropped };
 }

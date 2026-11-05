@@ -10,6 +10,7 @@ import type { AppEnv, Bindings, SessionUser } from '../env';
 import { hashPassword, randomId, randomToken, sha256Hex, verifyPassword } from './crypto';
 import { DAY, MINUTE } from './time';
 import { cookieSpec } from './cookies';
+import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
 import {
   deleteOtherSessions,
   deleteSession,
@@ -22,6 +23,8 @@ import {
   updateUserPassword,
 } from '../db/queries';
 
+export { PASSWORD_MIN };
+
 /** Base name; on HTTPS the cookie is `__Host-hm_session` (see lib/cookies.ts). */
 export const SESSION_COOKIE = 'hm_session';
 const SESSION_TTL_MS = 30 * DAY;
@@ -29,13 +32,18 @@ const SESSION_REFRESH_BELOW_MS = 15 * DAY;
 /** Hard cap: sliding renewal never keeps one session alive longer than this. */
 const SESSION_ABSOLUTE_MAX_MS = 90 * DAY;
 
-export const PASSWORD_MIN = 10;
-const PASSWORD_MAX = 256;
 const THROTTLE_WINDOW_MS = 15 * MINUTE;
 /** Attempts per window for login (per email + IP) and password re-checks (per user). */
 const THROTTLE_MAX_ATTEMPTS = 10;
 /** Sign-up attempts per window per IP (counted whether they succeed or not). */
 const SIGNUP_MAX_ATTEMPTS = 10;
+/**
+ * Login attempts per window for one email from every network combined. The per-network limit
+ * alone doesn't bound a botnet or an IPv6 range (one bucket per /64; a /48 holds 65,536), so
+ * this caps distributed guessing against one account (OWASP Authentication Cheat Sheet: count
+ * against the account, not just the source). Generous, so a typo-prone owner never meets it.
+ */
+const ACCOUNT_MAX_ATTEMPTS = 50;
 
 /** Well-formed hash that matches no password; verifying against it equalises timing for unknown emails. */
 const DUMMY_HASH = 'pbkdf2$100000$c29tZS1zYWx0LWZvci10aW1pbmc$2pX8YQ2yq1xS0bqgk5r4zC5N4bJt0bq0yq3s9m7vK1A';
@@ -68,9 +76,56 @@ function validEmail(email: string): boolean {
   return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function passwordProblem(pw: string): string | null {
+/**
+ * Keyboard rows and digit runs. A password that is one slice of these (either direction) is among
+ * the first an attacker tries, whatever its length.
+ */
+const SEQUENCES = [
+  '01234567890',
+  'abcdefghijklmnopqrstuvwxyz',
+  'qwertyuiop',
+  'asdfghjkl',
+  'zxcvbnm',
+  'qwertzuiop',
+  'azertyuiop',
+  '1qaz2wsx3edc4rfv5tgb6yhn',
+  '1q2w3e4r5t6y7u8i9o0p',
+  'q1w2e3r4t5y6u7i8o9p0',
+];
+
+/**
+ * Words that top every leaked-password list. Matched as the whole password once trailing digits
+ * and symbols are stripped, so "password123", "Qwerty2026!" and "letmein!!!!" are all caught.
+ */
+const COMMON_WORDS = new Set([
+  'password', 'passw0rd', 'p@ssw0rd', 'qwerty', 'qwertyuiop', 'iloveyou', 'letmein', 'welcome', 'admin',
+  'administrator', 'monkey', 'dragon', 'football', 'baseball', 'basketball', 'princess', 'sunshine',
+  'superman', 'batman', 'trustno', 'starwars', 'whatever', 'shadow', 'master', 'michael', 'jennifer',
+  'computer', 'internet', 'changeme', 'secret', 'login', 'abc', 'abcd', 'test', 'hello', 'freedom',
+]);
+
+/**
+ * OWASP ASVS v5 6.2.4 / 6.2.11 (NIST SP 800-63B): refuse passwords that are common or built from
+ * the context (the account's email, the app's name). No composition rules: length does the work.
+ */
+function guessable(pw: string, email: string): boolean {
+  const p = pw.toLowerCase();
+  if (new Set(p).size < 5) return true; // "aaaaaaaaaa", "1212121212", "abcabcabca"
+  if (SEQUENCES.some((s) => s.includes(p) || [...s].reverse().join('').includes(p))) return true;
+  if (COMMON_WORDS.has(p.replace(/[^a-z@]+$/, '').replace(/^[^a-z@]+/, ''))) return true;
+  // Context words: the email, its name part, the app's name, padded out to length ("taha2026!!").
+  // Only when little else is left, so "the matter is settled" stays fine for matt@….
+  const address = normalizeEmail(email);
+  for (const word of [address, address.split('@')[0] ?? '', 'hoomuch']) {
+    if (word.length >= 4 && p.includes(word) && p.replaceAll(word, '').length < PASSWORD_MIN) return true;
+  }
+  return false;
+}
+
+function passwordProblem(pw: string, email: string): string | null {
   if (pw.length < PASSWORD_MIN) return `Use at least ${PASSWORD_MIN} characters.`;
   if (pw.length > PASSWORD_MAX) return `That password is too long. Use ${PASSWORD_MAX} characters or fewer.`;
+  if (guessable(pw, email)) return 'That password is too easy to guess. Try a few unrelated words.';
   return null;
 }
 
@@ -137,7 +192,7 @@ export async function registerUser(env: Bindings, emailRaw: string, password: st
   }
   const email = normalizeEmail(emailRaw);
   if (!validEmail(email)) return { ok: false, error: 'Enter a valid email address.', field: 'email' };
-  const pwErr = passwordProblem(password);
+  const pwErr = passwordProblem(password, email);
   if (pwErr) return { ok: false, error: pwErr, field: 'password' };
   const exists = { ok: false as const, error: 'An account with this email already exists. Log in instead.', field: 'email' as const };
   if (await getUserByEmail(env.DB, email)) return exists;
@@ -154,8 +209,14 @@ export async function registerUser(env: Bindings, emailRaw: string, password: st
 
 export async function authenticate(env: Bindings, emailRaw: string, password: string, ip: string): Promise<AuthResult> {
   const email = normalizeEmail(emailRaw);
+  const now = Date.now();
   const key = await sha256Hex(`login|${email}|${ipBucket(ip)}`);
-  if (!(await reserveAttempt(env, key, Date.now(), THROTTLE_MAX_ATTEMPTS))) {
+  if (!(await reserveAttempt(env, key, now, THROTTLE_MAX_ATTEMPTS))) {
+    return { ok: false, error: THROTTLED_MESSAGE, throttled: true };
+  }
+  // Keyed by the email whether or not an account exists, so the limit reveals nothing. Not
+  // cleared on success: it lapses with its window, and a login can't reset an attacker's count.
+  if (!(await reserveAttempt(env, await sha256Hex(`login-account|${email}`), now, ACCOUNT_MAX_ATTEMPTS))) {
     return { ok: false, error: THROTTLED_MESSAGE, throttled: true };
   }
 
@@ -197,7 +258,7 @@ export async function changePassword(
   if (!check.ok) {
     return { ok: false, error: check.throttled ? check.error : 'Current password is incorrect.', field: 'current' };
   }
-  const problem = passwordProblem(next);
+  const problem = passwordProblem(next, user.email);
   if (problem) return { ok: false, error: problem, field: 'next' };
   await updateUserPassword(c.env.DB, user.id, await hashPassword(next));
   // Revoke every session, this one included (a stolen copy of this cookie must die too),
@@ -271,7 +332,11 @@ export function safeNext(next: string | undefined | null): string {
   return next;
 }
 
-/** Client IP for throttling (Cloudflare sets CF-Connecting-IP). */
+/**
+ * Client IP for throttling. Cloudflare sets CF-Connecting-IP on every request and overwrites any
+ * value the client sent. X-Forwarded-For is never read: the client controls it, so trusting it
+ * would let each request pick a fresh throttle bucket.
+ */
 export function clientIp(c: Context): string {
-  return c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown';
+  return c.req.header('cf-connecting-ip')?.trim() || 'unknown';
 }

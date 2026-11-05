@@ -1,6 +1,6 @@
 /** Log in and sign up (one narrow card, two fields). Owner: Experience (pages). */
 
-import { PASSWORD_MIN } from '../../lib/auth';
+import { PASSWORD_MIN } from '../../lib/password-policy';
 import { Button, Card, Field, FormError, LinkButton, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 

@@ -22,9 +22,9 @@ app.use(
     contentSecurityPolicy: {
       defaultSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
-      // Recharts, Base UI and Motion set inline styles (positions, sizes, chart colours), and the
-      // chart component writes a small <style> block. Scripts stay same-origin only: the page
-      // payload is a JSON data block, which is never executed.
+      // Recharts, Base UI and Motion set inline styles (positions, sizes, chart colours), and Base
+      // UI injects one constant <style> rule (Select's scrollbar). App code writes no <style>.
+      // Scripts stay same-origin only: the page payload is a JSON data block, never executed.
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       fontSrc: ["'self'"],
@@ -36,6 +36,20 @@ app.use(
     strictTransportSecurity: 'max-age=31536000; includeSubDomains',
     referrerPolicy: 'strict-origin-when-cross-origin',
     xFrameOptions: 'DENY',
+    // The app uses no powerful browser features; switch them off so injected or third-party
+    // code couldn't ask for them either.
+    permissionsPolicy: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      payment: [],
+      usb: [],
+      serial: [],
+      hid: [],
+      bluetooth: [],
+      displayCapture: [],
+      browsingTopics: [],
+    },
   }),
 );
 app.use('*', csrf());

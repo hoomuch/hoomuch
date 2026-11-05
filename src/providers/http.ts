@@ -18,6 +18,13 @@ export const MAX_RETRY_WAIT_MS = 10_000;
 const BACKOFF_BASE_MS = 400;
 const BACKOFF_CAP_MS = 4_000;
 const ERROR_TEXT_MAX = 300;
+/** Input cap for sanitizeErrorText (a provider controls the text, so its size is untrusted). */
+const SANITIZE_INPUT_MAX = 16 * 1024;
+/**
+ * Largest response body read from a provider. Real pages are well under 1 MB; anything bigger is a
+ * provider fault, and reading it whole could exhaust the Worker's 128 MB memory.
+ */
+export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export interface RequestSpec {
   /** Display name used in messages and logs, e.g. "Stripe". */
@@ -95,7 +102,13 @@ export type QueryValue = string | number | boolean | null | undefined | Readonly
 
 /** Joins base + path and appends query params; arrays become repeated keys, null/undefined are skipped. */
 export function buildUrl(base: string, path: string, query: Record<string, QueryValue> = {}): string {
-  const url = new URL(path.startsWith('http') ? path : base.replace(/\/+$/, '') + '/' + path.replace(/^\/+/, ''));
+  // Paths are always relative to the provider's base: a request carrying a key never leaves its
+  // host, even if an absolute URL or a scheme-relative "//host" ever reached here from data.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('//') || path.includes('\\')) {
+    throw new Error('buildUrl: path must be relative to the provider base');
+  }
+  const url = new URL(base.replace(/\/+$/, '') + '/' + path.replace(/^\/+/, ''));
+  if (url.origin !== new URL(base).origin) throw new Error('buildUrl: path left the provider host');
   for (const [k, v] of Object.entries(query)) {
     if (v === null || v === undefined) continue;
     if (Array.isArray(v)) for (const item of v) url.searchParams.append(k, String(item));
@@ -115,13 +128,16 @@ const MASKS: Array<[RegExp, string]> = [
   [/\b(sk|rk|pk)_(live|test)_[A-Za-z0-9]+/g, '$1_$2_***'],
   [/\b(sk|rk|atk|whsec)_[A-Za-z0-9_]{6,}/g, '$1_***'],
   [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*\.?[A-Za-z0-9_-]*/g, '[token]'],
-  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[email]'],
+  // Bounded quantifiers: unbounded ones backtrack quadratically on a long run of word characters
+  // (a base64 blob in an error body took ~20 s of CPU at 200 KB).
+  [/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24}/g, '[email]'],
   [/[A-Za-z0-9_-]{32,}/g, '[redacted]'],
 ];
 
 /** Collapses whitespace, masks key-like strings and e-mail addresses, truncates to ≤ `max` chars. */
 export function sanitizeErrorText(input: string, max = ERROR_TEXT_MAX): string {
-  let s = input.replace(/\s+/g, ' ').trim();
+  // Only the first few KB can survive truncation anyway; don't spend CPU masking the rest.
+  let s = input.slice(0, SANITIZE_INPUT_MAX).replace(/\s+/g, ' ').trim();
   for (const [re, rep] of MASKS) s = s.replace(re, rep);
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
@@ -182,6 +198,33 @@ function backoffMs(attempt: number): number {
 
 class RetryableNetworkError extends Error {}
 
+export class ResponseTooLargeError extends Error {}
+
+/** Reads the body as text, giving up (and cancelling the stream) once it passes `max` bytes. */
+export async function readTextBounded(res: Response, max: number): Promise<string> {
+  const declared = Number(res.headers.get('content-length') ?? NaN);
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => {});
+    throw new ResponseTooLargeError();
+  }
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let out = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      throw new ResponseTooLargeError();
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  return out + decoder.decode();
+}
+
 async function fetchWithTimeout(
   ctx: ProviderContext,
   url: string,
@@ -195,9 +238,10 @@ async function fetchWithTimeout(
     // Never follow redirects: the request carries the provider key, and these APIs don't redirect.
     const method = body === undefined ? 'GET' : 'POST';
     const res = await ctx.fetch(url, { method, headers, body, signal: controller.signal, redirect: 'manual' });
-    const text = await res.text();
+    const text = await readTextBounded(res, MAX_RESPONSE_BYTES);
     return { res, text };
   } catch (err) {
+    if (err instanceof ResponseTooLargeError) throw err; // not a network blip: retrying won't help
     throw new RetryableNetworkError(controller.signal.aborted ? 'timeout' : err instanceof Error ? err.name : 'network');
   } finally {
     clearTimeout(timer);
@@ -235,6 +279,10 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
     try {
       ({ res, text } = await fetchWithTimeout(ctx, spec.url, headers, timeoutMs, queryBody));
     } catch (err) {
+      if (err instanceof ResponseTooLargeError) {
+        ctx.log('http_error', { provider, path, attempt, reason: 'too_large' });
+        throw new ProviderError('upstream', `${provider} sent a response too large to read.`);
+      }
       const reason = err instanceof RetryableNetworkError ? err.message : 'network';
       if (attempt < maxAttempts) {
         ctx.log('http_retry', { provider, path, attempt, reason });

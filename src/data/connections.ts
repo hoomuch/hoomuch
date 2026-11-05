@@ -24,6 +24,16 @@ export function toSummary(row: ConnectionRow): ConnectionSummary {
   };
 }
 
+/**
+ * The connection's config as the page may see it. The detail page's props are serialised into the
+ * HTML, so a field the provider declares secret never goes there, even if an old row or an
+ * adapter wrote one into config (secrets belong in the encrypted credentials).
+ */
+function publicConfig(row: ConnectionRow): Record<string, string> {
+  const secret = new Set(getProviderMeta(row.provider).fields.filter((f) => f.secret).map((f) => f.name));
+  return Object.fromEntries(Object.entries(parseConfig(row.config)).filter(([k]) => !secret.has(k)));
+}
+
 export async function listConnectionSummaries(env: Bindings, userId: string): Promise<ConnectionSummary[]> {
   return (await listConnections(env.DB, userId)).map(toSummary);
 }
@@ -94,7 +104,7 @@ export async function getConnectionDetail(
     ...toSummary(row),
     createdAt: row.created_at,
     keyHint: row.key_hint,
-    config: parseConfig(row.config),
+    config: publicConfig(row),
     currency,
     snapshots,
     recentRuns,
