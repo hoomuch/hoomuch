@@ -102,7 +102,7 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
 | UI | coss ui (Base UI üzerine, `src/components/ui`), Lucide ikonlar, Motion (gerektiğinde) |
 | Grafik | shadcn Charts / Recharts |
 | Font | Geist Sans + Geist Mono (kendi sunucumuzdan, `public/fonts`) |
-| Stil | Tailwind CSS 4 (+ radial-gradient), Tailwind CLI ile `public/app.css`'e; istemci paketi esbuild ile `public/client/`'a derlenir (Wrangler `build` adımı) |
+| Stil | Tailwind CSS 4 (+ radial-gradient; Magic UI ışın, grain ve dither shader arka planları), Tailwind CLI ile `public/app.css`'e; istemci paketi esbuild ile `public/client/`'a derlenir (Wrangler `build` adımı) |
 | Veritabanı | Cloudflare D1, `migrations/` |
 | Zamanlama | Cron Triggers `*/30 * * * *` |
 | Test | Vitest (Node ortamı; adaptörler ve saf fonksiyonlar) |

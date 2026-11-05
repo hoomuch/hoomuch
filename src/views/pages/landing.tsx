@@ -18,6 +18,7 @@ import { getProviderMeta } from '../../providers/registry';
 import { ProviderDot } from '../components/badges';
 import { BreakdownTable } from '../components/breakdown-table';
 import { KeyGuide } from '../components/connection-form';
+import { HorizonGlow } from '../components/horizon-glow';
 import { Owl } from '../components/mascot';
 import { RangeTabs } from '../components/range-tabs';
 import { Card, LinkButton } from '../components/ui';
@@ -88,8 +89,10 @@ export function LandingPage(props: LandingPageProps) {
         ) : null}
       </section>
 
-      {/* 1b. The real dashboard, demo numbers. The owl sits on its top edge. */}
-      <section id="demo" aria-labelledby="demo-title" className="mt-28 scroll-mt-6 sm:mt-32">
+      {/* 1b. The real dashboard, demo numbers. The owl sits on its top edge, and a dotted sun
+          (Dither Field shader) rises behind it. */}
+      <section id="demo" aria-labelledby="demo-title" className="relative mt-28 scroll-mt-6 sm:mt-32">
+        <HorizonGlow className="inset-x-0 -top-32 h-32 sm:-top-36 sm:h-36" />
         <Frame className="relative border p-2 sm:p-4">
           <Owl pose="perched" eager className="absolute right-6 bottom-full sm:right-10" />
           <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1 sm:mb-4">

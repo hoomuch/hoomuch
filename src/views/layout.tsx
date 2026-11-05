@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react';
 import type { Flash as FlashMsg, SessionUser } from '../env';
 import { cn } from '../lib/utils';
+import { HeroBackdrop, QuietBackdrop } from './components/backdrop';
 import { Celebration } from './components/celebration';
 import { Flash } from './components/flash';
 import { Wordmark } from './components/icons';
@@ -55,6 +56,12 @@ export interface LayoutProps extends PageChrome {
    * set it on settings, forms, errors or pricing.
    */
   marketing?: boolean;
+  /**
+   * A still ray light with grain behind the page header (views/components/backdrop.tsx). The
+   * dashboard only: settings, forms and errors stay plain. Marketing pages get the moving hero
+   * version on their own.
+   */
+  backdrop?: boolean;
   /** Footer line on marketing pages, e.g. "Syncs every hour, so you can check less often." */
   footerNote?: string;
   children?: ReactNode;
@@ -130,13 +137,9 @@ export function Layout(props: LayoutProps) {
           </a>
         ) : null}
 
-        {/* The marketing glow: a radial gradient of the brand blue behind the header and hero. */}
-        {props.marketing ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[40rem] bg-[radial-gradient(60rem_28rem_at_50%_-6rem,--alpha(var(--color-brand)/14%),transparent_70%)] dark:bg-[radial-gradient(60rem_28rem_at_50%_-6rem,--alpha(var(--color-brand)/18%),transparent_70%)]"
-          />
-        ) : null}
+        {/* Light from above, behind the header: ray light and grain (Magic UI). Moving on marketing
+            pages, still on the dashboard. */}
+        {props.marketing ? <HeroBackdrop /> : props.backdrop ? <QuietBackdrop /> : null}
 
         <header className={cn('border-b', props.marketing && 'border-transparent')}>
           <div className={`${FRAME} flex flex-wrap items-center gap-x-6`}>

@@ -521,7 +521,7 @@ export function DashboardPage(props: DashboardPageProps) {
   const requestNow = useNow();
   if (props.connections.length === 0) {
     return (
-      <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex>
+      <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex backdrop>
         <PageHeader title="Dashboard" />
         <EmptyState title="Nothing to add up yet." actions={<ConnectActions />}>
           Connect Stripe, Lemon Squeezy or RevenueCat and your MRR shows up here. No key handy? Try it with demo data
@@ -564,7 +564,7 @@ export function DashboardPage(props: DashboardPageProps) {
 
   if (!hasNumbers) {
     return (
-      <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex refresh={props.sync?.refresh ?? undefined}>
+      <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex backdrop refresh={props.sync?.refresh ?? undefined}>
         <PageHeader title="Dashboard" />
         {syncNotice}
         {props.sync ? <DashboardSkeleton /> : <NoNumbers notes={notes} />}
@@ -573,7 +573,7 @@ export function DashboardPage(props: DashboardPageProps) {
   }
 
   return (
-    <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex refresh={props.sync?.refresh ?? undefined}>
+    <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex backdrop refresh={props.sync?.refresh ?? undefined}>
       <PageHeader
         title="Dashboard"
         actions={
