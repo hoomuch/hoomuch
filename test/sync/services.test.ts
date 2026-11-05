@@ -20,6 +20,7 @@ function stubStripe(): void {
     route('/v1/subscriptions', { json: emptyList }),
     route('/v1/prices', { json: emptyList }),
     route('/v1/balance_transactions', { json: emptyList }),
+    route('/v1/coupons', { json: emptyList }),
   ]);
   vi.stubGlobal('fetch', fetch);
 }

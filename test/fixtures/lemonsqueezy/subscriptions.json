@@ -5,8 +5,8 @@
       "from": 1,
       "lastPage": 1,
       "perPage": 100,
-      "to": 14,
-      "total": 14
+      "to": 20,
+      "total": 20
     }
   },
   "jsonapi": {
@@ -411,7 +411,7 @@
       "attributes": {
         "store_id": 101,
         "customer_id": 911,
-        "order_id": 5011,
+        "order_id": 5016,
         "order_item_id": 6011,
         "product_id": 141,
         "variant_id": 92,
@@ -604,6 +604,103 @@
     },
     {
       "type": "subscriptions",
+      "id": "16",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 916,
+        "order_id": 5116,
+        "order_item_id": 6016,
+        "product_id": 141,
+        "variant_id": 82,
+        "product_name": "Acme Pro",
+        "variant_name": "Yearly",
+        "user_name": "Customer16 Privateperson",
+        "user_email": "customer16.private@buyer.example",
+        "status": "cancelled",
+        "status_formatted": "Cancelled",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": true,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": {
+          "id": 8016,
+          "subscription_id": 16,
+          "price_id": 12,
+          "quantity": 1,
+          "is_usage_based": false,
+          "created_at": "2026-10-30T00:00:00.000000Z",
+          "updated_at": "2026-10-30T00:00:00.000000Z"
+        },
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/16/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/16/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2026-11-13T00:00:00.000000Z",
+        "ends_at": "2026-11-13T00:00:00.000000Z",
+        "created_at": "2026-10-30T00:00:00.000000Z",
+        "updated_at": "2026-11-03T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/16/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/16/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/16"
+      }
+    },
+    {
+      "type": "subscriptions",
       "id": "9",
       "attributes": {
         "store_id": 102,
@@ -697,6 +794,95 @@
       },
       "links": {
         "self": "https://api.lemonsqueezy.com/v1/subscriptions/9"
+      }
+    },
+    {
+      "type": "subscriptions",
+      "id": "15",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 915,
+        "order_id": 5115,
+        "order_item_id": 6015,
+        "product_id": 141,
+        "variant_id": 82,
+        "product_name": "Acme Pro",
+        "variant_name": "Yearly",
+        "user_name": "Customer15 Privateperson",
+        "user_email": "customer15.private@buyer.example",
+        "status": "cancelled",
+        "status_formatted": "Cancelled",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": true,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": null,
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/15/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/15/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2026-11-12T00:00:00.000000Z",
+        "ends_at": "2026-11-12T00:00:00.000000Z",
+        "created_at": "2026-10-29T00:00:00.000000Z",
+        "updated_at": "2026-11-02T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/15/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/15/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/15"
       }
     },
     {
@@ -802,7 +988,7 @@
       "attributes": {
         "store_id": 101,
         "customer_id": 907,
-        "order_id": 5007,
+        "order_id": 5107,
         "order_item_id": 6007,
         "product_id": 141,
         "variant_id": 83,
@@ -899,7 +1085,7 @@
       "attributes": {
         "store_id": 101,
         "customer_id": 906,
-        "order_id": 5006,
+        "order_id": 5007,
         "order_item_id": 6006,
         "product_id": 141,
         "variant_id": 82,
@@ -916,15 +1102,7 @@
         "cancelled": false,
         "trial_ends_at": "2026-11-09T00:00:00.000000Z",
         "billing_anchor": 12,
-        "first_subscription_item": {
-          "id": 8006,
-          "subscription_id": 6,
-          "price_id": 12,
-          "quantity": 1,
-          "is_usage_based": false,
-          "created_at": "2026-10-26T00:00:00.000000Z",
-          "updated_at": "2026-10-26T00:00:00.000000Z"
-        },
+        "first_subscription_item": null,
         "urls": {
           "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/6/payment-details?expires=1666869343&signature=0000",
           "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
@@ -996,7 +1174,7 @@
       "attributes": {
         "store_id": 101,
         "customer_id": 902,
-        "order_id": 5002,
+        "order_id": 5011,
         "order_item_id": 6002,
         "product_id": 141,
         "variant_id": 82,
@@ -1186,6 +1364,103 @@
     },
     {
       "type": "subscriptions",
+      "id": "18",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 918,
+        "order_id": 5118,
+        "order_item_id": 6018,
+        "product_id": 141,
+        "variant_id": 83,
+        "product_name": "Acme Pro",
+        "variant_name": "Quarterly",
+        "user_name": "Customer18 Privateperson",
+        "user_email": "customer18.private@buyer.example",
+        "status": "active",
+        "status_formatted": "Active",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": false,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": {
+          "id": 8018,
+          "subscription_id": 18,
+          "price_id": 22,
+          "quantity": 1,
+          "is_usage_based": false,
+          "created_at": "2026-09-20T00:00:00.000000Z",
+          "updated_at": "2026-09-20T00:00:00.000000Z"
+        },
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/18/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/18/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2026-12-20T00:00:00.000000Z",
+        "ends_at": null,
+        "created_at": "2026-09-20T00:00:00.000000Z",
+        "updated_at": "2026-09-20T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/18/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/18/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/18"
+      }
+    },
+    {
+      "type": "subscriptions",
       "id": "3",
       "attributes": {
         "store_id": 101,
@@ -1283,6 +1558,200 @@
     },
     {
       "type": "subscriptions",
+      "id": "17",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 917,
+        "order_id": 5117,
+        "order_item_id": 6017,
+        "product_id": 141,
+        "variant_id": 81,
+        "product_name": "Acme Pro",
+        "variant_name": "Monthly",
+        "user_name": "Customer17 Privateperson",
+        "user_email": "customer17.private@buyer.example",
+        "status": "active",
+        "status_formatted": "Active",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": false,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": {
+          "id": 8017,
+          "subscription_id": 17,
+          "price_id": 11,
+          "quantity": 1,
+          "is_usage_based": false,
+          "created_at": "2026-09-10T00:00:00.000000Z",
+          "updated_at": "2026-09-10T00:00:00.000000Z"
+        },
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/17/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/17/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2026-12-10T00:00:00.000000Z",
+        "ends_at": null,
+        "created_at": "2026-09-10T00:00:00.000000Z",
+        "updated_at": "2026-11-10T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/17/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/17/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/17"
+      }
+    },
+    {
+      "type": "subscriptions",
+      "id": "19",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 919,
+        "order_id": 5119,
+        "order_item_id": 6019,
+        "product_id": 141,
+        "variant_id": 81,
+        "product_name": "Acme Pro",
+        "variant_name": "Monthly",
+        "user_name": "Customer19 Privateperson",
+        "user_email": "customer19.private@buyer.example",
+        "status": "active",
+        "status_formatted": "Active",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": false,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": {
+          "id": 8019,
+          "subscription_id": 19,
+          "price_id": 11,
+          "quantity": 1,
+          "is_usage_based": false,
+          "created_at": "2026-09-01T00:00:00.000000Z",
+          "updated_at": "2026-09-01T00:00:00.000000Z"
+        },
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/19/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/19/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2026-12-01T00:00:00.000000Z",
+        "ends_at": null,
+        "created_at": "2026-09-01T00:00:00.000000Z",
+        "updated_at": "2026-11-01T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/19/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/19/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/19"
+      }
+    },
+    {
+      "type": "subscriptions",
       "id": "1",
       "attributes": {
         "store_id": 101,
@@ -1376,6 +1845,103 @@
       },
       "links": {
         "self": "https://api.lemonsqueezy.com/v1/subscriptions/1"
+      }
+    },
+    {
+      "type": "subscriptions",
+      "id": "20",
+      "attributes": {
+        "store_id": 101,
+        "customer_id": 920,
+        "order_id": 5120,
+        "order_item_id": 6020,
+        "product_id": 141,
+        "variant_id": 82,
+        "product_name": "Acme Pro",
+        "variant_name": "Yearly",
+        "user_name": "Customer20 Privateperson",
+        "user_email": "customer20.private@buyer.example",
+        "status": "cancelled",
+        "status_formatted": "Cancelled",
+        "card_brand": "visa",
+        "card_last_four": "4242",
+        "payment_processor": "stripe",
+        "pause": null,
+        "cancelled": true,
+        "trial_ends_at": null,
+        "billing_anchor": 12,
+        "first_subscription_item": {
+          "id": 8020,
+          "subscription_id": 20,
+          "price_id": 12,
+          "quantity": 1,
+          "is_usage_based": false,
+          "created_at": "2026-01-01T00:00:00.000000Z",
+          "updated_at": "2026-01-01T00:00:00.000000Z"
+        },
+        "urls": {
+          "update_payment_method": "https://acme-studio.lemonsqueezy.com/subscription/20/payment-details?expires=1666869343&signature=0000",
+          "customer_portal": "https://acme-studio.lemonsqueezy.com/billing?expires=1666869343&signature=0000",
+          "customer_portal_update_subscription": "https://acme-studio.lemonsqueezy.com/billing/20/update?expires=1666869343&signature=0000"
+        },
+        "renews_at": "2027-01-15T00:00:00.000000Z",
+        "ends_at": "2027-01-15T00:00:00.000000Z",
+        "created_at": "2026-01-01T00:00:00.000000Z",
+        "updated_at": "2026-10-20T00:00:00.000000Z",
+        "test_mode": false
+      },
+      "relationships": {
+        "store": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/store",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/store"
+          }
+        },
+        "customer": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/customer",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/customer"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/order",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/order"
+          }
+        },
+        "order-item": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/order-item",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/order-item"
+          }
+        },
+        "product": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/product",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/product"
+          }
+        },
+        "variant": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/variant",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/variant"
+          }
+        },
+        "subscription-items": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/subscription-items",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/subscription-items"
+          }
+        },
+        "subscription-invoices": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/subscriptions/20/subscription-invoices",
+            "self": "https://api.lemonsqueezy.com/v1/subscriptions/20/relationships/subscription-invoices"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/subscriptions/20"
       }
     }
   ]

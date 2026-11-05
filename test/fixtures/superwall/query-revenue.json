@@ -1,0 +1,15 @@
+{
+  "meta": [
+    { "name": "day", "type": "Date" },
+    { "name": "gross_minor", "type": "Int64" },
+    { "name": "refunds_minor", "type": "Int64" },
+    { "name": "charges", "type": "UInt64" }
+  ],
+  "data": [
+    { "day": "2026-11-02", "gross_minor": "38961", "refunds_minor": "0", "charges": "39" },
+    { "day": "2026-11-03", "gross_minor": "41959", "refunds_minor": "999", "charges": "41" },
+    { "day": "2026-11-05", "gross_minor": "0", "refunds_minor": "4999", "charges": "0" }
+  ],
+  "rows": 3,
+  "statistics": { "elapsed": 0.184, "rows_read": 52113, "bytes_read": 3801422 }
+}

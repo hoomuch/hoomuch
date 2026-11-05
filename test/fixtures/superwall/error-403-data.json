@@ -1,0 +1,7 @@
+{
+  "_tag": "@superwall/api-schema/v2/errors/PermissionError",
+  "type": "permission_error",
+  "code": "insufficient_permissions",
+  "message": "The API key does not have permission to perform this action",
+  "required_scope": "data:read"
+}

@@ -1,0 +1,24 @@
+{
+  "object": "chart_data",
+  "request_id": "req_8f2c1a7e",
+  "series": [{ "breakdown": "none", "key": null }],
+  "data": [
+    { "x": "2026-10-30", "incomplete": false, "values": { "null": { "y": 4012.4, "extra": {} } } },
+    { "x": "2026-10-31", "incomplete": false, "values": { "null": { "y": 4025.1, "extra": {} } } },
+    { "x": "2026-11-01", "incomplete": false, "values": { "null": { "y": 4030.55, "extra": {} } } },
+    { "x": "2026-11-02", "incomplete": false, "values": { "null": { "y": 4041.0, "extra": {} } } },
+    { "x": "2026-11-03", "incomplete": false, "values": { "null": { "y": 4058.73, "extra": {} } } },
+    { "x": "2026-11-04", "incomplete": false, "values": { "null": { "y": 4066.2, "extra": {} } } },
+    { "x": "2026-11-05", "incomplete": true, "values": { "null": { "y": 4071.89, "extra": {} } } }
+  ],
+  "y_axis": { "key": "mrrValue", "name": "MRR", "description": "Monthly recurring revenue from subscriptions.", "value_type": "currency" },
+  "x_axis": { "key": "mrrDate", "name": "Date", "description": "Date the subscription state applies to", "value_type": "date", "fill_missing_values": "cumulative" },
+  "filters": [],
+  "breakdowns": [],
+  "date_filters": [
+    { "name": "Last 7 days", "preset": "last_7_days", "active": true, "range": { "from": "2026-10-30", "to": "2026-11-05" } }
+  ],
+  "enriched_data": {},
+  "duration": { "start_time": 1793966400000, "end_time": 1793966400412, "duration_ms": 412 },
+  "totals": { "null": { "y": 4071.89, "extra": {} } }
+}

@@ -7,21 +7,68 @@
  *   - Subscription.discounts and SubscriptionItem.discounts are arrays of discount IDs, expandable into
  *     Discount objects. The legacy singular `discount` field is gone.
  *   - Discount.source.coupon is a coupon ID (expandable). The legacy embedded `Discount.coupon` is gone.
- *   - Coupon.applies_to and Coupon.currency_options, and Price.currency_options, are "includable"
- *     (returned only when expanded).
+ *   - Coupon.applies_to, Coupon.currency_options, Price.currency_options, Price.tiers and
+ *     Price.currency_options.<currency>.tiers are "includable" (returned only when expanded).
+ *   - Subscription.default_tax_rates and SubscriptionItem.tax_rates are embedded TaxRate objects (not
+ *     expandable), so `inclusive` and `percentage` come with the subscription: no Tax Rates permission,
+ *     no extra request.
  *   - current_period_start/end live on subscription items. MRR doesn't need them.
- *   - SubscriptionItem.current_trial marks item-level trials (trial offers), which are excluded from MRR
- *     the way Stripe's own Billing analytics excludes them.
+ *   - SubscriptionItem.current_trial marks an item-level trial (a trial offer).
+ *
+ * Metrics follow Stripe's Billing analytics definitions (https://docs.stripe.com/billing/subscriptions/analytics):
+ *   MRR           active + past_due subscriptions, normalized to a month (SPEC §6), net of running recurring
+ *                 discounts and of tax. Left out: metered (usage-based) items, items in a running trial
+ *                 offer, one-time discounts. Licensed tiered prices count, priced from their tiers:
+ *                   volume     the whole quantity at the unit amount of the tier it falls in, plus that
+ *                              tier's flat amount;
+ *                   graduated  each band of the quantity at its own tier's unit amount, plus the flat amount
+ *                              of every tier reached. Quantity 0 bills the first tier's flat amount.
+ *                 Tax: the item's manual tax rates (its own `tax_rates`, else the subscription's
+ *                 `default_tax_rates`) marked `inclusive` are inside the amount. They come out after
+ *                 discounts, as amount / (1 + Σ inclusive %), which is how Stripe discounts first and
+ *                 then backs inclusive tax out of the rest. Exclusive rates are added on top of the price,
+ *                 so there is nothing to remove.
+ *   Active subs   active + past_due subscriptions whose MRR is > 0 ("Active subscribers only includes
+ *                 subscribers with positive MRR"). Free plans, 100%-off coupons, and subscriptions that
+ *                 are only metered items or only running trial offers don't count; Stripe's definition
+ *                 leaves them out too. Stripe counts customers; this counts subscriptions (SPEC §6).
+ *   Trials        every status=trialing subscription (a legacy `trial_end` trial counts once; a trialing
+ *                 subscription made of free trial offers counts each of those items), plus every item of
+ *                 an active / past_due subscription whose trial offer is still running. Stripe counts
+ *                 trial offers per subscription item.
  *
  * Request plan:
- *   verify        3 requests: subscriptions, prices, balance_transactions (limit=1 each). 403s name the
- *                 missing registry permission.
+ *   verify        4 requests, limit=1 each: subscriptions, prices, balance_transactions, coupons. A 403 on
+ *                 one of the first three names the missing registry permission and fails. A 403 on coupons
+ *                 only adds a warning: MRR is then shown before discounts.
  *   fetchSnapshot status=active and status=past_due (limit=100, expand[]=data.discounts and
- *                 data.items.data.discounts), then status=trialing (count only). It also makes one
- *                 cached lookup per distinct coupon in an active discount, and per multi-currency price
- *                 whose default currency differs from the subscription's.
+ *                 data.items.data.discounts), then status=trialing (no expansion). Plus cached lookups,
+ *                 one per distinct:
+ *                   coupon in a running discount            GET /v1/coupons/{id} (Coupons: Read)
+ *                   multi-currency price billed in another  GET /v1/prices/{id}?expand[]=currency_options
+ *                   currency
+ *                   tiered price                            GET /v1/prices/{id}?expand[]=tiers, or
+ *                                                           expand[]=currency_options +
+ *                                                           currency_options.<cur>.tiers in another currency
+ *                 and /v1/subscription_items pages for a subscription with more items than the embedded list.
  *                 Running out of budget throws BudgetExhaustedError: a partial MRR would be wrong.
  *   fetchRevenue  balance_transactions newest to oldest between a fixed [since, startedAt] window, resumable.
+ *
+ * Known limitations:
+ *   - Customer-level discounts (a coupon on the Customer, applied to all of its invoices) aren't applied.
+ *     Reading them needs Customers: Read, which exposes customer PII.
+ *   - Stripe Tax (automatic_tax.enabled): the rate depends on the customer's location and isn't on the
+ *     subscription, so a tax-inclusive price stays tax-inclusive in MRR (counted, logged once as
+ *     stripe_inclusive_tax_unknown). A price with tax_behavior=unspecified follows the account's default
+ *     tax behavior, which a restricted key can't read; it is treated as exclusive. Tax rates added to each
+ *     invoice as it's created (invoice.created webhook) aren't visible on the subscription either.
+ *   - A partially captured card payment is a `charge` for the full authorization plus a `refund`
+ *     (reporting_category partial_capture_reversal) for the uncaptured part. Both are booked, so gross and
+ *     refunds are each slightly high while net revenue is right.
+ *   - Subscriptions on a test clock aren't returned by the list endpoint without a test_clock or customer
+ *     filter, so they're not counted (test mode only).
+ *   - A tiered price in a non-default currency needs expand[]=currency_options.<cur>.tiers. If Stripe
+ *     rejects that expansion (400), the item is left out and logged instead of failing the snapshot.
  */
 
 import {
@@ -50,16 +97,19 @@ export const STRIPE_API_VERSION = '2026-10-28.endive';
 const PROVIDER = 'Stripe';
 const PAGE_SIZE = 100;
 
-// Registry wording (registry.ts → permissions), used verbatim in 403 messages.
+// Registry wording (registry.ts → permissions), used verbatim in 403 messages. These are the Dashboard's
+// resource names; the API scopes are subscription_read, plan_read, balance_read and coupon_read.
 const PERM_SUBSCRIPTIONS = 'Subscriptions: Read';
-const PERM_PRICES = 'Products & Prices: Read';
+const PERM_PRICES = 'Prices: Read';
 const PERM_BALANCE = 'Balance: Read';
-// Not in the registry list (yet): coupon details sit behind their own RAK permission. Missing it
-// degrades MRR to "before discounts" instead of failing the sync. See `CouponResolver`.
+// Listed in the registry, but optional: without it MRR degrades to "before discounts" instead of failing
+// the sync (see `CouponResolver`), and verify only warns.
 const PERM_COUPONS = 'Coupons: Read';
 
 export const SECRET_KEY_WARNING =
   'This is a full-access secret key. A restricted key (rk_…) with read access is safer. You can replace the key on this page.';
+export const COUPONS_PERMISSION_WARNING =
+  'This key can’t read coupons, so MRR is shown before discounts. Add Coupons: Read to fix it.';
 
 // ---------- key handling ----------
 
@@ -152,19 +202,40 @@ interface StripeRecurring {
   usage_type: string;
 }
 
+interface StripeTier {
+  flat_amount: number | null;
+  flat_amount_decimal: string | null;
+  unit_amount: number | null;
+  unit_amount_decimal: string | null;
+  /** null = inf (the last tier). */
+  up_to: number | null;
+}
+
 interface StripeAmounts {
   unit_amount: number | null;
   unit_amount_decimal: string | null;
+  /** Includable: only present when expanded. */
+  tiers?: StripeTier[] | null;
 }
 
 interface StripePrice extends StripeAmounts {
   id: string;
   currency: string;
   billing_scheme: string;
+  tiers_mode?: string | null;
+  tax_behavior?: string | null;
   product: string | { id: string } | null;
   recurring: StripeRecurring | null;
   transform_quantity: { divide_by: number; round: string } | null;
   currency_options?: Record<string, StripeAmounts> | null;
+}
+
+interface StripeTaxRate {
+  id: string;
+  inclusive: boolean;
+  percentage: number;
+  /** Only set on rates created by Stripe Tax. */
+  rate_type?: string | null;
 }
 
 interface StripeCoupon {
@@ -191,12 +262,16 @@ interface StripeSubscriptionItem {
   quantity: number | null;
   discounts?: DiscountRef[] | null;
   current_trial?: { end_date: number } | null;
+  /** When non-empty, replaces the subscription's default_tax_rates for this item. */
+  tax_rates?: StripeTaxRate[] | null;
 }
 
 interface StripeSubscription {
   id: string;
   currency: string;
   discounts?: DiscountRef[] | null;
+  automatic_tax?: { enabled: boolean } | null;
+  default_tax_rates?: StripeTaxRate[] | null;
   items: { data: StripeSubscriptionItem[]; has_more: boolean };
 }
 
@@ -219,18 +294,28 @@ function isObject(v: unknown): v is Record<string, unknown> {
 const INTERVALS: readonly BillingInterval[] = ['day', 'week', 'month', 'year'];
 const INTERVAL_DAYS: Record<BillingInterval, number> = { day: 1, week: 7, month: 365 / 12, year: 365 };
 
-/** One licensed subscription item, normalized to a monthly amount (minor units, fractional while discounting). */
+/**
+ * One licensed subscription item, normalized to a monthly amount (minor units, fractional while
+ * discounting). `monthly` still includes inclusive tax; `taxDivisor` takes it out at the end.
+ */
 interface Line {
   product: string | null;
   monthly: number;
   interval: BillingInterval;
   count: number;
+  /** 1 + the item's inclusive tax rates / 100; 1 when its amount holds no tax we know of. */
+  taxDivisor: number;
 }
 
 interface SnapshotStats {
-  tieredItems: number;
+  /** Tiered items whose tiers couldn't be read or used. */
+  tieredUnpriced: number;
   unresolvedDiscounts: number;
   unpricedItems: number;
+  /** Tax-inclusive items under Stripe Tax: the rate isn't on the subscription, so tax stays in. */
+  inclusiveTaxUnknown: number;
+  /** active / past_due subscriptions left out of the active count because their MRR is 0. */
+  zeroMrrSubscriptions: number;
 }
 
 /**
@@ -280,29 +365,60 @@ class CouponResolver {
   }
 }
 
-/** Per-run cache of prices re-read with currency_options (multi-currency prices). */
+/**
+ * Per-run cache of prices re-read with includable fields, keyed by price ID + expand list:
+ *   - currency_options, for a multi-currency price billed in a currency other than its default;
+ *   - tiers (or currency_options.<cur>.tiers), for a tiered price. The subscription list can't include
+ *     them: data.items.data.price.tiers is 5 expand levels, and Stripe allows 4.
+ * Same permission as the verify probe (Prices: Read). Prices can be archived but not deleted, so the
+ * price of a live subscription always resolves.
+ */
 class PriceResolver {
-  private readonly cache = new Map<string, StripePrice>();
+  private readonly cache = new Map<string, StripePrice | null>();
 
   constructor(
     private readonly ctx: ProviderContext,
     private readonly key: string,
   ) {}
 
-  async get(id: string): Promise<StripePrice> {
-    let price = this.cache.get(id);
-    if (!price) {
-      price = await stripeGet<StripePrice>(
+  /** null only when `tolerateBadRequest` and Stripe rejected the expand list (400). */
+  private async fetch(id: string, expand: string[], tolerateBadRequest = false): Promise<StripePrice | null> {
+    const cacheKey = `${id}|${expand.join(',')}`;
+    if (this.cache.has(cacheKey)) return this.cache.get(cacheKey) ?? null;
+    let price: StripePrice | null;
+    try {
+      const body = await stripeGet<unknown>(
         this.ctx,
         this.key,
         `/prices/${encodeURIComponent(id)}`,
-        { 'expand[]': ['currency_options'] },
+        { 'expand[]': expand },
         PERM_PRICES,
       );
-      if (!isObject(price)) throw unreadable();
-      this.cache.set(id, price);
+      if (!isObject(body)) throw unreadable();
+      price = body as unknown as StripePrice;
+    } catch (err) {
+      if (!(tolerateBadRequest && err instanceof ProviderError && err.status === 400)) throw err;
+      price = null;
     }
+    this.cache.set(cacheKey, price);
     return price;
+  }
+
+  async withCurrencyOptions(id: string): Promise<StripePrice | null> {
+    return this.fetch(id, ['currency_options']);
+  }
+
+  /** The price's tiers in `currency` (lowercase), or null if Stripe doesn't return them. */
+  async tiersIn(price: StripePrice, currency: string): Promise<StripeTier[] | null> {
+    if (price.currency?.toLowerCase() === currency) {
+      const full = await this.fetch(price.id, ['tiers']);
+      return Array.isArray(full?.tiers) ? full.tiers : null;
+    }
+    // The docs mark currency_options.<cur>.tiers includable but show no expand example, so a 400 here
+    // leaves this one item out (logged) instead of failing the snapshot.
+    const full = await this.fetch(price.id, ['currency_options', `currency_options.${currency}.tiers`], true);
+    const tiers = full?.currency_options?.[currency]?.tiers;
+    return Array.isArray(tiers) ? tiers : null;
   }
 }
 
@@ -315,22 +431,64 @@ interface MrrEnv {
   stats: SnapshotStats;
 }
 
-function amountOf(a: StripeAmounts | null | undefined): number | null {
-  if (!a) return null;
-  if (typeof a.unit_amount === 'number' && Number.isFinite(a.unit_amount)) return a.unit_amount;
-  if (typeof a.unit_amount_decimal === 'string') {
-    const n = Number(a.unit_amount_decimal);
-    if (Number.isFinite(n)) return n;
+/** An integer amount, else its `_decimal` twin (a decimal string), else null. */
+function amountOrDecimal(n: number | null | undefined, decimal: string | null | undefined): number | null {
+  if (typeof n === 'number' && Number.isFinite(n)) return n;
+  if (typeof decimal === 'string') {
+    const v = Number(decimal);
+    if (Number.isFinite(v)) return v;
   }
   return null;
+}
+
+function amountOf(a: StripeAmounts | null | undefined): number | null {
+  return a ? amountOrDecimal(a.unit_amount, a.unit_amount_decimal) : null;
 }
 
 /** Unit amount in the subscription's currency (lowercase), or null if it can't be determined. */
 async function unitAmountIn(price: StripePrice, currency: string, env: MrrEnv): Promise<number | null> {
   if (price.currency?.toLowerCase() === currency) return amountOf(price);
   // Multi-currency price: the embedded object carries the default currency only.
-  const full = await env.prices.get(price.id);
-  return amountOf(full.currency_options?.[currency]);
+  const full = await env.prices.withCurrencyOptions(price.id);
+  return amountOf(full?.currency_options?.[currency]);
+}
+
+/**
+ * What Stripe bills per period for `quantity` units of a tiered price (minor units, unrounded), or null
+ * if the tiers or mode can't be used. https://docs.stripe.com/subscriptions/pricing-models/tiered-pricing
+ *   volume     quantity × unit amount of the first tier whose up_to ≥ quantity, + that tier's flat amount.
+ *   graduated  Σ per tier: (units of the quantity inside the tier) × its unit amount, + its flat amount
+ *              for every tier the quantity reaches.
+ * Both bill the first tier's flat amount at quantity 0 ("Stripe always bills the first flat rate tier
+ * when quantity=0"). A tier has a unit amount, a flat amount or both; a missing one is 0.
+ */
+function tieredAmount(tiers: StripeTier[], mode: string | null | undefined, quantity: number): number | null {
+  const sorted = tiers
+    .filter((t): t is StripeTier => isObject(t))
+    .map((t) => ({
+      upTo: typeof t.up_to === 'number' && Number.isFinite(t.up_to) ? t.up_to : Infinity,
+      unit: amountOrDecimal(t.unit_amount, t.unit_amount_decimal) ?? 0,
+      flat: amountOrDecimal(t.flat_amount, t.flat_amount_decimal) ?? 0,
+    }))
+    .sort((a, b) => a.upTo - b.upTo);
+  const last = sorted[sorted.length - 1];
+  if (!last || !(quantity >= 0)) return null;
+  if (mode === 'volume') {
+    const tier = sorted.find((t) => quantity <= t.upTo) ?? last;
+    return quantity * tier.unit + tier.flat;
+  }
+  if (mode === 'graduated') {
+    let total = 0;
+    let below = 0; // units already billed by lower tiers
+    for (const [i, t] of sorted.entries()) {
+      const units = Math.min(quantity, t.upTo) - below;
+      if (units > 0 || i === 0) total += Math.max(0, units) * t.unit + t.flat;
+      if (quantity <= t.upTo) break;
+      below = t.upTo;
+    }
+    return total;
+  }
+  return null;
 }
 
 function billedQuantity(quantity: number, t: StripePrice['transform_quantity']): number {
@@ -344,30 +502,77 @@ function productId(p: StripePrice['product']): string | null {
   return typeof p === 'string' ? p : p.id;
 }
 
-async function itemLine(item: StripeSubscriptionItem, currency: string, env: MrrEnv): Promise<Line | null> {
-  const price = item.price;
-  const rec = price?.recurring;
-  if (!price || !rec) return null;
-  if (rec.usage_type === 'metered') return null; // usage-based: not recurring revenue (SPEC §6.1)
-  if (item.current_trial && item.current_trial.end_date * 1000 > env.now) return null; // item-level trial
+/** True while the item's trial offer runs. Stripe drops `current_trial` once the trial ends. */
+function inTrialOffer(item: StripeSubscriptionItem, now: number): boolean {
+  const end = item.current_trial?.end_date;
+  return typeof end === 'number' && end * 1000 > now;
+}
+
+/** One invoice line's amount per billing period (rounded minor units), or null if it can't be priced (counted in stats). */
+async function periodAmount(price: StripePrice, quantity: number, currency: string, env: MrrEnv): Promise<number | null> {
   if (price.billing_scheme === 'tiered') {
-    env.stats.tieredItems += 1; // tiers aren't in the list payload (5-level expand); counted as 0
-    return null;
-  }
-  const interval = rec.interval as BillingInterval;
-  if (!INTERVALS.includes(interval)) {
-    env.stats.unpricedItems += 1;
-    return null;
+    const tiers = await env.prices.tiersIn(price, currency);
+    const amount = tiers ? tieredAmount(tiers, price.tiers_mode, quantity) : null; // tiers can't take transform_quantity
+    if (amount === null) {
+      env.stats.tieredUnpriced += 1;
+      return null;
+    }
+    return Math.round(amount);
   }
   const unit = await unitAmountIn(price, currency, env);
   if (unit === null) {
     env.stats.unpricedItems += 1;
     return null;
   }
+  // Stripe bills round(unit × quantity) per period.
+  return Math.round(unit * billedQuantity(quantity, price.transform_quantity));
+}
+
+/**
+ * 1 + Σ(inclusive manual tax rates) / 100 for one item: dividing by it backs inclusive tax out of the
+ * amount, as Stripe does (tax = amount − amount / (1 + rate)). https://docs.stripe.com/billing/taxes/tax-rates
+ *   - The item's own tax_rates replace the subscription's default_tax_rates when set.
+ *   - A TaxRate's `inclusive` flag decides whether its percentage is inside the amount ("The inclusive
+ *     property determines whether the tax percentage is added to, or included in, the overall amount"),
+ *     whatever the price's tax_behavior says (that field is for Stripe Tax).
+ *   - Stripe Tax (automatic_tax) can't be combined with tax rates and keeps its rate off the subscription:
+ *     a tax-inclusive price is left as is and counted.
+ */
+function inclusiveTaxDivisor(item: StripeSubscriptionItem, price: StripePrice, sub: StripeSubscription, env: MrrEnv): number {
+  if (sub.automatic_tax?.enabled === true) {
+    if (price.tax_behavior === 'inclusive') env.stats.inclusiveTaxUnknown += 1;
+    return 1;
+  }
+  const rates = Array.isArray(item.tax_rates) && item.tax_rates.length > 0 ? item.tax_rates : sub.default_tax_rates;
+  let percent = 0;
+  for (const r of Array.isArray(rates) ? rates : []) {
+    if (typeof r !== 'object' || r === null || r.inclusive !== true || r.rate_type === 'flat_amount') continue;
+    if (typeof r.percentage === 'number' && Number.isFinite(r.percentage) && r.percentage > 0) percent += r.percentage;
+  }
+  return 1 + percent / 100;
+}
+
+async function itemLine(item: StripeSubscriptionItem, sub: StripeSubscription, currency: string, env: MrrEnv): Promise<Line | null> {
+  const price = item.price;
+  const rec = price?.recurring;
+  if (!price || !rec) return null;
+  if (rec.usage_type === 'metered') return null; // usage-based: not recurring revenue (SPEC §6.1)
+  if (inTrialOffer(item, env.now)) return null; // counted as a trial instead
+  const interval = rec.interval as BillingInterval;
+  if (!INTERVALS.includes(interval)) {
+    env.stats.unpricedItems += 1;
+    return null;
+  }
+  const perPeriod = await periodAmount(price, item.quantity ?? 1, currency, env);
+  if (perPeriod === null) return null;
   const count = rec.interval_count > 0 ? rec.interval_count : 1;
-  // Stripe bills round(unit × quantity) per period; normalize that invoice line to a month.
-  const perPeriod = Math.round(unit * billedQuantity(item.quantity ?? 1, price.transform_quantity));
-  return { product: productId(price.product), monthly: normalizeToMonthly(perPeriod, interval, count), interval, count };
+  return {
+    product: productId(price.product),
+    monthly: normalizeToMonthly(perPeriod, interval, count),
+    interval,
+    count,
+    taxDivisor: inclusiveTaxDivisor(item, price, sub, env),
+  };
 }
 
 function amountOffIn(coupon: StripeCoupon, currency: string): number | null {
@@ -459,17 +664,25 @@ async function subscriptionItems(sub: StripeSubscription, env: MrrEnv): Promise<
   return items;
 }
 
-/** Monthly recurring amount of one subscription (rounded minor units), item discounts first, then subscription discounts. */
-async function subscriptionMrr(sub: StripeSubscription, currency: string, env: MrrEnv): Promise<number> {
+/**
+ * Monthly recurring amount of one subscription (rounded minor units): item discounts first, then
+ * subscription discounts, then inclusive tax backed out of what's left.
+ */
+async function subscriptionMrr(
+  sub: StripeSubscription,
+  items: StripeSubscriptionItem[],
+  currency: string,
+  env: MrrEnv,
+): Promise<number> {
   const lines: Line[] = [];
-  for (const item of await subscriptionItems(sub, env)) {
-    const line = await itemLine(item, currency, env);
+  for (const item of items) {
+    const line = await itemLine(item, sub, currency, env);
     if (!line) continue;
     await applyDiscounts([line], item.discounts, currency, env);
     lines.push(line);
   }
   await applyDiscounts(lines, sub.discounts, currency, env);
-  return Math.round(lines.reduce((s, l) => s + Math.max(0, l.monthly), 0));
+  return Math.round(lines.reduce((s, l) => s + Math.max(0, l.monthly) / l.taxDivisor, 0));
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
@@ -480,12 +693,12 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     now: ctx.now(),
     coupons: new CouponResolver(ctx, key),
     prices: new PriceResolver(ctx, key),
-    stats: { tieredItems: 0, unresolvedDiscounts: 0, unpricedItems: 0 },
+    stats: { tieredUnpriced: 0, unresolvedDiscounts: 0, unpricedItems: 0, inclusiveTaxUnknown: 0, zeroMrrSubscriptions: 0 },
   };
 
   const mrr: MoneyMap = {};
-  // SPEC §6: active + past_due, regardless of their MRR (metered/tiered-only subscriptions still count).
   let activeSubscriptions = 0;
+  let activeTrials = 0;
   for (const status of ['active', 'past_due'] as const) {
     for await (const sub of paginate<StripeSubscription>(
       ctx,
@@ -494,24 +707,37 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       { status, 'expand[]': ['data.discounts', 'data.items.data.discounts'] },
       PERM_SUBSCRIPTIONS,
     )) {
-      activeSubscriptions += 1;
-      if (typeof sub.currency !== 'string' || !sub.currency) continue;
-      const currency = sub.currency.toLowerCase();
-      const amount = await subscriptionMrr(sub, currency, env);
-      if (amount !== 0) addToMoney(mrr, currency, amount);
+      const items = await subscriptionItems(sub, env);
+      activeTrials += items.filter((i) => inTrialOffer(i, env.now)).length; // trial offers count per item
+      const currency = typeof sub.currency === 'string' ? sub.currency.toLowerCase() : '';
+      const amount = currency ? await subscriptionMrr(sub, items, currency, env) : 0;
+      // Stripe: "Active subscribers only includes subscribers with positive MRR".
+      if (amount > 0) {
+        activeSubscriptions += 1;
+        addToMoney(mrr, currency, amount);
+      } else {
+        env.stats.zeroMrrSubscriptions += 1;
+      }
     }
   }
 
-  let activeTrials = 0;
-  for await (const _ of paginate<StripeSubscription>(ctx, key, '/subscriptions', { status: 'trialing' }, PERM_SUBSCRIPTIONS)) {
-    activeTrials += 1;
+  // Legacy trials (trial_end) count once per subscription. A trialing subscription made of free trial
+  // offers counts each of them, like Stripe does. The embedded items list is enough for a count.
+  for await (const sub of paginate<StripeSubscription>(ctx, key, '/subscriptions', { status: 'trialing' }, PERM_SUBSCRIPTIONS)) {
+    activeTrials += Math.max(1, (sub.items?.data ?? []).filter((i) => inTrialOffer(i, env.now)).length);
   }
 
-  const { tieredItems, unresolvedDiscounts, unpricedItems } = env.stats;
-  if (tieredItems > 0) ctx.log('stripe_tiered_prices_excluded', { items: tieredItems });
+  const { tieredUnpriced, unresolvedDiscounts, unpricedItems, inclusiveTaxUnknown, zeroMrrSubscriptions } = env.stats;
+  if (tieredUnpriced > 0) ctx.log('stripe_tiered_prices_unpriced', { items: tieredUnpriced });
   if (unresolvedDiscounts > 0) ctx.log('stripe_discounts_unresolved', { discounts: unresolvedDiscounts });
   if (unpricedItems > 0) ctx.log('stripe_items_unpriced', { items: unpricedItems });
-  ctx.log('stripe_snapshot', { subscriptions: activeSubscriptions, trials: activeTrials, currencies: Object.keys(mrr) });
+  if (inclusiveTaxUnknown > 0) ctx.log('stripe_inclusive_tax_unknown', { items: inclusiveTaxUnknown });
+  ctx.log('stripe_snapshot', {
+    subscriptions: activeSubscriptions,
+    zeroMrr: zeroMrrSubscriptions,
+    trials: activeTrials,
+    currencies: Object.keys(mrr),
+  });
 
   return {
     mrr,
@@ -670,11 +896,19 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
   const parsed = parseKey(input.credentials['apiKey']);
   if ('error' in parsed) return { ok: false, error: parsed.error, field: 'apiKey' };
   const { key, restricted, testMode } = parsed;
+  const warnings = restricted ? [] : [SECRET_KEY_WARNING];
   try {
     // One cheap read per permission in the registry checklist; a 403 names the missing one.
     await stripeGet(ctx, key, '/subscriptions', { limit: 1 }, PERM_SUBSCRIPTIONS);
     await stripeGet(ctx, key, '/prices', { limit: 1 }, PERM_PRICES);
     await stripeGet(ctx, key, '/balance_transactions', { limit: 1 }, PERM_BALANCE);
+    // Coupons are optional (SPEC §6.1): without them MRR is shown before discounts, so only warn.
+    try {
+      await stripeGet(ctx, key, '/coupons', { limit: 1 }, PERM_COUPONS);
+    } catch (err) {
+      if (!(err instanceof ProviderError && err.kind === 'permission')) throw err;
+      warnings.push(COUPONS_PERMISSION_WARNING);
+    }
   } catch (err) {
     if (err instanceof ProviderError && err.kind === 'auth') {
       return {
@@ -694,7 +928,7 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
     accountLabel: testMode ? 'Stripe (test mode)' : 'Stripe (live)',
     config: {},
     testMode,
-    warnings: restricted ? [] : [SECRET_KEY_WARNING],
+    warnings,
   };
 }
 

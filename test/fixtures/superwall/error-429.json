@@ -1,0 +1,7 @@
+{
+  "_tag": "@superwall/api-schema/v2/errors/RateLimit",
+  "type": "rate_limit_error",
+  "code": "rate_limit_exceeded",
+  "message": "Too many requests have been made in a short period",
+  "retry_after": 30
+}

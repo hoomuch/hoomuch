@@ -1,0 +1,8 @@
+{
+  "message": "offset : invalid value",
+  "type": "invalid_request",
+  "api_error_code": "param_wrong_value",
+  "param": "offset",
+  "error_code": "param_wrong_value",
+  "http_status_code": 400
+}

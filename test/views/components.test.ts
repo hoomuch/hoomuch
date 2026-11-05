@@ -16,6 +16,8 @@ import { RangeTabs } from '../../src/views/components/range-tabs';
 import { RelativeTime } from '../../src/views/components/relative-time';
 import { ProviderDot, StatusBadge, TestModeBadge } from '../../src/views/components/badges';
 import { RingsMark } from '../../src/views/components/icons';
+import { ProviderLogo } from '../../src/views/components/provider-logos';
+import { ProviderPickerPage } from '../../src/views/pages/connections';
 import {
   Alert,
   Button,
@@ -246,6 +248,32 @@ describe('BreakdownTable', () => {
     const out = await render('breakdown-test', h(BreakdownTable, { rows: [row], currency: 'USD', rangeDays: 7 }));
     expect(out).toContain('Test mode');
     expect(out).toContain('0%');
+  });
+});
+
+describe('ProviderLogo', () => {
+  it('draws every provider as a decorative tile, with no remote image and unique clip ids', async () => {
+    for (const p of PROVIDERS) {
+      const out = await render(`logo-${p.id}`, h(ProviderLogo, { provider: p.id, size: 'lg' }));
+      expect(out, p.id).toMatch(/^<(svg|span)\b[^>]*aria-hidden="true"/);
+      expect(out, p.id).toContain('size-8');
+      expect(out, p.id).not.toMatch(/<img|href=|xlink/);
+    }
+    // Two Polar logos on one page must not share a clipPath id.
+    const twice = await html(createElement('div', null, h(ProviderLogo, { provider: 'polar' }), h(ProviderLogo, { provider: 'polar' })));
+    const ids = [...twice.matchAll(/<clipPath id="([^"]+)"/g)].map((m) => m[1]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('shows each real provider in the picker as a logo card, the demo row apart', async () => {
+    const out = await render('provider-picker', h(ProviderPickerPage, { chrome: { user, flash: null } }));
+    for (const p of PROVIDERS.filter((x) => x.id !== 'demo')) {
+      expect(out).toContain(`href="/connections/new?provider=${p.id}"`);
+      expect(out).toContain(p.name);
+    }
+    expect(tags(out, 'svg', 'size-8')).toHaveLength(PROVIDERS.length - 1);
+    expect(out).toContain('href="/connections/new?provider=demo"');
   });
 });
 

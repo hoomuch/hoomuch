@@ -11,9 +11,33 @@
 
 import type { MoneyMap } from '../lib/money';
 
-export type ProviderId = 'stripe' | 'lemonsqueezy' | 'revenuecat' | 'demo';
+export type ProviderId =
+  | 'stripe'
+  | 'paddle'
+  | 'lemonsqueezy'
+  | 'polar'
+  | 'revenuecat'
+  | 'chargebee'
+  | 'dodo'
+  | 'gumroad'
+  | 'adapty'
+  | 'superwall'
+  | 'demo';
 
-export const PROVIDER_IDS: readonly ProviderId[] = ['stripe', 'lemonsqueezy', 'revenuecat', 'demo'];
+/** Every id the app accepts. The database no longer checks this (migration 0003): this list is the guard. */
+export const PROVIDER_IDS: readonly ProviderId[] = [
+  'stripe',
+  'paddle',
+  'lemonsqueezy',
+  'polar',
+  'revenuecat',
+  'chargebee',
+  'dodo',
+  'gumroad',
+  'adapty',
+  'superwall',
+  'demo',
+];
 
 export function isProviderId(v: unknown): v is ProviderId {
   return typeof v === 'string' && (PROVIDER_IDS as readonly string[]).includes(v);
@@ -152,7 +176,7 @@ export interface RevenuePage {
 
 export interface ProviderAdapter {
   readonly id: ProviderId;
-  /** Live, read-only check of the credentials. Should cost at most ~3 requests. */
+  /** Live, read-only check of the credentials. Should cost at most ~4 requests (one probe per permission). */
   verify(input: ConnectionInput, ctx: ProviderContext): Promise<VerifyResult>;
   /** Current MRR / subscriptions / trials. */
   fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot>;

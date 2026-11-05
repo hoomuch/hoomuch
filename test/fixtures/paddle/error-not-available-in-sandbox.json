@@ -1,0 +1,11 @@
+{
+  "error": {
+    "type": "request_error",
+    "code": "not_available_in_sandbox",
+    "detail": "This endpoint isn't available in the sandbox environment.",
+    "documentation_url": "https://developer.paddle.com/errors/shared/not_available_in_sandbox"
+  },
+  "meta": {
+    "request_id": "00000000-0000-0000-0000-000000000000"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "data": {
+    "common": {
+      "data": [{ "title": "Total", "type": "total", "value": 512, "values": [{ "x": "2026-11-05", "y": 512 }] }],
+      "value": 512,
+      "value_from": 512,
+      "value_to": 512,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "subscriptions_active",
+      "type": "multi",
+      "default_aggregation": "last",
+      "description": "<div>Paid subscriptions that have not yet expired.</div>",
+      "metric_name": "Active subscriptions",
+      "is_json": true,
+      "unit": "count",
+      "recommended_period": null
+    }
+  }
+}

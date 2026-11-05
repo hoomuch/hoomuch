@@ -72,6 +72,7 @@ const AUTH_MESSAGE =
 const PROJECT_NOT_FOUND_MESSAGE =
   "RevenueCat couldn’t find this project. Copy the Project ID from Project settings in RevenueCat (it looks like proj1ab2c3d4).";
 const PROJECT_HINT = 'If it already has it, check that the key was created in this project.';
+const MISSING_PREFIX_HINT = 'Project IDs start with “proj”: if you copied it from the dashboard’s address bar, add “proj” in front.';
 
 // ---------- input ----------
 
@@ -127,6 +128,17 @@ function requireInput(input: ConnectionInput): RcInput {
 
 // ---------- HTTP ----------
 
+/**
+ * Every Charts & Metrics endpoint lists 423 Locked, undocumented beyond the name. Treat it as temporary:
+ * no status on the error, so verify shows the generic "try again" and a resumed backfill keeps its cursor
+ * (a 4xx status would read as a stale cursor and restart it).
+ */
+function mapLocked(status: number): ProviderError | null {
+  return status === 423
+    ? new ProviderError('upstream', `${PROVIDER} is busy with this project right now (HTTP 423). The next sync will retry.`)
+    : null;
+}
+
 async function rcGet(
   ctx: ProviderContext,
   inp: RcInput,
@@ -142,6 +154,7 @@ async function rcGet(
       headers: { Authorization: `Bearer ${inp.apiKey}` },
       permission,
       notFoundMessage,
+      mapError: mapLocked,
     });
   } catch (err) {
     // A 404 on a project-scoped path means the Project ID is wrong; 403 stays on the key (fetchJson's default).
@@ -293,7 +306,25 @@ function measureIndex(measures: unknown[], test: (unit: string, name: string) =>
   return null;
 }
 
-/** Parses a non-segmented, day-resolution chart into per-day values. Null when the shape isn't the documented one. */
+/** Log-safe description of a chart payload we couldn't read: types and lengths only, never values. */
+function chartShape(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) return { body: Array.isArray(body) ? 'array' : typeof body };
+  const values = body['values'];
+  const first: unknown = Array.isArray(values) ? values[0] : undefined;
+  return {
+    resolution: typeof body['resolution'] === 'string' ? body['resolution'] : null,
+    values: Array.isArray(values) ? values.length : typeof values,
+    row: Array.isArray(first) ? `array(${first.length})` : isRecord(first) ? Object.keys(first).sort().join(',') : typeof first,
+  };
+}
+
+/**
+ * Parses a non-segmented, day-resolution chart into per-day values. Null when the shape isn't one we know.
+ * Rows are read as objects `{cohort, measure, value, incomplete}`: the shape the realtime (v3) Revenue and
+ * Refunds charts return (RevenueCat's own API tooling reads them this way). The API reference only says
+ * `values` items "vary by chart type" and may be arrays of numbers, with no positional schema, so array rows
+ * are NOT guessed at: the chart is reported unreadable and its shape is logged.
+ */
 function parseDailyChart(body: unknown, from: string, to: string): ParsedChart | null {
   if (!isRecord(body) || !Array.isArray(body['values'])) return null;
   if (body['resolution'] !== undefined && body['resolution'] !== 'day') return null;
@@ -308,7 +339,6 @@ function parseDailyChart(body: unknown, from: string, to: string): ParsedChart |
 
   const byDay = new Map<string, DayValues>();
   for (const row of body['values']) {
-    // Object rows `{cohort, measure, value, incomplete}` are the documented realtime (v3) shape.
     if (!isRecord(row)) return null;
     const day = cohortDay(row['cohort']);
     if (!day) return null;
@@ -342,7 +372,9 @@ async function fetchDailyChart(
       ctx,
       inp,
       `/charts/${chart}`,
-      { resolution: DAY_RESOLUTION, start_date: from, end_date: to, currency: REQUEST_CURRENCY },
+      // realtime=true is the API default; sent explicitly because Refunds is a realtime-only chart and the
+      // v2 Revenue chart dates refunds differently, so gross = revenue + refunded only holds on v3.
+      { resolution: DAY_RESOLUTION, start_date: from, end_date: to, currency: REQUEST_CURRENCY, realtime: true },
       RC_SCOPE_CHARTS,
       `${PROVIDER} has no ${chart} chart for this project.`,
     );
@@ -357,6 +389,7 @@ async function fetchDailyChart(
     throw err;
   }
   const parsed = parseDailyChart(body, from, to);
+  if (!parsed) ctx.log('revenuecat_chart_unreadable', { chart, ...chartShape(body) });
   return parsed ? { ok: true, chart: parsed } : { ok: false, reason: 'unreadable' };
 }
 
@@ -389,7 +422,7 @@ function cursorDay(cursor: string | null): string | null {
 type VerifyFailure = Extract<VerifyResult, { ok: false }>;
 
 /** Turns expected verify failures into form errors with RevenueCat-specific guidance; null = rethrow. */
-function verifyFailure(err: unknown): VerifyFailure | null {
+function verifyFailure(err: unknown, projectId: string): VerifyFailure | null {
   if (!(err instanceof ProviderError)) return null;
   switch (err.kind) {
     case 'auth':
@@ -397,7 +430,12 @@ function verifyFailure(err: unknown): VerifyFailure | null {
     case 'permission':
       return { ok: false, error: `${err.message} ${PROJECT_HINT}`, field: 'apiKey' };
     case 'not_found':
-      return { ok: false, error: PROJECT_NOT_FOUND_MESSAGE, field: 'projectId' };
+      // Dashboard URLs show the ID without its "proj" prefix (e.g. /projects/1a2b3c4d/…).
+      return {
+        ok: false,
+        error: projectId.startsWith('proj') ? PROJECT_NOT_FOUND_MESSAGE : `${PROJECT_NOT_FOUND_MESSAGE} ${MISSING_PREFIX_HINT}`,
+        field: 'projectId',
+      };
     case 'upstream':
       // 400/422: RevenueCat refused the request itself (e.g. a malformed Project ID); its sanitised reason helps.
       return err.status !== undefined && err.status >= 400 && err.status < 500 ? { ok: false, error: err.message } : null;
@@ -423,7 +461,7 @@ export const revenueCatAdapter: ProviderAdapter = {
     try {
       overview = await getOverview(ctx, inp);
     } catch (err) {
-      const failure = verifyFailure(err);
+      const failure = verifyFailure(err, inp.projectId);
       if (failure) return failure;
       throw err;
     }

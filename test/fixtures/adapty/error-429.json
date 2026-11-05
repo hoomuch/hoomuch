@@ -1,0 +1,5 @@
+{
+  "errors": [{ "source": "non_field_errors", "errors": ["Request was throttled."] }],
+  "error_code": "rate_limited",
+  "status_code": 429
+}

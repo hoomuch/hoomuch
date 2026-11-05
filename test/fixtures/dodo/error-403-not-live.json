@@ -1,0 +1,4 @@
+{
+  "code": "MERCHANT_NOT_LIVE",
+  "message": "Live payments not enabled for merchant"
+}

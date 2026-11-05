@@ -1,0 +1,52 @@
+{
+  "data": {
+    "revenue": {
+      "data": [{ "title": "Total", "type": "total", "value": 4545.67, "values": [{ "x": "2026-11-05", "y": 4545.67 }] }],
+      "value": 4545.67,
+      "value_from": 4545.67,
+      "value_to": 4545.67,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "mrr",
+      "type": "multi",
+      "default_aggregation": "last",
+      "description": "<div>Monthly recurring revenue from active paid subscriptions.</div>",
+      "metric_name": "MRR",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    },
+    "proceeds": {
+      "data": [{ "title": "Total", "type": "total", "value": 3500.17, "values": [{ "x": "2026-11-05", "y": 3500.17 }] }],
+      "value": 3500.17,
+      "value_from": 3500.17,
+      "value_to": 3500.17,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "mrr",
+      "type": "multi",
+      "default_aggregation": "last",
+      "description": "<div>MRR after the store's commission.</div>",
+      "metric_name": "MRR",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    },
+    "net_revenue": {
+      "data": [{ "title": "Total", "type": "total", "value": 3120.4, "values": [{ "x": "2026-11-05", "y": 3120.4 }] }],
+      "value": 3120.4,
+      "value_from": 3120.4,
+      "value_to": 3120.4,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "mrr",
+      "type": "multi",
+      "default_aggregation": "last",
+      "description": "<div>MRR after the store's commission and taxes.</div>",
+      "metric_name": "MRR",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    }
+  }
+}

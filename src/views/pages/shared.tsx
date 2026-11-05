@@ -175,7 +175,8 @@ export function describeConfig(meta: ProviderMeta, config: Record<string, string
       const cur = storeCurrencies(value);
       if (cur) rows.push({ label: cur.includes(',') ? 'Store currencies' : 'Store currency', value: cur });
     } else if (key === 'revenueHistory') {
-      rows.push({ label: 'Revenue history', value: value === 'daily' ? 'Daily' : `${meta.name} 28-day total only` });
+      // 'none': the key can't read the provider's daily history (RevenueCat Charts, Adapty, Superwall data:read).
+      rows.push({ label: 'Revenue history', value: value === 'daily' ? 'Daily' : 'No daily history with this key' });
     } else {
       rows.push({ label: configLabel(meta, key), value });
     }

@@ -1,0 +1,94 @@
+{
+  "data": {
+    "revenue": {
+      "data": [
+        {
+          "title": "Total",
+          "type": "total",
+          "value": 202.83,
+          "values": [
+            { "x": "2026-10-30", "y": 129.99 },
+            { "x": "2026-10-31", "y": 0.0 },
+            { "x": "2026-11-01", "y": 45.5 },
+            { "x": "2026-11-03", "y": -4.99 },
+            { "x": "2026-11-04", "y": 19.99 },
+            { "x": "2026-11-05", "y": 12.34 }
+          ]
+        }
+      ],
+      "value": 202.83,
+      "value_from": null,
+      "value_to": null,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "revenue",
+      "type": "multi",
+      "default_aggregation": "sum",
+      "description": "<div>Total money received from both subscriptions and one-time purchases. Does not include\nrevenue from subscriptions and purchases that were refunded afterward. Calculated before the store's fee.</div>",
+      "metric_name": "Revenue",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    },
+    "proceeds": {
+      "data": [
+        {
+          "title": "Total",
+          "type": "total",
+          "value": 141.98,
+          "values": [
+            { "x": "2026-10-30", "y": 90.99 },
+            { "x": "2026-10-31", "y": 0.0 },
+            { "x": "2026-11-01", "y": 31.85 },
+            { "x": "2026-11-03", "y": -3.49 },
+            { "x": "2026-11-04", "y": 13.99 },
+            { "x": "2026-11-05", "y": 8.64 }
+          ]
+        }
+      ],
+      "value": 141.98,
+      "value_from": null,
+      "value_to": null,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "revenue",
+      "type": "multi",
+      "default_aggregation": "sum",
+      "description": "<div>Revenue after the store's commission.</div>",
+      "metric_name": "Revenue",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    },
+    "net_revenue": {
+      "data": [
+        {
+          "title": "Total",
+          "type": "total",
+          "value": 118.32,
+          "values": [
+            { "x": "2026-10-30", "y": 75.83 },
+            { "x": "2026-10-31", "y": 0.0 },
+            { "x": "2026-11-01", "y": 26.54 },
+            { "x": "2026-11-03", "y": -2.91 },
+            { "x": "2026-11-04", "y": 11.66 },
+            { "x": "2026-11-05", "y": 7.2 }
+          ]
+        }
+      ],
+      "value": 118.32,
+      "value_from": null,
+      "value_to": null,
+      "compare_value_from": null,
+      "compare_value_to": null,
+      "title": "revenue",
+      "type": "multi",
+      "default_aggregation": "sum",
+      "description": "<div>Revenue after the store's commission and taxes.</div>",
+      "metric_name": "Revenue",
+      "is_json": true,
+      "unit": "USD",
+      "recommended_period": null
+    }
+  }
+}

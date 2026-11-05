@@ -32,7 +32,13 @@ const input = (apiKey = KEY, projectId = PROJECT): ConnectionInput => ({
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-const dayQuery = (start: string, end: string) => ({ resolution: '0', start_date: start, end_date: end, currency: 'USD' });
+const dayQuery = (start: string, end: string) => ({
+  resolution: '0',
+  start_date: start,
+  end_date: end,
+  currency: 'USD',
+  realtime: 'true',
+});
 
 /** A documented-shape day chart with no data points, echoing the requested range. */
 const emptyChart = (displayName: string) => (url: URL) => ({
@@ -178,6 +184,23 @@ describe('revenuecat verify', () => {
     if (res.ok) return;
     expect(res.field).toBe('projectId');
     expect(res.error).toMatch(/couldn’t find this project/);
+    expect(res.error).not.toMatch(/add “proj”/);
+  });
+
+  it('on a 404 for an ID without the proj prefix, says to add it (dashboard URLs drop it)', async () => {
+    const { fetch } = fakeFetch([route('/v2/projects/1ab2c3d4/metrics/overview', { status: 404, json: err404 })]);
+    const res = await revenueCatAdapter.verify(input(KEY, '1ab2c3d4'), makeCtx(fetch));
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.field).toBe('projectId');
+    expect(res.error).toMatch(/add “proj” in front/);
+  });
+
+  it('rethrows 423 Locked on the overview, so the form shows "try again" instead of a key error', async () => {
+    const { fetch } = fakeFetch([route(OVERVIEW, { status: 423, json: { type: 'resource_locked', message: 'Locked' } })]);
+    const err = await catchErr(revenueCatAdapter.verify(input(), makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(err.status).toBeUndefined();
   });
 
   it('warns (but connects) when the key cannot read Charts', async () => {
@@ -390,6 +413,25 @@ describe('revenuecat fetchRevenue', () => {
       expect(page).toEqual({ events: [], daily: [], nextCursor: null, done: true });
       expect(ctx.logs.find((l) => l.event === 'revenuecat_charts_unavailable')?.data).toMatchObject({ reason: 'unreadable' });
     }
+  });
+
+  it('logs the shape (never the values) of an unreadable chart, so array rows can be diagnosed', async () => {
+    const arrayRows = { ...clone(revenueChart), values: [[1793318400, 129.99, 7]] };
+    const { fetch } = fakeFetch([route(REVENUE, { json: arrayRows })]);
+    const ctx = makeCtx(fetch);
+    await revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: null }, ctx);
+    const shape = ctx.logs.find((l) => l.event === 'revenuecat_chart_unreadable')?.data;
+    expect(shape).toEqual({ chart: 'revenue', resolution: 'day', values: 1, row: 'array(3)' });
+    expect(JSON.stringify(ctx.logs)).not.toContain('129.99');
+  });
+
+  it('treats 423 Locked as temporary: thrown without a 4xx status, so a resumed backfill keeps its cursor', async () => {
+    const { fetch, calls } = fakeFetch([route(REVENUE, { status: 423, json: { type: 'resource_locked', message: 'Locked' } })]);
+    const err = await catchErr(revenueCatAdapter.fetchRevenue(input(), { since: SINCE, cursor: '2026-10-30' }, makeCtx(fetch)));
+    expect(calls).toHaveLength(1);
+    expect(err.kind).toBe('upstream');
+    expect(err.status).toBeUndefined();
+    expect(err.message).toMatch(/HTTP 423/);
   });
 
   it('retries a 429 using RevenueCat backoff and spends one budget unit per logical request', async () => {

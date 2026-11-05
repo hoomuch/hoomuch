@@ -1,0 +1,45 @@
+{
+  "object": "chart_definitions",
+  "y_axis": [
+    { "key": "netProceeds", "name": "Proceeds", "description": "Revenue after refunds, store fees, and taxes.", "value_type": "currency" },
+    { "key": "grossSales", "name": "Sales", "description": "Revenue before refunds, taxes, and fees.", "value_type": "currency" },
+    { "key": "mrrValue", "name": "MRR", "description": "Monthly recurring revenue from subscriptions.", "value_type": "currency" },
+    { "key": "activeSubscriptionCount", "name": "Active Subscriptions", "description": "Count of unexpired, paid subscriptions.", "value_type": "number" },
+    { "key": "newTrialCount", "name": "New Trials", "description": "Trial starts, cohorted by trial start date.", "value_type": "number" }
+  ],
+  "x_axis": [
+    { "key": "purchaseDate", "name": "Purchase date", "description": "Date of the purchase", "value_type": "date", "fill_missing_values": "zero" },
+    { "key": "mrrDate", "name": "Date", "description": "Date the subscription state applies to", "value_type": "date", "fill_missing_values": "cumulative" }
+  ],
+  "breakdowns": [
+    { "key": "countryCode", "name": "Country", "description": "Storefront country", "active": false, "value_type": "string" }
+  ],
+  "filters": [
+    { "key": "environment", "name": "Environment", "description": "Production or sandbox", "active": true, "value_type": "string", "value": ["PRODUCTION"] }
+  ],
+  "date_presets": ["last_7_days", "last_30_days", "last_90_days", "custom"],
+  "date_intervals": [
+    { "key": "day", "name": "Daily", "description": "One point per day" },
+    { "key": "week", "name": "Weekly", "description": "One point per week" }
+  ],
+  "chart_types": [
+    { "key": "proceeds", "name": "Proceeds", "description": "Revenue after refunds, store fees, and taxes.", "group": "Revenue", "x_axis": "purchaseDate", "y_axis": "netProceeds", "date_dimension": "purchaseDate", "include": [] },
+    { "key": "sales", "name": "Sales", "description": "Revenue before refunds, taxes, and fees.", "group": "Revenue", "x_axis": "purchaseDate", "y_axis": "grossSales", "date_dimension": "purchaseDate", "include": [] },
+    { "key": "monthly_recurring", "name": "MRR", "description": "Monthly recurring revenue from subscriptions.", "group": "Revenue", "x_axis": "mrrDate", "y_axis": "mrrValue", "date_dimension": "mrrDate", "include": [], "default_chart_type": "line", "availability": { "status": "available", "application_ids": [456, 457] } },
+    { "key": "subs_active", "name": "Active Subscriptions", "description": "Count of unexpired, paid subscriptions.", "group": "Subscriptions", "x_axis": "mrrDate", "y_axis": "activeSubscriptionCount", "date_dimension": "mrrDate", "include": [], "default_breakdown": "countryCode", "availability": { "status": "available", "application_ids": [456, 457] } },
+    { "key": "new_trials", "name": "New Trials", "description": "Trial starts, cohorted by trial start date.", "group": "Subscriptions", "x_axis": "purchaseDate", "y_axis": "newTrialCount", "date_dimension": "purchaseDate", "include": [] }
+  ],
+  "scope": {
+    "object": "chart_scope",
+    "type": "organization",
+    "organization_id": 123,
+    "project_id": null,
+    "application_id": null,
+    "all_projects": true,
+    "projects": [{ "id": 3827, "name": "Habit Owl" }],
+    "applications": [
+      { "id": 456, "name": "Habit Owl iOS", "platform": "ios", "project_id": 3827 },
+      { "id": 457, "name": "Habit Owl Android", "platform": "android", "project_id": 3827 }
+    ]
+  }
+}

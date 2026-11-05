@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "All your subscription revenue under one roof — Stripe, Lemon Squeezy, RevenueCat.",
+  "description": "All your subscription revenue under one roof — Stripe, Paddle, Lemon Squeezy, Polar, RevenueCat, Chargebee, Dodo Payments, Gumroad, Adapty, Superwall.",
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",

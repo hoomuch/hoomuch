@@ -1,0 +1,15 @@
+{
+  "after_balance": 1252000,
+  "amount": 12000,
+  "before_balance": 1240000,
+  "business_id": "bus_FakeBusiness0001",
+  "created_at": "2026-11-05T09:00:00Z",
+  "currency": "USD",
+  "description": "Payment from jane.fake@example.com",
+  "event_type": "payment",
+  "id": "led_FakeEntry0001",
+  "is_credit": true,
+  "payout_id": null,
+  "reference_object_id": "pay_FakePayment0001",
+  "usd_equivalent_amount": 12000
+}

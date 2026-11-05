@@ -1,0 +1,213 @@
+{
+  "meta": {
+    "page": {
+      "currentPage": 1,
+      "from": 1,
+      "lastPage": 1,
+      "perPage": 100,
+      "to": 6,
+      "total": 6
+    }
+  },
+  "jsonapi": {
+    "version": "1.0"
+  },
+  "links": {
+    "first": "https://api.lemonsqueezy.com/v1/discount-redemptions?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt",
+    "last": "https://api.lemonsqueezy.com/v1/discount-redemptions?page%5Bnumber%5D=1&page%5Bsize%5D=100&sort=-createdAt"
+  },
+  "data": [
+    {
+      "type": "discount-redemptions",
+      "id": "46",
+      "attributes": {
+        "discount_id": 35,
+        "order_id": 5012,
+        "discount_name": "Beta 10%",
+        "discount_code": "BETA10",
+        "discount_amount": 10,
+        "discount_amount_type": "percent",
+        "amount": 150,
+        "created_at": "2026-11-01T00:00:00.000000Z",
+        "updated_at": "2026-11-01T00:00:00.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/46/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/46/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/46/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/46/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/46"
+      }
+    },
+    {
+      "type": "discount-redemptions",
+      "id": "45",
+      "attributes": {
+        "discount_id": 32,
+        "order_id": 5118,
+        "discount_name": "€3 off for 6 months",
+        "discount_code": "QUARTER3",
+        "discount_amount": 300,
+        "discount_amount_type": "fixed",
+        "amount": 300,
+        "created_at": "2026-09-20T00:00:00.000000Z",
+        "updated_at": "2026-09-20T00:00:00.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/45/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/45/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/45/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/45/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/45"
+      }
+    },
+    {
+      "type": "discount-redemptions",
+      "id": "44",
+      "attributes": {
+        "discount_id": 31,
+        "order_id": 5117,
+        "discount_name": "Launch 50%",
+        "discount_code": "LAUNCH50",
+        "discount_amount": 50,
+        "discount_amount_type": "percent",
+        "amount": 450,
+        "created_at": "2026-09-10T00:00:00.000000Z",
+        "updated_at": "2026-09-10T00:00:00.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/44/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/44/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/44/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/44/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/44"
+      }
+    },
+    {
+      "type": "discount-redemptions",
+      "id": "43",
+      "attributes": {
+        "discount_id": 33,
+        "order_id": 5119,
+        "discount_name": "Fall 20%",
+        "discount_code": "FALL20",
+        "discount_amount": 20,
+        "discount_amount_type": "percent",
+        "amount": 180,
+        "created_at": "2026-09-01T00:00:02.000000Z",
+        "updated_at": "2026-09-01T00:00:02.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/43/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/43/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/43/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/43/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/43"
+      }
+    },
+    {
+      "type": "discount-redemptions",
+      "id": "42",
+      "attributes": {
+        "discount_id": 34,
+        "order_id": 5119,
+        "discount_name": "Welcome €5",
+        "discount_code": "WELCOME5",
+        "discount_amount": 500,
+        "discount_amount_type": "fixed",
+        "amount": 500,
+        "created_at": "2026-09-01T00:00:01.000000Z",
+        "updated_at": "2026-09-01T00:00:01.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/42/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/42/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/42/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/42/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/42"
+      }
+    },
+    {
+      "type": "discount-redemptions",
+      "id": "41",
+      "attributes": {
+        "discount_id": 31,
+        "order_id": 5013,
+        "discount_name": "Launch 50%",
+        "discount_code": "LAUNCH50",
+        "discount_amount": 50,
+        "discount_amount_type": "percent",
+        "amount": 450,
+        "created_at": "2026-08-20T00:00:00.000000Z",
+        "updated_at": "2026-08-20T00:00:00.000000Z"
+      },
+      "relationships": {
+        "discount": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/41/discount",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/41/relationships/discount"
+          }
+        },
+        "order": {
+          "links": {
+            "related": "https://api.lemonsqueezy.com/v1/discount-redemptions/41/order",
+            "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/41/relationships/order"
+          }
+        }
+      },
+      "links": {
+        "self": "https://api.lemonsqueezy.com/v1/discount-redemptions/41"
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "periods": [
+    {
+      "timestamp": "2026-11-05T00:00:00Z",
+      "monthly_recurring_revenue": 123456
+    }
+  ],
+  "totals": {
+    "monthly_recurring_revenue": 123456
+  },
+  "metrics": {
+    "monthly_recurring_revenue": {
+      "slug": "monthly_recurring_revenue",
+      "display_name": "Monthly Recurring Revenue",
+      "type": "currency"
+    }
+  }
+}

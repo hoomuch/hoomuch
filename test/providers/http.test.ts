@@ -4,6 +4,7 @@ import {
   buildUrl,
   fetchJson,
   hasBudget,
+  RateLimitedError,
   sanitizeErrorText,
 } from '../../src/providers/http';
 import { ProviderError } from '../../src/providers/types';
@@ -193,6 +194,71 @@ describe('sanitizeErrorText', () => {
     );
     expect(s).toBe('Bearer *** rk_test_*** sk_*** [token] [email] [redacted]');
     expect(sanitizeErrorText('z'.repeat(1000)).length).toBeLessThanOrEqual(300);
+  });
+
+  it('masks Paddle, Polar, Dodo and Creem keys and Basic auth', () => {
+    const s = sanitizeErrorText(
+      'pdl_sdbx_apikey_01gtgztp8f_abc polar_oat_Xy12 dodo_test_k3y creem_test_abc creem_live1 Basic dXNlcjo=',
+    );
+    expect(s).toBe('pdl_sdbx_apikey_*** polar_oat_*** dodo_test_*** creem_test_*** creem_*** Basic ***');
+    expect(sanitizeErrorText('key secret_live_AbCd1234.0123456789abcdef and public_live_xyz.123')).toBe(
+      'key secret_live_*** and public_live_***',
+    );
+  });
+});
+
+describe('fetchJson rateLimit: yield', () => {
+  it('gives up on the first 429, empties the budget and does not sleep', async () => {
+    const sleeps = recordSleeps();
+    const { fetch, calls } = fakeFetch([route('/v1/things', [{ status: 429, json: {} }, { json: { ok: 1 } }])]);
+    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    const err = await catchErr(fetchJson(ctx, spec({ rateLimit: 'yield' })));
+    expect(err).toBeInstanceOf(RateLimitedError);
+    expect(err.kind).toBe('rate_limit');
+    expect(calls).toHaveLength(1);
+    expect(sleeps).toHaveLength(0);
+    expect(hasBudget(ctx)).toBe(false);
+  });
+
+  it('still retries 5xx', async () => {
+    recordSleeps();
+    const { fetch } = fakeFetch([route('/v1/things', [{ status: 503, json: {} }, { json: { ok: 1 } }])]);
+    await expect(fetchJson(makeCtx(fetch, { pageBudget: 5 }), spec({ rateLimit: 'yield' }))).resolves.toEqual({ ok: 1 });
+  });
+});
+
+describe('fetchJson readQuery', () => {
+  it('POSTs the JSON query to a read endpoint, and GETs when there is none', async () => {
+    const { fetch, calls } = fakeFetch([
+      route('/v1/things', { json: { ok: 'post' } }, { method: 'POST' }),
+      route('/v1/things', { json: { ok: 'get' } }),
+    ]);
+    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    await expect(fetchJson(ctx, spec({ readQuery: { chart_id: 'mrr' } }))).resolves.toEqual({ ok: 'post' });
+    await expect(fetchJson(ctx, spec())).resolves.toEqual({ ok: 'get' });
+    expect(calls[0]).toMatchObject({ method: 'POST', body: '{"chart_id":"mrr"}' });
+    expect(calls[0]!.headers['content-type']).toBe('application/json');
+    expect(calls[1]).toMatchObject({ method: 'GET' });
+    expect(calls[1]!.body).toBeUndefined();
+    expect(calls[1]!.headers['content-type']).toBeUndefined();
+  });
+});
+
+describe('fetchJson mapError', () => {
+  it('lets the provider map an error first and falls back to the status mapping on null', async () => {
+    const { fetch } = fakeFetch([
+      route('/v1/things', [
+        { status: 403, json: { error: { code: 'invalid_token', detail: 'bad' } } },
+        { status: 403, json: { error: { code: 'forbidden', detail: 'nope' } } },
+      ]),
+    ]);
+    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    const mapError = (status: number, body: unknown) => {
+      const code = (body as { error?: { code?: string } })?.error?.code;
+      return status === 403 && code === 'invalid_token' ? new ProviderError('auth', 'Example rejected the key.') : null;
+    };
+    expect((await catchErr(fetchJson(ctx, spec({ mapError })))).kind).toBe('auth');
+    expect((await catchErr(fetchJson(ctx, spec({ mapError })))).kind).toBe('permission');
   });
 });
 

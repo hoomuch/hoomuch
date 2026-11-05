@@ -74,6 +74,8 @@ export interface RecordedCall {
   url: string;
   method: string;
   headers: Record<string, string>;
+  /** Request body (POST read queries), if any. */
+  body?: string;
 }
 
 export function fakeFetch(routes: Route[]): { fetch: typeof fetch; calls: RecordedCall[]; routes: Route[] } {
@@ -83,7 +85,7 @@ export function fakeFetch(routes: Route[]): { fetch: typeof fetch; calls: Record
     const method = (init?.method ?? 'GET').toUpperCase();
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((v, k) => (headers[k] = v));
-    calls.push({ url: url.toString(), method, headers });
+    calls.push({ url: url.toString(), method, headers, ...(typeof init?.body === 'string' ? { body: init.body } : {}) });
 
     const r = routes.find((x) => x.method === method && x.test(url));
     if (!r) throw new Error(`fakeFetch: no route for ${method} ${url.toString()}`);

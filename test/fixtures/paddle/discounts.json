@@ -1,0 +1,105 @@
+{
+  "data": [
+    {
+      "id": "dsc_01gtgztp8fpchantd5g1wrksa3",
+      "status": "active",
+      "description": "Black Friday 2024",
+      "enabled_for_checkout": true,
+      "code": "BF10OFF",
+      "type": "percentage",
+      "mode": "standard",
+      "amount": "10",
+      "currency_code": "USD",
+      "recur": false,
+      "maximum_recurring_intervals": null,
+      "usage_limit": 1000,
+      "restrict_to": null,
+      "expires_at": "2024-12-03T00:00:00Z",
+      "times_used": 0,
+      "discount_group_id": "dsg_01js2gqehzccfkywgx1jk2mtsp",
+      "custom_data": null,
+      "import_meta": null,
+      "created_at": "2024-11-28T14:36:14.695Z",
+      "updated_at": "2024-11-28T14:36:14.695Z"
+    },
+    {
+      "id": "dsc_01gtf15svsqzgp9325ss4ebmwt",
+      "status": "active",
+      "description": "Introductory offer: $10 off per user for Pro",
+      "enabled_for_checkout": true,
+      "code": "10OFFPRO",
+      "type": "flat_per_seat",
+      "mode": "standard",
+      "amount": "1000",
+      "currency_code": "USD",
+      "recur": false,
+      "maximum_recurring_intervals": null,
+      "usage_limit": null,
+      "restrict_to": [
+        "pri_01gsz8x8sawmvhz1pv30nge1ke"
+      ],
+      "expires_at": "2023-12-05T15:00:00Z",
+      "times_used": 0,
+      "discount_group_id": null,
+      "custom_data": null,
+      "import_meta": null,
+      "created_at": "2023-03-01T16:48:04.473Z",
+      "updated_at": "2023-12-05T14:27:26.844Z"
+    },
+    {
+      "id": "dsc_01gtgraak4chyhnp47rrdv89ad",
+      "status": "active",
+      "description": "Nonprofit discount",
+      "enabled_for_checkout": true,
+      "code": "98XFAUR91R",
+      "type": "percentage",
+      "mode": "standard",
+      "amount": "10",
+      "currency_code": null,
+      "recur": true,
+      "maximum_recurring_intervals": 3,
+      "usage_limit": null,
+      "restrict_to": [],
+      "expires_at": null,
+      "times_used": 6,
+      "discount_group_id": null,
+      "custom_data": null,
+      "import_meta": null,
+      "created_at": "2023-03-02T08:51:44.356Z",
+      "updated_at": "2023-11-07T14:37:41.459Z"
+    },
+    {
+      "id": "dsc_01h83xenpcfjyhkqr4x214m02x",
+      "status": "active",
+      "description": "Nonprofit discount",
+      "enabled_for_checkout": false,
+      "code": null,
+      "type": "percentage",
+      "mode": "standard",
+      "amount": "10",
+      "currency_code": null,
+      "recur": true,
+      "maximum_recurring_intervals": null,
+      "usage_limit": null,
+      "restrict_to": [
+        "pri_01h83xenpcfjyhkqr4x214m02x"
+      ],
+      "expires_at": null,
+      "times_used": 0,
+      "discount_group_id": null,
+      "custom_data": null,
+      "import_meta": null,
+      "created_at": "2023-08-18T08:51:07.596Z",
+      "updated_at": "2023-08-18T09:05:17.05Z"
+    }
+  ],
+  "meta": {
+    "request_id": "d8f286a6-e049-4a6e-8fa8-a6f145ac3ecf",
+    "pagination": {
+      "per_page": 50,
+      "next": "https://api.paddle.com/discounts?after=dsc_01h83xenpcfjyhkqr4x214m02x",
+      "has_more": false,
+      "estimated_total": 4
+    }
+  }
+}

@@ -11,6 +11,7 @@ import { getProviderMeta, PROVIDERS } from '../../providers/registry';
 import type { ProviderMeta } from '../../providers/types';
 import { ProviderDot, StatusBadge, TestModeBadge } from '../components/badges';
 import { ConnectionForm } from '../components/connection-form';
+import { ProviderLogo } from '../components/provider-logos';
 import { EmptyState } from '../components/empty-state';
 import { RelativeTime } from '../components/relative-time';
 import { Button, Card, FormError, LinkButton, PageHeader, ScrollTable, TableRowHeader } from '../components/ui';
@@ -60,7 +61,12 @@ export function ConnectionsPage(props: ConnectionsPageProps) {
                     </a>
                     {c.lastError ? <p className="mt-1 max-w-md leading-5 text-destructive-foreground">{c.lastError}</p> : null}
                   </TableRowHeader>
-                  <TableCell>{getProviderMeta(c.provider).name}</TableCell>
+                  <TableCell>
+                    <span className="inline-flex items-center gap-2">
+                      <ProviderLogo provider={c.provider} />
+                      {getProviderMeta(c.provider).name}
+                    </span>
+                  </TableCell>
                   <TableCell>
                     <span className="inline-flex flex-wrap gap-1">
                       <StatusBadge status={c.status} />
@@ -93,19 +99,19 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
     <Layout {...props.chrome} title="Add a connection" nav="connections" noindex>
       <BackLink href="/connections" label="Connections" />
       <PageHeader title="Add a connection" description="Pick where your subscriptions live. hoomuch only ever reads." />
-      <ul className="grid gap-4 sm:grid-cols-3">
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {real.map((p) => (
           <li key={p.id}>
             <CossCard
               render={<a href={`/connections/new?provider=${p.id}`} />}
               className="group h-full p-5 transition-[border-color,box-shadow,scale] duration-150 ease-out hover:border-input hover:shadow-sm/5 motion-safe:active:scale-[0.99]"
             >
-              <span className="flex items-center gap-2 font-semibold">
-                <ProviderDot dotClass={p.dotClass} size="md" />
-                {p.name}
-                <ArrowRight className="ml-auto size-4 shrink-0 text-faint transition-transform duration-150 ease-out motion-safe:group-hover:translate-x-0.5" />
+              <span className="flex items-center justify-between">
+                <ProviderLogo provider={p.id} size="lg" />
+                <ArrowRight className="size-4 shrink-0 text-faint transition-transform duration-150 ease-out motion-safe:group-hover:translate-x-0.5" />
               </span>
-              <span className="mt-1.5 text-muted-foreground">{p.tagline}</span>
+              <span className="mt-3 font-semibold">{p.name}</span>
+              <span className="mt-0.5 text-muted-foreground">{p.tagline}</span>
             </CossCard>
           </li>
         ))}
@@ -114,7 +120,7 @@ export function ProviderPickerPage(props: { chrome: PageChrome }) {
         href="/connections/new?provider=demo"
         className="mt-4 flex items-center gap-2 rounded-2xl border border-dashed px-5 py-3 text-muted-foreground transition-[border-color,color,scale] duration-150 ease-out hover:border-input hover:text-foreground motion-safe:active:scale-[0.99]"
       >
-        <ProviderDot dotClass={demo.dotClass} />
+        <ProviderLogo provider="demo" />
         <span>
           <span className="font-semibold">{demo.name}</span> · {demo.tagline}
         </span>
@@ -146,7 +152,7 @@ export function NewConnectionPage(props: NewConnectionPageProps) {
         title={heading}
         description={
           <span className="inline-flex items-center gap-2">
-            <ProviderDot dotClass={meta.dotClass} />
+            <ProviderLogo provider={meta.id} />
             {meta.tagline}
           </span>
         }
