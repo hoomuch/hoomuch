@@ -104,12 +104,24 @@ describe('Layout', () => {
     expect(out).toContain('name="robots" content="noindex"');
     expect(out).toContain('role="status"');
     expect(out).toContain('Body');
-    // App footer: plain name, the source (AGPL-3.0 §13) and issues, the read-only promise. No owl.
+    // App footer: the wordmark, the source (AGPL-3.0 §13) and issues, the read-only promise.
+    // No backdrop here, so no owl.
     const footer = out.slice(out.indexOf('<footer'), out.indexOf('</footer>'));
+    expect(footer).toContain('<span class="sr-only">hoomuch</span>');
     expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch"');
     expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch/issues"');
     expect(footer).toContain('Only ever reads. Keys are encrypted at rest.');
     expect(footer).not.toContain('/mascot/');
+  });
+
+  it('puts the asleep owl on the daily pages’ footer, never on Settings', async () => {
+    const footerOf = (s: string) => s.slice(s.indexOf('<footer'), s.indexOf('</footer>'));
+    const daily = await html(h(Layout, { title: 'Dashboard', user, flash: null, nav: 'dashboard', backdrop: true }));
+    expect(footerOf(daily)).toContain('src="/mascot/asleep.png"');
+    const settings = await html(h(Layout, { title: 'Settings', user, flash: null, nav: 'settings', backdrop: true }));
+    expect(footerOf(settings)).not.toContain('/mascot/');
+    const connection = await html(h(Layout, { title: 'Stripe', user, flash: null, nav: 'connections' }));
+    expect(footerOf(connection)).not.toContain('/mascot/');
   });
 
   it('gives marketing pages the owl footer with its links and the page’s dry line', async () => {

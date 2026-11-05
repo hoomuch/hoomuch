@@ -204,7 +204,14 @@ export function Layout(props: LayoutProps) {
           {props.children}
         </main>
 
-        {props.marketing ? <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} /> : <AppFooter />}
+        {props.marketing ? (
+          <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} />
+        ) : (
+          // The owl naps on the footer of the daily pages (dashboard, connections list,
+          // transactions): the ones with the backdrop, minus Settings. Never on settings, connect
+          // forms, a connection's page (keys, deletes), auth or error pages.
+          <AppFooter owl={Boolean(props.backdrop) && props.nav !== 'settings'} />
+        )}
         {props.celebrate ? <Celebration /> : null}
         <PagePayloadScript />
       </body>
@@ -215,9 +222,10 @@ export function Layout(props: LayoutProps) {
 // ---------- footer ----------
 //
 // Two footers that share one bottom line. Every page links to its source (AGPL-3.0 §13).
-// Marketing pages (landing, signed-out 404): the asleep owl on the top hairline, the wordmark and
-// the page's dry line, four links, then the meta line. App pages: the meta line only, plain
-// "hoomuch" instead of the wordmark (design/system.md §9 Brand). Hover is colour only (§3.6).
+// Both carry the wordmark, with the asleep owl resting on the top hairline above it.
+// Marketing pages (landing, signed-out 404): the wordmark and the page's dry line, four links,
+// then the meta line. App pages: one row, the wordmark, Source code and Report an issue, the
+// read-only promise; the owl only on the daily pages. Hover is colour only (design/system.md §3.6).
 
 /**
  * Quiet footer link. py-1 makes it a 28px target in body text, 24px in captions (WCAG 2.5.8);
@@ -240,6 +248,19 @@ function FooterLink(props: { href: string; external?: boolean; children: ReactNo
   );
 }
 
+/**
+ * Asleep on the hairline: the PNG's lowest pixels are its bottom edge, so bottom-full rests it
+ * on the footer's top border. Lined up with the wordmark below it. Needs a `relative` parent.
+ */
+function FooterOwl() {
+  return <Owl pose="asleep" className="absolute bottom-full left-4 opacity-70 sm:left-6" />;
+}
+
+/** Same size and weight as the header's, so the name reads as the logo at both ends. */
+function FooterWordmark() {
+  return <Wordmark className="text-title font-semibold tracking-tight text-foreground" />;
+}
+
 /** The promise every page repeats, with its one icon. */
 function TrustLine() {
   return (
@@ -255,12 +276,10 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
     // mt-*: room above the hairline for the owl, whatever section ends the page.
     <footer className="mt-12 border-t sm:mt-16">
       <div className={`${FRAME} relative`}>
-        {/* Asleep on the hairline: the PNG's lowest pixels are its bottom edge, so bottom-full
-            rests it on the line. Lined up with the wordmark below it. */}
-        <Owl pose="asleep" className="absolute bottom-full left-4 opacity-70 sm:left-6" />
+        <FooterOwl />
         <div className="flex flex-col gap-x-12 gap-y-5 py-10 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <Wordmark className="text-title font-semibold tracking-tight text-foreground" />
+            <FooterWordmark />
             {props.note ? <p className="mt-1 text-body text-muted-foreground">{props.note}</p> : null}
           </div>
           <nav aria-label="Footer">
@@ -300,12 +319,16 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
   );
 }
 
-function AppFooter() {
+function AppFooter(props: { owl: boolean }) {
   return (
-    <footer className="border-t">
-      <div className={`${FRAME} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-5 text-caption text-muted-foreground`}>
-        <div className="flex flex-wrap items-center gap-x-5">
-          <span className="font-semibold text-foreground">{APP_NAME}</span>
+    // mt-8 with the owl: room above the hairline so it never touches the last card.
+    <footer className={cn('border-t', props.owl && 'mt-8')}>
+      <div
+        className={`${FRAME} relative flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-6 text-caption text-muted-foreground`}
+      >
+        {props.owl ? <FooterOwl /> : null}
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+          <FooterWordmark />
           <nav aria-label="Footer" className="flex flex-wrap gap-x-5">
             <FooterLink href={SOURCE_URL} external>
               Source code
