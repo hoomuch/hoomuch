@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: npm run check (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Node hoomuch supports: `engines` in package.json. Earlier releases, Node 22
+          # included, fail tests on node:sqlite and on Intl's currency and compact-number data.
+          - name: Node 24.14
+            node-version: '24.14'
+          # The version contributors and Cloudflare's builds use.
+          - name: .nvmrc
+            node-version-file: .nvmrc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          node-version-file: ${{ matrix.node-version-file }}
+          cache: npm
+      - run: npm ci
+      - run: npm run check

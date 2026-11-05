@@ -1,0 +1,44 @@
+# A squash merge turns the pull request title into the commit message, so the title has to pass the
+# same Conventional Commits check as `.githooks/commit-msg` (CONTRIBUTING.md, "Commit messages").
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Conventional Commit title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Check the title
+        # The title goes through an environment variable, never straight into the script, so a
+        # title can't inject shell commands.
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # The ${...} below are JavaScript template literals, so the single quotes are on purpose.
+          # shellcheck disable=SC2016
+          node --input-type=module -e '
+            import { checkCommitMessage } from "./scripts/commit-msg.mjs";
+            const errors = checkCommitMessage(process.env.TITLE);
+            if (errors.length > 0) {
+              console.log(`::error title=PR title::${errors.join("; ")}`);
+              console.log(`\n    ${process.env.TITLE}\n`);
+              for (const e of errors) console.log(`  - ${e}`);
+              console.log("\n  Edit the pull request title; this check runs again on its own.");
+              console.log("  Rules: CONTRIBUTING.md, \"Commit messages\"");
+              process.exit(1);
+            }
+            console.log(`ok: ${process.env.TITLE}`);
+          '

@@ -16,13 +16,13 @@ import { NotAvailable, ScrollTable, TableRowHeader } from './ui';
 const NUM = 'text-right tabular-nums';
 const CAPTION_ID = 'breakdown-caption';
 
-function shareLabel(pct: number): string {
+export function shareLabel(pct: number): string {
   if (pct <= 0) return '0%';
   if (pct < 1) return '<1%';
   return `${Math.round(pct)}%`;
 }
 
-function ShareBar(props: { pct: number }) {
+export function ShareBar(props: { pct: number }) {
   const w = Math.max(0, Math.min(100, props.pct));
   return (
     <svg width="48" height="4" viewBox="0 0 48 4" aria-hidden="true" className="hidden shrink-0 sm:block">

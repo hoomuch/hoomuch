@@ -11,6 +11,9 @@
   },
   "homepage": "https://github.com/tahabozdemir/hoomuch#readme",
   "bugs": "https://github.com/tahabozdemir/hoomuch/issues",
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "predeploy": "npm run db:migrate:remote",
@@ -23,9 +26,11 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf-typegen": "wrangler types",
+    "domains:update": "node scripts/update-disposable-domains.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "check": "npm run typecheck && npm run test && npm run build",
+    "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "cloudflare": {
     "bindings": {
@@ -34,6 +39,12 @@
       },
       "ALLOW_SIGNUP": {
         "description": "Leave `true` until you've created your own account, then set it to `false` so nobody else can sign up on your instance."
+      },
+      "TURNSTILE_SITE_KEY": {
+        "description": "Optional. A Cloudflare Turnstile site key. With `TURNSTILE_SECRET_KEY` set too, log in and sign up require the Turnstile check. Leave empty to keep it off."
+      },
+      "TURNSTILE_SECRET_KEY": {
+        "description": "Optional secret. The secret key of the same Turnstile widget."
       }
     }
   },

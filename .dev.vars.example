@@ -4,3 +4,10 @@
 # 32 random bytes, base64. Generate with:
 #   openssl rand -base64 32
 ENCRYPTION_KEY=
+
+# Optional: Cloudflare Turnstile on log in and sign up. Set TURNSTILE_SITE_KEY in wrangler.jsonc
+# (vars) and the secret here. Cloudflare's published test pair passes on any host, localhost too:
+#   TURNSTILE_SITE_KEY=1x00000000000000000000AA (in a local override of vars)
+#   TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+# In production: wrangler secret put TURNSTILE_SECRET_KEY
+# TURNSTILE_SECRET_KEY=

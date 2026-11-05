@@ -76,6 +76,11 @@ export interface ProviderMeta {
   warning?: string;
   /** How revenue history is sourced (SPEC §6). */
   revenueHistory: 'transactions' | 'daily' | 'none';
+  /**
+   * Its revenue events carry a product or plan name (`RevenueEvent.description`), so the dashboard
+   * can split revenue by product. False for providers that report daily totals only.
+   */
+  productNames: boolean;
 }
 
 // ---------- runtime ----------

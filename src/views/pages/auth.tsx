@@ -1,6 +1,8 @@
 /** Log in and sign up (one narrow card, two fields). Owner: Experience (pages). */
 
+import { HONEYPOT_FIELD } from '../../lib/bot-defense';
 import { PASSWORD_MIN } from '../../lib/password-policy';
+import { TurnstileWidget } from '../components/turnstile';
 import { Button, Card, Field, FormError, LinkButton, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 
@@ -16,6 +18,8 @@ export interface AuthPageProps {
   field?: 'email' | 'password';
   /** False when ALLOW_SIGNUP=false. */
   signupOpen: boolean;
+  /** Turnstile's public site key when the instance turns it on; the form then shows the widget. */
+  turnstileSiteKey?: string | null;
 }
 
 function withNext(path: string, next: string | null | undefined): string {
@@ -82,6 +86,16 @@ export function AuthPage(props: AuthPageProps) {
             help={isSignup ? `At least ${PASSWORD_MIN} characters.` : undefined}
             error={passwordError}
           />
+          {/* Honeypot: hidden from people and assistive tech, so only a bot fills it in (lib/bot-defense.ts). */}
+          <div className="hidden" aria-hidden="true">
+            <label>
+              Leave this empty
+              <input type="text" name={HONEYPOT_FIELD} tabIndex={-1} autoComplete="off" />
+            </label>
+          </div>
+          {props.turnstileSiteKey ? (
+            <TurnstileWidget siteKey={props.turnstileSiteKey} action={isSignup ? 'signup' : 'login'} />
+          ) : null}
           <div className="mt-6">
             <Button block busyLabel={isSignup ? 'Creating account…' : 'Logging in…'}>{isSignup ? 'Create account' : 'Log in'}</Button>
           </div>

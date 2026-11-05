@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getDashboardData, kpi } from '../../src/data/dashboard';
+import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
+import { recomputeDailyRevenue } from '../../src/sync/repo';
 import { listTransactions } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
@@ -253,6 +254,112 @@ describe('getDashboardData', () => {
     expect(d.revenueSeries).toHaveLength(90);
     expect(d.revenueSeries[0]!.total).toBe(100);
     expect(d.kpis.revenue).toMatchObject({ value: 100, previous: 50 });
+  });
+});
+
+describe('getDashboardData products', () => {
+  const at = (day: string, hour = 12) => Date.parse(`${day}T${String(hour).padStart(2, '0')}:00:00.000Z`);
+  /** Rebuilds daily_revenue from transactions, as a sync does, so the KPI and the split share a source. */
+  async function aggregate(...connectionIds: string[]) {
+    for (const id of connectionIds) {
+      await t.db.batch(recomputeDailyRevenue(t.db, id, { from: addDays(TODAY, -100), to: TODAY }));
+    }
+  }
+
+  it('splits revenue by product per connection, puts the rest under no product name, and adds up to the KPI', async () => {
+    fx({ EUR: 0.5 });
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    seedConnection(t, { id: 'demo', userId: 'u1', provider: 'demo', name: 'Demo' });
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'App' });
+    tx('ls', 'p1', at(TODAY), 20_00, 'USD', 'Pro');
+    tx('ls', 'p2', at('2026-11-03'), 20_00, 'USD', 'Pro');
+    tx('ls', 'p3', at('2026-11-03', 15), -5_00, 'USD', 'Pro'); // refund
+    tx('ls', 't1', at('2026-11-02'), 10_00, 'EUR', 'Team'); // → 20 USD
+    tx('ls', 'o1', Date.parse('2026-10-30T00:00:00.000Z'), 1_00, 'USD', 'Old'); // first instant of the 7-day window
+    tx('ls', 'o2', Date.parse('2026-10-29T23:59:59.999Z'), 99_00, 'USD', 'Old'); // the day before: left out
+    tx('ls', 'n1', at('2026-11-01'), 3_00, 'USD', null); // a charge without a name
+    tx('ls', 'n2', at('2026-11-01'), 1_00, 'USD', '   '); // blank counts as no name
+    tx('demo', 'd1', at(TODAY), 7_00, 'USD', 'Pro'); // same name, other connection: its own row
+    tx('st', 's1', at(TODAY), 50_00, 'USD', null);
+    rev('rc', TODAY, 'USD', 30_00, 0, 'provider');
+    await aggregate('ls', 'demo', 'st');
+
+    const roundTrips = t.roundTrips();
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(t.roundTrips() - roundTrips).toBe(1);
+    const p = d.products;
+    expect(p.rows.map((r) => [r.name, r.connectionName, r.revenue, r.charges])).toEqual([
+      ['Pro', 'Pagekit', 35_00, 2],
+      ['Team', 'Pagekit', 20_00, 1],
+      ['Pro', 'Demo', 7_00, 1],
+      ['Old', 'Pagekit', 1_00, 1],
+    ]);
+    expect(p.rows[0]).toMatchObject({ connectionId: 'ls', dotClass: expect.stringMatching(/^bg-\[#/) });
+    expect(p.more).toBeNull();
+    // 4 without a name from Lemon Squeezy, Stripe's 50, RevenueCat's 30 (daily totals).
+    expect(p.unnamed.revenue).toBe(84_00);
+    expect(p.unnamedProviders).toEqual(['Stripe', 'RevenueCat']); // biggest first; Lemon Squeezy names products
+    expect(p.named).toBe(true);
+    const total = p.rows.reduce((s, r) => s + r.revenue, 0) + p.unnamed.revenue;
+    expect(total).toBe(d.kpis.revenue.value);
+    expect(p.rows[0]!.sharePct).toBe(23.8); // 35 of 147
+    expect(p.unnamed.sharePct).toBe(57.1);
+  });
+
+  it('gives a product that lost money no share and lists it last', async () => {
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    tx('ls', 'a', at(TODAY), 10_00, 'USD', 'Pro');
+    tx('ls', 'b', at(TODAY), -4_00, 'USD', 'Legacy');
+    await aggregate('ls');
+    const p = (await getDashboardData(testEnv(t.db), user, 7)).products;
+    expect(p.rows.map((r) => [r.name, r.revenue, r.charges, r.sharePct])).toEqual([
+      ['Pro', 10_00, 1, 100],
+      ['Legacy', -4_00, 0, 0],
+    ]);
+    expect(p.unnamed).toEqual({ revenue: 0, sharePct: 0 });
+    expect(p.unnamedProviders).toEqual([]);
+  });
+
+  it(`shows ${PRODUCT_ROWS + 1} products in full, and folds anything past ${PRODUCT_ROWS} into one row`, async () => {
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    for (let i = 1; i <= PRODUCT_ROWS + 1; i++) tx('ls', `x${i}`, at(TODAY), i * 100, 'USD', `Plan ${i}`);
+    await aggregate('ls');
+    let p = (await getDashboardData(testEnv(t.db), user, 7)).products;
+    expect(p.rows).toHaveLength(PRODUCT_ROWS + 1); // never "1 more product"
+    expect(p.more).toBeNull();
+
+    tx('ls', 'y1', at(TODAY), 50, 'USD', 'Tiny A');
+    tx('ls', 'y2', at(TODAY), 40, 'USD', 'Tiny B');
+    await aggregate('ls');
+    p = (await getDashboardData(testEnv(t.db), user, 7)).products;
+    expect(p.rows).toHaveLength(PRODUCT_ROWS);
+    expect(p.rows[0]!.name).toBe(`Plan ${PRODUCT_ROWS + 1}`);
+    expect(p.more).toMatchObject({ count: 3, revenue: 100 + 50 + 40, charges: 3 });
+  });
+
+  it('has nothing to split when no provider reports product names', async () => {
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    tx('st', 's1', at(TODAY), 50_00, 'USD', null);
+    await aggregate('st');
+    const p = (await getDashboardData(testEnv(t.db), user, 7)).products;
+    expect(p).toEqual({ rows: [], more: null, unnamed: { revenue: 50_00, sharePct: 100 }, unnamedProviders: ['Stripe'], named: false });
+  });
+
+  it('ignores names on a provider that reports daily totals, and another user’s products', async () => {
+    seedConnection(t, { id: 'mine', userId: 'u1', provider: 'demo', name: 'Mine' });
+    seedConnection(t, { id: 'theirs', userId: 'u2', provider: 'demo', name: 'Theirs' });
+    seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'App' });
+    tx('mine', 'a', at(TODAY), 5_00, 'USD', 'Pro');
+    tx('theirs', 'b', at(TODAY), 999_00, 'USD', 'Secret');
+    // A daily-totals provider never stores transactions; if one did, its revenue comes from daily_revenue only.
+    tx('rc', 'c', at(TODAY), 8_00, 'USD', 'Should not count');
+    rev('rc', TODAY, 'USD', 8_00, 0, 'provider');
+    await aggregate('mine', 'theirs');
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.products.rows.map((r) => r.name)).toEqual(['Pro']);
+    expect(d.products.unnamed.revenue).toBe(8_00);
+    expect(d.products.rows[0]!.revenue + d.products.unnamed.revenue).toBe(d.kpis.revenue.value);
   });
 });
 

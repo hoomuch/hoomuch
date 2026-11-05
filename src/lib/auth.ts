@@ -11,6 +11,7 @@ import { hashPassword, randomId, randomToken, sha256Hex, verifyPassword } from '
 import { DAY, MINUTE } from './time';
 import { cookieSpec } from './cookies';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
+import { isDisposableEmail } from './disposable-email';
 import {
   deleteOtherSessions,
   deleteSession,
@@ -32,11 +33,25 @@ const SESSION_REFRESH_BELOW_MS = 15 * DAY;
 /** Hard cap: sliding renewal never keeps one session alive longer than this. */
 const SESSION_ABSOLUTE_MAX_MS = 90 * DAY;
 
-const THROTTLE_WINDOW_MS = 15 * MINUTE;
+export const THROTTLE_WINDOW_MS = 15 * MINUTE;
 /** Attempts per window for login (per email + IP) and password re-checks (per user). */
 const THROTTLE_MAX_ATTEMPTS = 10;
 /** Sign-up attempts per window per IP (counted whether they succeed or not). */
 const SIGNUP_MAX_ATTEMPTS = 10;
+/**
+ * Login attempts per window from one network, whatever the email. The email + network limit
+ * doesn't see credential stuffing (one guess each at many accounts), and every attempt costs a
+ * PBKDF2 hash, so this also bounds the CPU one network can make the Worker burn.
+ */
+const LOGIN_IP_MAX_ATTEMPTS = 30;
+/** Accounts actually created from one network per day. Bounds bulk sign-ups that pace themselves. */
+const SIGNUP_DAILY_MAX = 5;
+export const DAILY_WINDOW_MS = DAY;
+/**
+ * Day-long counters get this readable prefix on their (hashed) key so the cron can keep them for a
+ * day while still dropping the 15-minute ones after 15 minutes. See deleteStaleLoginAttempts.
+ */
+export const DAILY_KEY_PREFIX = 'day:';
 /**
  * Login attempts per window for one email from every network combined. The per-network limit
  * alone doesn't bound a botnet or an IPv6 range (one bucket per /64; a /48 holds 65,536), so
@@ -142,7 +157,13 @@ export type AuthResult =
  * still within `max` for the current window. Counting first (single upsert … RETURNING) means
  * parallel requests can't all slip past a read-then-write check.
  */
-async function reserveAttempt(env: Bindings, key: string, now: number, max: number): Promise<boolean> {
+async function reserveAttempt(
+  env: Bindings,
+  key: string,
+  now: number,
+  max: number,
+  windowMs: number = THROTTLE_WINDOW_MS,
+): Promise<boolean> {
   const row = await env.DB.prepare(
     `INSERT INTO login_attempts (key, failures, window_start) VALUES (?, 1, ?)
      ON CONFLICT(key) DO UPDATE SET
@@ -150,7 +171,7 @@ async function reserveAttempt(env: Bindings, key: string, now: number, max: numb
        window_start = CASE WHEN ? - window_start >= ? THEN ? ELSE window_start END
      RETURNING failures`,
   )
-    .bind(key, now, now, THROTTLE_WINDOW_MS, now, THROTTLE_WINDOW_MS, now)
+    .bind(key, now, now, windowMs, now, windowMs, now)
     .first<{ failures: number }>();
   return (row?.failures ?? 1) <= max;
 }
@@ -192,10 +213,18 @@ export async function registerUser(env: Bindings, emailRaw: string, password: st
   }
   const email = normalizeEmail(emailRaw);
   if (!validEmail(email)) return { ok: false, error: 'Enter a valid email address.', field: 'email' };
+  if (isDisposableEmail(email)) {
+    return { ok: false, error: 'Use an email address you’ll keep. Disposable inboxes can’t sign up.', field: 'email' };
+  }
   const pwErr = passwordProblem(password, email);
   if (pwErr) return { ok: false, error: pwErr, field: 'password' };
   const exists = { ok: false as const, error: 'An account with this email already exists. Log in instead.', field: 'email' as const };
   if (await getUserByEmail(env.DB, email)) return exists;
+  // Counted only once the sign-up would go through, so typos and taken emails don't use it up.
+  const dayKey = DAILY_KEY_PREFIX + (await sha256Hex(`signup-day|${ipBucket(ip)}`));
+  if (!(await reserveAttempt(env, dayKey, Date.now(), SIGNUP_DAILY_MAX, DAILY_WINDOW_MS))) {
+    return { ok: false, error: 'Too many accounts were created from this network today. Try again tomorrow.', throttled: true };
+  }
   const id = randomId();
   try {
     await insertUser(env.DB, { id, email, passwordHash: await hashPassword(password) });
@@ -210,7 +239,12 @@ export async function registerUser(env: Bindings, emailRaw: string, password: st
 export async function authenticate(env: Bindings, emailRaw: string, password: string, ip: string): Promise<AuthResult> {
   const email = normalizeEmail(emailRaw);
   const now = Date.now();
-  const key = await sha256Hex(`login|${email}|${ipBucket(ip)}`);
+  const bucket = ipBucket(ip);
+  // Every attempt from this network, whatever the email: credential stuffing tries each account once.
+  if (!(await reserveAttempt(env, await sha256Hex(`login-ip|${bucket}`), now, LOGIN_IP_MAX_ATTEMPTS))) {
+    return { ok: false, error: THROTTLED_MESSAGE, throttled: true };
+  }
+  const key = await sha256Hex(`login|${email}|${bucket}`);
   if (!(await reserveAttempt(env, key, now, THROTTLE_MAX_ATTEMPTS))) {
     return { ok: false, error: THROTTLED_MESSAGE, throttled: true };
   }
