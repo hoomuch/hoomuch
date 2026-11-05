@@ -11,6 +11,9 @@
   },
   "homepage": "https://github.com/tahabozdemir/hoomuch#readme",
   "bugs": "https://github.com/tahabozdemir/hoomuch/issues",
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "predeploy": "npm run db:migrate:remote",
