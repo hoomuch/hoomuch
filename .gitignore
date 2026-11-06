@@ -12,3 +12,8 @@ dist/
 
 # Private design notes and assets; not part of the open-source release.
 design/
+
+# Agent skills installed locally with `npx skills`; each contributor picks their own.
+.agents/
+.claude/skills/
+skills-lock.json
