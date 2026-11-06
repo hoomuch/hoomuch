@@ -129,3 +129,23 @@ describe('remembered choices', () => {
     expect(await htmlOf(all)).toMatch(/<a\b(?=[^>]*href="\/transactions\?provider=all")(?=[^>]*aria-current="page")/);
   });
 });
+
+describe('settings', () => {
+  it('shows where the currency and the zone came from without asking D1 again', async () => {
+    t.exec("UPDATE users SET base_currency = 'EUR', currency_source = 'inferred', timezone = 'Europe/Istanbul', timezone_source = 'chosen'");
+    // A session far from its refresh, so the request makes no write of its own either.
+    t.exec('UPDATE sessions SET expires_at = ?', NOW + 20 * DAY);
+    const before = t.roundTrips();
+    const res = await get('/settings');
+    expect(res.status).toBe(200);
+    expect(t.roundTrips() - before).toBe(1); // the session lookup, which carries both sources
+    const html = await res.text();
+    const json = /<script id="hm-page" type="application\/json">(.*?)<\/script>/s.exec(html)?.[1];
+    expect(JSON.parse(json!).props).toMatchObject({
+      currency: 'EUR',
+      currencySource: 'inferred',
+      timeZone: 'Europe/Istanbul',
+      timeZoneSource: 'chosen',
+    });
+  });
+});

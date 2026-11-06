@@ -218,9 +218,28 @@ export function zoneSegments(fromMs: number, toMs: number, tz: string): ZoneSegm
  * range (D1 has no time zone support). Returns the expression and its bind values, in order.
  */
 export function localDaySql(column: string, segments: readonly ZoneSegment[]): { sql: string; binds: number[] } {
-  if (segments.length <= 1) {
-    return { sql: `strftime('%Y-%m-%d', (${column} + ?) / 1000, 'unixepoch')`, binds: [segments[0]?.offset ?? 0] };
-  }
+  const { sql, binds } = localTimeSql(column, segments);
+  return { sql: `strftime('%Y-%m-%d', (${sql}) / 1000, 'unixepoch')`, binds };
+}
+
+/**
+ * Like `localDaySql`, but the local day as a whole number of days since 1970-01-01, which is much
+ * cheaper to compute and group on: an aggregate over thousands of rows groups on this and formats
+ * each group once with `dayNumberToKeySql`. Same day as `localDaySql` for any instant after
+ * 1970-01-01 14:00 UTC.
+ */
+export function localDayNumberSql(column: string, segments: readonly ZoneSegment[]): { sql: string; binds: number[] } {
+  const { sql, binds } = localTimeSql(column, segments);
+  // D1 binds numbers as REAL: without the cast this would be a real division, one group per row.
+  return { sql: `CAST(${sql} AS INTEGER) / ${DAY}`, binds };
+}
+
+/** SQL for the 'YYYY-MM-DD' key of a `localDayNumberSql` value. */
+export const dayNumberToKeySql = (dayNumber: string): string => `strftime('%Y-%m-%d', ${dayNumber} * 86400, 'unixepoch')`;
+
+/** `column` shifted into local wall-clock time (epoch ms), and its binds. */
+function localTimeSql(column: string, segments: readonly ZoneSegment[]): { sql: string; binds: number[] } {
+  if (segments.length <= 1) return { sql: `${column} + ?`, binds: [segments[0]?.offset ?? 0] };
   const binds: number[] = [];
   let expr = 'CASE';
   for (let i = segments.length - 1; i >= 1; i--) {
@@ -229,7 +248,7 @@ export function localDaySql(column: string, segments: readonly ZoneSegment[]): {
   }
   expr += ' ELSE ? END';
   binds.push(segments[0]!.offset);
-  return { sql: `strftime('%Y-%m-%d', (${column} + ${expr}) / 1000, 'unixepoch')`, binds };
+  return { sql: `${column} + ${expr}`, binds };
 }
 
 /** "Europe/Istanbul" → "Europe/Istanbul", "America/New_York" → "America/New York": for labels. */

@@ -165,6 +165,7 @@ export interface SessionJoinRow {
   email_verified_at: number | null;
   timezone: string;
   timezone_source: TimezoneSource;
+  currency_source: CurrencySource;
 }
 
 /** A live session: not expired, and created after `minCreatedAt` (absolute lifetime cap). */
@@ -177,7 +178,7 @@ export function getSessionWithUser(
   return db
     .prepare(
       `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.base_currency, u.email_verified_at,
-              u.timezone, u.timezone_source
+              u.timezone, u.timezone_source, u.currency_source
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.id = ? AND s.expires_at > ? AND s.created_at > ?`,
     )
@@ -236,11 +237,24 @@ export async function deleteStaleLoginAttempts(
 
 // ---------- connections ----------
 
-export async function listConnections(db: D1Database, userId: string): Promise<ConnectionRow[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC')
-    .bind(userId)
-    .all<ConnectionRow>();
+/** A connection as read models see it: every column but the encrypted credentials. */
+export type ConnectionView = Omit<ConnectionRow, 'credentials_enc'>;
+
+/**
+ * The columns of a ConnectionView. Pages select these, never `*`: the encrypted keys are only read
+ * where they're used (sync, key rotation), not into every page's memory.
+ */
+export const CONNECTION_VIEW_COLUMNS =
+  'id, user_id, provider, name, key_hint, config, test_mode, status, last_synced_at, last_sync_started_at, last_error, ' +
+  'revenue_cursor, revenue_synced_until, queued_at, webhook_nonce, webhook_last_at, created_at, updated_at';
+
+/** The user's connections, oldest first, for a `db.batch` (listConnections runs it alone). */
+export function connectionsStatement(db: D1Database, userId: string): D1PreparedStatement {
+  return db.prepare(`SELECT ${CONNECTION_VIEW_COLUMNS} FROM connections WHERE user_id = ? ORDER BY created_at ASC`).bind(userId);
+}
+
+export async function listConnections(db: D1Database, userId: string): Promise<ConnectionView[]> {
+  const { results } = await connectionsStatement(db, userId).all<ConnectionView>();
   return results;
 }
 

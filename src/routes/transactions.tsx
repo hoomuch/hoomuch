@@ -3,7 +3,7 @@
 import type { Hono } from 'hono';
 import { parseDayParam } from '../data/calendar';
 import { listConnectionSummaries } from '../data/connections';
-import { listTransactions } from '../data/transactions';
+import { listTransactions, parseCursor } from '../data/transactions';
 import type { ConnectionSummary } from '../data/types';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
@@ -29,9 +29,12 @@ export function registerTransactionRoutes(app: Hono<AppEnv>): void {
     // ?day= narrows the list to one of the user's local days (the dashboard calendar links here).
     // Not remembered.
     const day = parseDayParam(c.req.query('day'), Date.now(), user.timeZone);
+    // Where the Next / Previous link said the page starts (data/transactions.ts); junk is ignored.
+    const before = parseCursor(c.req.query('before'));
+    const after = parseCursor(c.req.query('after'));
 
     const [txns, connections] = await Promise.all([
-      listTransactions(c.env, user, { provider, page, day }),
+      listTransactions(c.env, user, { provider, page, day, before, after }),
       listConnectionSummaries(c.env, user.id),
     ]);
 

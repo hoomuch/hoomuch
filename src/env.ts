@@ -68,5 +68,12 @@ export type AppEnv = {
     celebrate: boolean;
     /** The signed-in account hasn't confirmed its address (false when signed out). See lib/auth.ts. */
     emailUnverified: boolean;
+    /**
+     * Where the display currency came from (migration 0002), read with the session so the dashboard
+     * needn't ask D1 again before its own queries. 'default' when signed out.
+     */
+    currencySource: 'default' | 'inferred' | 'chosen';
+    /** Where the time zone came from (migration 0009), after this request's inference. Like currencySource. */
+    timezoneSource: 'default' | 'inferred' | 'chosen';
   };
 };

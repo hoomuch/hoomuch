@@ -19,6 +19,7 @@ import snapshotWarnings from '../../migrations/0006_snapshot_warnings.sql?raw';
 import syncQueue from '../../migrations/0007_sync_queue.sql?raw';
 import webhooks from '../../migrations/0008_webhooks.sql?raw';
 import userTimezone from '../../migrations/0009_user_timezone.sql?raw';
+import transactionsCover from '../../migrations/0010_transactions_cover_index.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
 import { FakeQueue } from './queue';
@@ -110,6 +111,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(syncQueue);
   sqlite.exec(webhooks);
   sqlite.exec(userTimezone);
+  sqlite.exec(transactionsCover);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {

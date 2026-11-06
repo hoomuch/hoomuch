@@ -15,9 +15,11 @@ import { LATEST_FX_SQL, latestFx } from '../sync/fx';
 export async function dominantMrrCurrency(env: Bindings, userId: string): Promise<string | null> {
   const [snapsR, fxR] = await env.DB.batch([
     env.DB.prepare(
-      `SELECT s.mrr FROM snapshots s JOIN connections c ON c.id = s.connection_id
-        WHERE c.user_id = ? AND c.provider != 'demo'
-          AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id)`,
+      // Correlated on the connection: one primary-key seek each, however long the history.
+      `SELECT s.mrr FROM connections c
+         JOIN snapshots s ON s.connection_id = c.id
+                         AND s.day = (SELECT MAX(x.day) FROM snapshots x WHERE x.connection_id = c.id)
+        WHERE c.user_id = ? AND c.provider != 'demo'`,
     ).bind(userId),
     env.DB.prepare(LATEST_FX_SQL),
   ]);
