@@ -1,7 +1,7 @@
 /**
  * Provider metadata (Lead): names, form fields, permissions, webhooks. The adapters themselves are
  * looked up in ./adapters.ts. This file imports none of them, so the pages and the browser bundle
- * can read the metadata without pulling in adapter code.
+ * can read the metadata without pulling in adapter code (.dependency-cruiser.mjs checks it).
  */
 
 import type { ConnectionConfig, Credentials, ProviderId, ProviderMeta } from './types';

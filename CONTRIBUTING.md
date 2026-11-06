@@ -42,7 +42,7 @@ the syncs follow a moment later in the same terminal.
 Before opening a pull request, run:
 
 ```bash
-npm run check                           # typecheck + unused code + tests + build
+npm run check                           # typecheck + unused code + module boundaries + tests + build
 ```
 
 It must pass. CI runs the same check on every pull request, on Node 24.14 and on the `.nvmrc`
@@ -63,6 +63,31 @@ so CI does too. When it reports something:
 The coss ui components in `src/components/ui/` stay as the shadcn CLI writes them, so their unused
 exports aren't reported. A whole component nothing imports still is: delete it, and
 `npx shadcn@latest add @coss/<name>` brings it back when a page needs it.
+
+### Module boundaries
+
+`npm run deps` runs [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) over
+`src/`, `test/`, `scripts/` and `bench/`, with the rules in `.dependency-cruiser.mjs`; `npm run check`
+runs it too. Most rules are ground rules, written as rules about imports:
+
+- **Adapters are pure:** `src/providers/` imports only `src/providers/` and the shared helpers in
+  `src/lib/`, never D1, `env`, the sync engine or the UI.
+- **The dashboard reads only from D1:** read models never import adapter code or the sync engine.
+  Adapters are looked up in `src/providers/adapters.ts`, which only the sync engine and the
+  connection services import.
+- **Pages stay off the server:** at runtime, pages and the browser entry import only pages, coss ui,
+  the shared helpers in `src/lib/`, provider metadata (`providers/registry.ts`, `types.ts`,
+  `warnings.ts`) and `data/types.ts`. The page gets its data as props. Types may come from anywhere.
+- **coss ui stays generic,** and only `src/views/` imports it.
+
+The rest are general: no cycles of runtime imports, no import that doesn't resolve, nothing in `src/`
+from `devDependencies`, `test/`, `bench/` or `scripts/`. A finding names its rule, and the rule's
+comment in `.dependency-cruiser.mjs` says why it's there. `import type` vanishes when the code is
+built, so most rules let it through.
+
+TypeScript 7.0 has no compiler API for dependency-cruiser to read TypeScript with, so it parses with
+swc (`@swc/core`, a devDependency) for now. Once dependency-cruiser supports a stable TypeScript
+7.x, the `parser` option and `@swc/core` can go.
 
 ### Security checks
 
@@ -94,8 +119,9 @@ line above it.
 | Script | What it does |
 |--------|--------------|
 | `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
-| `npm run check` | Typecheck, Knip, tests and build |
+| `npm run check` | Typecheck, Knip, dependency-cruiser, tests and build |
 | `npm run knip` | Files, exports and dependencies nothing uses (see *Unused code*) |
+| `npm run deps` | Checks imports against the rules in `.dependency-cruiser.mjs` (see *Module boundaries*) |
 | `npm run security` | gitleaks, OSV-Scanner, Opengrep and zizmor, on your machine (see *Security checks*) |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |
@@ -130,6 +156,7 @@ test/                Vitest suites and API fixtures
 bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases
 knip.jsonc           what Knip counts as an entry point, and what it skips
+.dependency-cruiser.mjs   the module boundaries `npm run deps` checks
 ```
 
 ### Performance
