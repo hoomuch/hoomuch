@@ -166,8 +166,10 @@ export interface DashboardData {
   /** Days in the window that have snapshots, oldest → newest (may be sparse early on). */
   mrrSeries: MrrDay[];
   fx: {
-    /** Day of the FX table used, null if none was needed / available. */
+    /** Day of the latest rates MRR was converted at, null if none was needed / available. */
     asOf: string | null;
+    /** Some revenue was converted from another currency, at the rate of its own day. */
+    daily: boolean;
     /** Currencies that couldn't be converted and were left out of totals. */
     missing: string[];
   };

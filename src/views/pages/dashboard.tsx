@@ -730,9 +730,13 @@ export function DashboardPage(props: DashboardPageProps) {
           />
         ) : null}
 
-        {data.fx.asOf ? (
+        {data.fx.asOf || data.fx.daily ? (
           <p className="text-caption text-muted-foreground">
-            Converted to {data.currency} at ECB rates from {formatDay(data.fx.asOf)}, past days included.
+            {data.fx.asOf && data.fx.daily
+              ? `Converted to ${data.currency}: revenue at each day’s exchange rate, MRR at rates from ${formatDay(data.fx.asOf)}.`
+              : data.fx.asOf
+                ? `MRR converted to ${data.currency} at exchange rates from ${formatDay(data.fx.asOf)}.`
+                : `Revenue converted to ${data.currency} at each day’s exchange rate.`}
           </p>
         ) : null}
       </div>

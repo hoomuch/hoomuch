@@ -225,18 +225,18 @@ describe('runScheduledSync — FX and limits', () => {
     await seed(c, 'b', { lastSyncedAt: NOW - 2 * HOUR });
 
     await tick(c);
-    expect(c.fxCalls).toHaveLength(1);
+    expect(c.fxCalls).toHaveLength(2); // the blended rates, then the ECB's
     expect(c.t.rows('SELECT day FROM fx_rates')).toEqual([{ day: FX_BODY.date }]);
 
     vi.setSystemTime(NOW + 30 * MINUTE);
     await tick(c, NOW + 30 * MINUTE);
     vi.setSystemTime(NOW + 12 * HOUR);
     await tick(c, NOW + 12 * HOUR);
-    expect(c.fxCalls).toHaveLength(1);
+    expect(c.fxCalls).toHaveLength(2);
 
     vi.setSystemTime(NOW + 21 * HOUR);
     await tick(c, NOW + 21 * HOUR);
-    expect(c.fxCalls).toHaveLength(2);
+    expect(c.fxCalls).toHaveLength(4);
   });
 
   it('an FX outage does not block syncing', async () => {
@@ -251,7 +251,7 @@ describe('runScheduledSync — FX and limits', () => {
     expect(syncedIds(c).sort()).toEqual(['a', 'b']);
     expect(conn(c.t, 'a').status).toBe('ok');
     expect(c.t.rows('SELECT 1 FROM fx_rates')).toEqual([]);
-    expect(c.fxCalls).toHaveLength(1); // one attempt per tick, not one per connection
+    expect(c.fxCalls).toHaveLength(1); // one attempt per tick, not one per connection (the ECB's isn't tried without the blended)
     expect(summary(c)).toMatchObject({ fx: 'failed', queued: 2 });
   });
 

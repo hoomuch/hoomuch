@@ -5,7 +5,7 @@
 
 import type { Bindings } from '../env';
 import { convertMinor, isSupportedCurrency, normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { LATEST_FX_SQL, latestFx } from '../sync/fx';
 
 /**
  * The supported display currency with the largest share of current MRR across real (non-demo)
@@ -33,7 +33,7 @@ export async function dominantMrrCurrency(env: Bindings, userId: string): Promis
     const only = [...totals.keys()][0]!;
     return isSupportedCurrency(only) ? only : null;
   }
-  const fx = rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null);
+  const fx = latestFx(fxR!.results as { day: string; base: string; rates: string }[] | undefined);
   if (!fx) return null;
   let best: { currency: string; usd: number } | null = null;
   for (const [currency, amount] of totals) {

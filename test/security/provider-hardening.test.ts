@@ -3,6 +3,7 @@
  * Security Top 10 API7 SSRF, API10 Unsafe Consumption of APIs, API4 Unrestricted Resource Use).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { buildUrl, fetchJson, MAX_RESPONSE_BYTES, sanitizeErrorText } from '../../src/providers/http';
 import { foreignKeyOwner, getProviderMeta, splitInput } from '../../src/providers/registry';
 import { ProviderError } from '../../src/providers/types';
@@ -178,7 +179,7 @@ describe('replacing a key', () => {
     await seed('k');
     // A cron tick takes the lock while the new key is being checked with Stripe.
     const { fetch } = fakeFetch([
-      route('/v1/latest', { json: FX_BODY }),
+      route('/v2/rates', { json: fxV2(FX_BODY) }),
       route(/\/v1\//, async () => {
         await acquireSyncLock(c.env.DB, 'k', NOW, NOW - 5 * 60_000);
         return { json: emptyList };
@@ -195,7 +196,7 @@ describe('replacing a key', () => {
   it('holds the lock through the swap, so a cron run between check and write is turned away', async () => {
     c = setup();
     await seed('k');
-    const { fetch } = fakeFetch([route('/v1/latest', { json: FX_BODY }), route(/\/v1\//, { json: emptyList })]);
+    const { fetch } = fakeFetch([route('/v2/rates', { json: fxV2(FX_BODY) }), route(/\/v1\//, { json: emptyList })]);
     vi.stubGlobal('fetch', fetch);
     // Right before the credentials are written (after every check has passed), a cron tick tries
     // to take the lock. It must fail: otherwise it syncs with the old key and commits after the purge.
@@ -229,7 +230,7 @@ describe('replacing a key', () => {
   it('releases the lock it took, so the new sync can run and finish', async () => {
     c = setup();
     await seed('k');
-    const { fetch } = fakeFetch([route('/v1/latest', { json: FX_BODY }), route(/\/v1\//, { json: emptyList })]);
+    const { fetch } = fakeFetch([route('/v2/rates', { json: fxV2(FX_BODY) }), route(/\/v1\//, { json: emptyList })]);
     vi.stubGlobal('fetch', fetch);
     const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' });
     expect(r).toMatchObject({ ok: true });

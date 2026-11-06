@@ -7,6 +7,7 @@
  * `GET /v1/products?ids[]=…`). Then the split stays null and MRR is untouched, as the second test shows.
  */
 import { renderToStaticMarkup } from 'react-dom/server';
+import { fxV2 } from '../fixtures/fx';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDashboardData } from '../../src/data/dashboard';
@@ -135,7 +136,7 @@ function stripeRoutes(productsResponse: FakeResponse | ((url: URL) => FakeRespon
   ];
   const trialing = [sub([item(price(2900, 'prod_Team'))], { status: 'trialing' })];
   return [
-    route('/v1/latest', { json: FX }),
+    route('/v2/rates', { json: fxV2(FX) }),
     route('/v1/subscriptions', { json: list(active, '/v1/subscriptions') }, { query: { status: 'active' } }),
     route('/v1/subscriptions', { json: list([], '/v1/subscriptions') }, { query: { status: 'past_due' } }),
     route('/v1/subscriptions', { json: list(trialing, '/v1/subscriptions') }, { query: { status: 'trialing' } }),

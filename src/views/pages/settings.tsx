@@ -61,7 +61,7 @@ export function SettingsPage(props: SettingsPageProps) {
         <Card
           id="display-currency"
           title="Display currency"
-          description="Converted at the latest ECB rates, past days included. Transactions also show the original amount."
+          description="Revenue converts at the exchange rate of the day it came in, MRR at the latest rates. Transactions also show the original amount."
         >
           <form method="post" action="/settings/currency">
             <SelectField

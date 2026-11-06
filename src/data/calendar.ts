@@ -12,7 +12,7 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import { BACKFILL_DAYS } from '../sync/aggregate';
-import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
 import type { CalendarDay, CalendarMonth } from './types';
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
@@ -97,7 +97,7 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
-  const [connsR, beforeR, snapsR, revR, countR, oldestR, fxR] = await db.batch([
+  const [connsR, beforeR, snapsR, revR, countR, oldestR, fxR, histR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     // Each connection's last snapshot before the 1st: carried into the month, and the 1st's change.
     db
@@ -135,6 +135,7 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
       )
       .bind(user.id),
     db.prepare(LATEST_FX_SQL),
+    fxHistoryStatement(db, user.id, currency, first, last),
   ]);
 
   const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
@@ -143,7 +144,9 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
   const revRows = (revR!.results ?? []) as unknown as RevRow[];
   const counts = (countR!.results ?? []) as unknown as CountRow[];
   const oldestSnapshot = ((oldestR!.results?.[0] ?? null) as { day: string | null } | null)?.day ?? null;
-  const cv = new FxConverter(currency, rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null));
+  type FxRows = { day: string; base: string; rates: string }[] | undefined;
+  // Revenue at each day's rate, end-of-day MRR at the latest (SPEC §6).
+  const cv = new FxConverter(currency, latestFx(fxR!.results as FxRows), new FxHistory(histR!.results as FxRows));
 
   // ---- where revenue history starts ----
   // A connection counts once a revenue sync has run (or rows exist), except a daily-totals provider
@@ -192,8 +195,8 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
     const i = index.get(r.day);
     if (i === undefined || r.day > today) continue;
     const d = out[i]!;
-    const gross = cv.amount(r.gross, r.currency);
-    const refunds = cv.amount(r.refunds, r.currency);
+    const gross = cv.amountOn(r.gross, r.currency, r.day);
+    const refunds = cv.amountOn(r.refunds, r.currency, r.day);
     d.gross += gross;
     d.refunds += refunds;
     d.net = (d.net ?? 0) + gross - refunds;

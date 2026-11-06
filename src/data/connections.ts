@@ -8,7 +8,7 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { getProviderMeta } from '../providers/registry';
 import { webhookPath } from '../services/webhooks';
 import { parseStoredWarnings } from '../sync/aggregate';
-import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { FxConverter, LATEST_FX_SQL, latestFx } from '../sync/fx';
 import type { ConnectionDetail, ConnectionSummary, SnapshotRow, SyncRunRow } from './types';
 
 export function toSummary(row: ConnectionRow): ConnectionSummary {
@@ -86,7 +86,7 @@ export async function getConnectionDetail(
 
   const row = (connR!.results?.[0] ?? null) as ConnectionRow | null;
   if (!row) return null;
-  const cv = new FxConverter(currency, rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null));
+  const cv = new FxConverter(currency, latestFx(fxR!.results as { day: string; base: string; rates: string }[] | undefined));
 
   const snapshots: SnapshotRow[] = ((snapR!.results ?? []) as unknown as SnapRow[]).map((s) => ({
     day: s.day,

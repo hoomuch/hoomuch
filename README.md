@@ -233,7 +233,10 @@ wasn't. The ones you'd notice:
   sale's day, because Gumroad doesn't date them.
 - **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
   (SPEC §6.9).
-- **Everywhere:** past revenue is converted at today's FX rate, and day boundaries are UTC.
+- **Everywhere:** day boundaries are UTC. Revenue converts at the exchange rate of its own day and
+  MRR at the latest, both from [Frankfurter](https://frankfurter.dev): the ECB's reference rate where
+  it publishes one, other central banks' otherwise. Rates before an instance's first sync reach back
+  about 200 days; a currency that first shows up later converts its earlier days at its oldest rate.
 
 ## How it's built
 

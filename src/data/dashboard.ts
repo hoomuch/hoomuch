@@ -2,8 +2,9 @@
  * Dashboard read model. Owner: Data Plane. Signature is part of the contract (SPEC §9.1).
  *
  * One D1 round trip (a single `db.batch`), no provider calls (SPEC N-02). Every amount is
- * converted into the user's display currency with the newest FX table; currencies without a
- * rate are left out of totals and reported in `fx.missing` (SPEC §6 "Döviz").
+ * converted into the user's display currency: revenue at the rate of its own day, MRR at the
+ * latest; currencies without a rate are left out of totals and reported in `fx.missing`
+ * (SPEC §6 "Döviz").
  */
 
 import type { Bindings, SessionUser } from '../env';
@@ -14,7 +15,7 @@ import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
 import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
-import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
 import { toSummary } from './connections';
 import type {
   BreakdownRow,
@@ -56,6 +57,8 @@ export interface ProductSumRow {
   /** Null when the transactions had no product name. */
   product: string | null;
   currency: string;
+  /** UTC day the transactions occurred on (each day converts at its own rate). */
+  day: string;
   net: number;
   charges: number;
 }
@@ -79,7 +82,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
-  const [connsR, windowR, latestR, beforeR, revR, fxR, productR] = await db.batch([
+  const [connsR, windowR, latestR, beforeR, revR, fxR, productR, histR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     db
       .prepare(
@@ -109,16 +112,19 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       )
       .bind(user.id, prevStart, today),
     db.prepare(LATEST_FX_SQL),
-    // Same window as the revenue rows above (UTC days start..today), per product and currency.
+    // Same window as the revenue rows above (UTC days start..today), per product, currency and
+    // day: each day converts at its own rate, like the revenue KPI.
     db
       .prepare(
         `SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
+                strftime('%Y-%m-%d', t.occurred_at / 1000, 'unixepoch') AS day,
                 SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges
            FROM transactions t JOIN connections c ON c.id = t.connection_id
           WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
-          GROUP BY t.connection_id, product, t.currency`,
+          GROUP BY t.connection_id, product, t.currency, day`,
       )
       .bind(user.id, dayStart(start), dayStart(today) + DAY),
+    fxHistoryStatement(db, user.id, currency, prevStart, today),
   ]);
 
   const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
@@ -126,8 +132,10 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   const latestSnaps = (latestR!.results ?? []) as unknown as SnapRow[];
   const beforeSnaps = (beforeR!.results ?? []) as unknown as SnapRow[];
   const revRows = (revR!.results ?? []) as unknown as RevRow[];
-  const fx = rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null);
-  const cv = new FxConverter(currency, fx);
+  type FxRows = { day: string; base: string; rates: string }[] | undefined;
+  const fx = latestFx(fxR!.results as FxRows);
+  // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
+  const cv = new FxConverter(currency, fx, new FxHistory(histR!.results as FxRows));
 
   const days = dayRange(start, today);
   const revenueSeries: RevenueDay[] = days.map((day) => ({ day, total: 0, byConnection: {} }));
@@ -139,7 +147,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   let previousRevenue = 0;
   for (const r of revRows) {
     hasDailyRows.add(r.connection_id);
-    const net = cv.amount(r.gross - r.refunds, r.currency);
+    const net = cv.amountOn(r.gross - r.refunds, r.currency, r.day);
     if (r.day < start) {
       previousRevenue += net;
       continue;
@@ -296,7 +304,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     productMrr,
     revenueSeries,
     mrrSeries,
-    fx: { asOf: cv.used && fx ? fx.day : null, missing },
+    fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
     warnings,
   };
 }
@@ -321,7 +329,7 @@ export function productBreakdown(
     const conn = connById.get(r.connection_id);
     // Only providers whose daily revenue is built from these rows; anything else would count twice.
     if (!conn || getProviderMeta(conn.provider).revenueHistory !== 'transactions') continue;
-    const net = cv.amount(r.net, r.currency);
+    const net = cv.amountOn(r.net, r.currency, r.day);
     if (r.product === null) {
       addUnnamed(conn.id, net);
       continue;

@@ -8,6 +8,7 @@ import { getDashboardData } from '../../src/data/dashboard';
 import { runScheduledSync, syncConnection } from '../../src/sync/engine';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
+import { fxV2 } from '../fixtures/fx';
 import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, setup, teardown, type Ctx } from './helpers';
 
@@ -16,9 +17,9 @@ afterEach(() => teardown());
 /** FX answers only after a real delay, so a snapshot written "alongside" it would win the race. */
 function slowFx(): void {
   const { fetch } = fakeFetch([
-    route('/v1/latest', async () => {
+    route('/v2/rates', async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
-      return { json: FX_BODY };
+      return { json: fxV2(FX_BODY) };
     }),
   ]);
   vi.stubGlobal('fetch', fetch);
@@ -80,7 +81,7 @@ describe('FX is loaded before the first snapshot is visible', () => {
 
   it('an FX outage still lets the sync finish (rates are best effort)', async () => {
     const c = setup();
-    vi.stubGlobal('fetch', fakeFetch([route('/v1/latest', { status: 503, json: {} })]).fetch);
+    vi.stubGlobal('fetch', fakeFetch([route('/v2/rates', { status: 503, json: {} })]).fetch);
     seedDemo(c);
     const r = await syncConnection(c.env, 'demo', 'initial');
     expect(r.ok).toBe(true);

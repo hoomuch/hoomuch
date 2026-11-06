@@ -1,5 +1,6 @@
 /** Connection services: key rotation semantics and deletion (Data Plane). */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { stripeAdapter } from '../../src/providers/stripe';
 import {
   MAX_CONNECTIONS_PER_USER,
@@ -22,7 +23,7 @@ const emptyList = { object: 'list', data: [], has_more: false };
 
 function stubStripe(): void {
   const { fetch } = fakeFetch([
-    route('/v1/latest', { json: FX_BODY }),
+    route('/v2/rates', { json: fxV2(FX_BODY) }),
     route('/v1/subscriptions', { json: emptyList }),
     route('/v1/prices', { json: emptyList }),
     route('/v1/balance_transactions', { json: emptyList }),

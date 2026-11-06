@@ -74,7 +74,7 @@ describe('getDashboardData', () => {
     expect(d.revenueSeries.every((r) => r.total === 0)).toBe(true);
     expect(d.kpis.mrr).toEqual({ value: 0, previous: null, deltaPct: null });
     expect(d.kpis.revenue.previous).toBeNull();
-    expect(d.fx).toEqual({ asOf: null, missing: [] });
+    expect(d.fx).toEqual({ asOf: null, daily: false, missing: [] });
     expect(d.warnings).toEqual([]);
   });
 
@@ -105,7 +105,7 @@ describe('getDashboardData', () => {
       ['stripe1', 250_00, 29.4],
     ]);
     expect(d.breakdown[0]).toMatchObject({ provider: 'lemonsqueezy', color: '#AD7D00', status: 'ok', activeTrials: null });
-    expect(d.fx).toEqual({ asOf: '2026-11-04', missing: [] });
+    expect(d.fx).toMatchObject({ asOf: '2026-11-04', missing: [] });
     // MRR series: only days with snapshots, other connections carried forward.
     expect(d.mrrSeries).toEqual([
       { day: '2026-10-10', total: 110_00 + 500_00 },
@@ -547,5 +547,48 @@ describe('connection read models', () => {
     seedConnection(t, { id: 'c', userId: 'u2', provider: 'stripe' });
     expect(await getConnectionDetail(testEnv(t.db), user, 'c')).toBeNull();
     expect(await listConnectionSummaries(testEnv(t.db), 'u1')).toEqual([]);
+  });
+});
+
+describe('revenue at each day’s exchange rate (SPEC §6)', () => {
+  const at = (day: string) => Date.parse(`${day}T12:00:00.000Z`);
+
+  beforeEach(async () => {
+    // 1 USD = 0.5 € on Nov 2, 0.8 € from Nov 4 (the latest). Nov 3 has no row (a holiday).
+    fx({ EUR: 0.5 }, '2026-11-02');
+    fx({ EUR: 0.8 }, '2026-11-04');
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    tx('st', 'a', at('2026-11-02'), 100_00, 'EUR', 'Pro');
+    tx('st', 'b', at('2026-11-03'), 100_00, 'EUR', 'Pro');
+    tx('st', 'c', at('2026-11-04'), 100_00, 'EUR', null);
+    await t.db.batch(recomputeDailyRevenue(t.db, 'st', { from: '2026-11-02', to: '2026-11-04' }));
+    snap('st', TODAY, { EUR: 80_00 }, 1);
+  });
+
+  it('dashboard: each day’s revenue at its own rate, MRR at the latest, products adding up to the KPI', async () => {
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    const byDay = Object.fromEntries(d.revenueSeries.map((r) => [r.day, r.total]));
+    expect(byDay['2026-11-02']).toBe(200_00); // 100 € at 0.5
+    expect(byDay['2026-11-03']).toBe(200_00); // the holiday takes Nov 2's rate
+    expect(byDay['2026-11-04']).toBe(125_00); // 100 € at 0.8
+    expect(d.kpis.revenue.value).toBe(525_00);
+    expect(d.kpis.mrr.value).toBe(100_00); // 80 € at the latest 0.8
+    expect(d.fx).toEqual({ asOf: '2026-11-04', daily: true, missing: [] });
+    expect(d.products.rows.map((p) => [p.name, p.revenue])).toEqual([['Pro', 400_00]]);
+    expect(d.products.rows.reduce((s, p) => s + p.revenue, 0) + d.products.unnamed.revenue).toBe(d.kpis.revenue.value);
+  });
+
+  it('calendar and transactions use the same day rates', async () => {
+    const { getCalendarMonth } = await import('../../src/data/calendar');
+    const cal = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    const net = Object.fromEntries(cal.days.filter((x) => x.day <= '2026-11-04').map((x) => [x.day, x.net]));
+    expect(net).toMatchObject({ '2026-11-02': 200_00, '2026-11-03': 200_00, '2026-11-04': 125_00 });
+
+    const page = await listTransactions(testEnv(t.db), user, { provider: null, page: 1 });
+    expect(page.items.map((i) => [i.externalId, i.displayAmount])).toEqual([
+      ['c', 125_00],
+      ['b', 200_00],
+      ['a', 200_00],
+    ]);
   });
 });

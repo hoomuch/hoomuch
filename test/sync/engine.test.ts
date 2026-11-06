@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { demoAdapter } from '../../src/providers/demo';
 import { BudgetExhaustedError, fetchJson, hasBudget } from '../../src/providers/http';
 import { revenueCatAdapter } from '../../src/providers/revenuecat';
@@ -120,7 +121,7 @@ describe('syncConnection — demo end to end', () => {
     expect(dailyRows(c.t, 'demo-1', 'provider')).toEqual([]);
 
     // FX filled by ensureFx on a fresh install.
-    expect(c.fxCalls).toHaveLength(1);
+    expect(c.fxCalls).toHaveLength(2); // the blended rates, then the ECB's
     expect(c.t.rows('SELECT day, base FROM fx_rates')).toEqual([{ day: '2026-11-04', base: 'USD' }]);
 
     expect(runs(c.t)).toEqual([
@@ -158,7 +159,7 @@ describe('syncConnection — demo end to end', () => {
     expect(c.t.rows('SELECT * FROM transactions ORDER BY external_id')).toEqual(before.tx);
     expect(c.t.rows('SELECT * FROM daily_revenue ORDER BY day, currency')).toEqual(before.daily);
     expect(snapshotTable()).toEqual(before.snaps);
-    expect(c.fxCalls).toHaveLength(1); // ensureFx only fetches into an empty table
+    expect(c.fxCalls).toHaveLength(2); // ensureFx only fetches into an empty table
     expect(runs(c.t).map((x) => [x.kind, x.ok])).toEqual([
       ['initial', 1],
       ['manual', 1],
@@ -790,7 +791,7 @@ describe('syncConnection — lock', () => {
 /** A provider endpoint where every request takes `stepMs` of wall-clock time. */
 function slowApi(stepMs: number): void {
   const { fetch } = fakeFetch([
-    route('/v1/latest', { json: FX_BODY }),
+    route('/v2/rates', { json: fxV2(FX_BODY) }),
     route('/v1/slow', (url) => {
       vi.setSystemTime(Date.now() + stepMs);
       return { json: { n: Number(url.searchParams.get('after') ?? 0) + 1 } };

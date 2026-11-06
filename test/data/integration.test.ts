@@ -3,6 +3,7 @@
  * This is the SPEC "Definition of Done" path ("adds a demo connection and the dashboard fills").
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { syncConnection } from '../../src/sync/engine';
 import { getDashboardData } from '../../src/data/dashboard';
 import { listTransactions } from '../../src/data/transactions';
@@ -20,7 +21,7 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
   const { fetch } = fakeFetch([
-    route('/v1/latest', { json: { amount: 1, base: 'USD', date: '2026-11-04', rates: { EUR: 0.9, GBP: 0.8, JPY: 150 } } }),
+    route('/v2/rates', { json: fxV2({ date: '2026-11-04', rates: { EUR: 0.9, GBP: 0.8, JPY: 150 } }) }),
   ]);
   vi.stubGlobal('fetch', fetch);
   t = createTestD1();
@@ -58,7 +59,7 @@ describe('demo connection end to end', () => {
     expect(d90.revenueSeries).toHaveLength(90);
     expect(d90.revenueSeries.filter((x) => x.total !== 0).length).toBeGreaterThan(80);
     expect(d90.kpis.revenue.previous).toBeNull(); // nothing before the 90-day backfill
-    expect(d90.fx).toEqual({ asOf: '2026-11-04', missing: [] });
+    expect(d90.fx).toEqual({ asOf: '2026-11-04', daily: true, missing: [] });
     expect(d90.warnings).toEqual([]);
 
     const d30 = await getDashboardData(env, user, 30);

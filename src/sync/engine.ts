@@ -56,7 +56,7 @@ import {
   genericSyncError,
   isStaleCursorError,
 } from './errors';
-import { ensureFx, refreshFxIfStale } from './fx';
+import { ensureFx, ensureFxHistory, refreshFxIfStale } from './fx';
 import { QUEUED_STALE_MS, enqueueSyncs } from './queue';
 import {
   acquireSyncLock,
@@ -472,6 +472,8 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
   // Settled before any sync is queued, so a dashboard never renders a fresh install's numbers
   // without rates (cron syncs skip ensureFx). refreshFxIfStale never throws (catch is belt and braces).
   const fx = await refreshFxIfStale(env.DB, globalFetch, now).catch(() => 'failed');
+  // Past days' rates, fetched once after an install or upgrade (usually one D1 read and done).
+  summary['fxHistory'] = await ensureFxHistory(env.DB, globalFetch, now).catch(() => 'failed');
 
   try {
     const intervalMs = syncIntervalMs(env);

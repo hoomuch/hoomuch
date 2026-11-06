@@ -246,7 +246,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       productMrr: NO_PRODUCT_MRR,
       revenueSeries: days.map((day) => ({ day, total: 0, byConnection: {} })),
       mrrSeries: [],
-      fx: { asOf: null, missing: [] },
+      fx: { asOf: null, daily: false, missing: [] },
       warnings: [],
     };
   }
@@ -325,7 +325,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     productMrr: fixtureProductMrr(breakdown),
     revenueSeries,
     mrrSeries,
-    fx: { asOf: '2026-11-04', missing: state === 'warnings' ? ['ARS'] : [] },
+    fx: { asOf: '2026-11-04', daily: true, missing: state === 'warnings' ? ['ARS'] : [] },
     // Sync problems come from the connections (Pagekit is in error); FX from fx.missing.
     warnings: [],
   };
