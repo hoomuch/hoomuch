@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DATA_PERMISSION_WARNING,
   RESTRICTED_PROJECTS_WARNING,
@@ -14,6 +14,10 @@ import {
 import { ProviderError, type ConnectionInput, type SnapshotHistoryPoint } from '../../src/providers/types';
 import { dayRange } from '../../src/lib/time';
 import { cleanSnapshotHistory } from '../../src/sync/aggregate';
+import { syncConnection } from '../../src/sync/engine';
+import { seedConnection } from '../fixtures/d1';
+import { fxV2 } from '../fixtures/fx';
+import { FX_BODY, SNAP, encryptedCreds, page, setup, teardown, type Ctx as SyncCtx } from '../sync/helpers';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type TestCtx } from '../fixtures/harness';
 import definitionsFixture from '../fixtures/superwall/definitions.json';
 import mrrChart from '../fixtures/superwall/chart-mrr.json';
@@ -732,6 +736,7 @@ describe('superwall fetchSnapshotHistory', () => {
     for (const c of calls.slice(1)) {
       expect(bodyOf(c)).toMatchObject({
         organization_id: ORG,
+        x_axis: 'mrrDate',
         breakdown: null,
         date_filter: { dimension: 'mrrDate', preset: 'last_90_days' },
         date_interval: 'day',
@@ -837,5 +842,162 @@ describe('superwall fetchSnapshotHistory', () => {
     const e = await catchErr(superwallAdapter.fetchSnapshotHistory!(input('pk_abcdefghijklmnopqrst'), { days: 90 }, makeCtx(fetch)));
     expect(e.kind).toBe('invalid_input');
     expect(calls).toHaveLength(0);
+  });
+
+  it('leaves out a past point whose y is null instead of storing it as zero', async () => {
+    const mrr = clone(mrrChart90);
+    at(mrr, '2026-10-10').values = { null: { y: null, extra: {} } };
+    const { fetch } = fakeFetch(historyRoutes({ mrr }));
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+    expect(rows.map((r) => r.day)).toEqual(dayRange('2026-08-08', '2026-11-04').filter((d) => d !== '2026-10-10'));
+    expect(ctx.logs.find((l) => l.event === 'superwall_history_fetched')?.data).toEqual({ days: 88, unmatched: 1, notFinal: 1 });
+  });
+
+  it('still reads today’s null-y point as not computed yet in the snapshot, keeping yesterday’s value', async () => {
+    const mrr = clone(mrrChart);
+    mrr.data[6]!.values = { null: { y: null, extra: {} } } as unknown as (typeof mrr.data)[6]['values'];
+    const { fetch } = fakeFetch([route(DEFS, { json: definitionsFixture }), route(DATA, chartData({ mrr }), { method: 'POST' }), route(QUERY, queryData())]);
+    const ctx = makeCtx(fetch);
+    const snap = await superwallAdapter.fetchSnapshot(input(), ctx);
+    expect(snap.mrr).toEqual({ USD: 406620 }); // 2026-11-04's 4066.20
+    expect(logEvents(ctx)).toContain('superwall_chart_used_last_complete_day');
+  });
+
+  it('does not trust a chart that lists a day twice (logging which chart, not its values)', async () => {
+    const subs = clone(subsChart90);
+    points(subs).splice(30, 0, { x: '2026-09-07', incomplete: false, values: { null: { y: 999, extra: {} } } });
+    const { fetch } = fakeFetch(historyRoutes({ subs }));
+    const ctx = makeCtx(fetch);
+    const e = await catchErr(history(ctx));
+    expect(e.kind).toBe('upstream');
+    expect(e.message).toBe('Superwall returned the Active Subscriptions chart with a day listed twice, which hoomuch couldn’t read.');
+    expect(ctx.logs.find((l) => l.event === 'superwall_unreadable')?.data).toEqual({
+      what: 'the Active Subscriptions chart with a day listed twice, which',
+      chart: 'subs_active',
+    });
+  });
+
+  it('reads a negative MRR as zero, in history and in the snapshot (as Adapty does)', async () => {
+    const mrr90 = clone(mrrChart90);
+    at(mrr90, '2026-09-01').values = { null: { y: -12.5, extra: {} } };
+    const a = fakeFetch(historyRoutes({ mrr: mrr90 }));
+    const rows = await history(makeCtx(a.fetch));
+    expect(rows.find((r) => r.day === '2026-09-01')?.snapshot.mrr).toEqual({ USD: 0 });
+
+    const mrr = clone(mrrChart);
+    mrr.data[6]!.values.null.y = -5;
+    const b = fakeFetch([route(DEFS, { json: definitionsFixture }), route(DATA, chartData({ mrr }), { method: 'POST' }), route(QUERY, queryData())]);
+    expect((await superwallAdapter.fetchSnapshot(input(), makeCtx(b.fetch))).mrr).toEqual({ USD: 0 });
+  });
+
+  it('leaves today out because it is today, not because Superwall marks its point incomplete', async () => {
+    const mrr = clone(mrrChart90);
+    const subs = clone(subsChart90);
+    at(mrr, TODAY).incomplete = false;
+    at(subs, TODAY).incomplete = false;
+    const { fetch } = fakeFetch(historyRoutes({ mrr, subs }));
+    const rows = await history(makeCtx(fetch));
+    expect(rows).toHaveLength(89);
+    expect(rows.at(-1)).toEqual(point('2026-11-04', 406620, 408));
+  });
+
+  it('runs with a budget of exactly three requests', async () => {
+    const { fetch, calls } = fakeFetch(historyRoutes());
+    const ctx = makeCtx(fetch, { pageBudget: 3 });
+    expect(await history(ctx)).toHaveLength(89);
+    expect(calls).toHaveLength(3);
+    expect(ctx.pageBudget).toBe(0);
+  });
+
+  it('rounds a fractional subscription count to the nearest whole one', async () => {
+    const subs = clone(subsChart90);
+    at(subs, '2026-08-08').values = { null: { y: 318.6, extra: {} } };
+    const { fetch } = fakeFetch(historyRoutes({ subs }));
+    expect((await history(makeCtx(fetch)))[0]).toEqual(point('2026-08-08', 310000, 319));
+  });
+
+  it('reads a one-day history', async () => {
+    const { fetch } = fakeFetch(historyRoutes());
+    expect(await history(makeCtx(fetch), 1)).toEqual([point('2026-11-04', 406620, 408)]);
+  });
+
+  it('counts back from the day the engine says is today, when that isn’t the UTC day', async () => {
+    const { fetch } = fakeFetch(historyRoutes());
+    // Ahead of UTC (already 2026-11-06): the owner's yesterday is Superwall's unfinished today, read as fetchSnapshot reads it.
+    const ahead = await superwallAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-06' }, makeCtx(fetch));
+    expect(ahead.map((r) => r.day)).toEqual(dayRange('2026-08-08', TODAY));
+    expect(ahead.at(-1)).toEqual(point(TODAY, 407189, 409));
+
+    // Behind UTC (still 2026-11-04): that day is the owner's today, so history ends the day before.
+    const behind = await superwallAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-04' }, makeCtx(fetch));
+    expect(behind.map((r) => r.day)).toEqual(dayRange('2026-08-08', '2026-11-03'));
+
+    // More than a day away from the UTC day can't be the owner's today: the UTC day is used.
+    const far = await superwallAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-10-01' }, makeCtx(fetch));
+    expect(far.map((r) => r.day)).toEqual(dayRange('2026-08-08', '2026-11-04'));
+  });
+
+  it('for the owner’s yesterday, keeps Superwall’s last complete day while today’s point isn’t computed (no false zero)', async () => {
+    const mrr = clone(mrrChart90);
+    const subs = clone(subsChart90);
+    at(mrr, TODAY).values = {};
+    at(subs, TODAY).values = { null: { y: 0, extra: {} } };
+    const { fetch } = fakeFetch(historyRoutes({ mrr, subs }));
+    const rows = await superwallAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-06' }, makeCtx(fetch));
+    expect(rows.at(-1)).toEqual(point(TODAY, 406620, 408)); // 2026-11-04's 4066.20 and 408, as fetchSnapshot reads them
+  });
+
+  it('doesn’t make up the owner’s yesterday from Superwall’s today when that point has no value and nothing to fall back to', async () => {
+    const mrr = { ...clone(mrrChart90), data: [{ x: TODAY, incomplete: true, values: { null: { y: null, extra: {} } } }] };
+    const subs = { ...clone(subsChart90), data: [{ x: TODAY, incomplete: true, values: {} }] };
+    const { fetch } = fakeFetch(historyRoutes({ mrr, subs }));
+    expect(await superwallAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-06' }, makeCtx(fetch))).toEqual([]);
+  });
+
+  describe('through the engine, for owners away from UTC', () => {
+    const SW_ID = 'sw-1';
+    afterEach(() => teardown());
+
+    async function firstSync(timeZone: string, now = NOW): Promise<{ c: SyncCtx; days: string[] }> {
+      const c = setup();
+      vi.setSystemTime(now);
+      c.t.exec('UPDATE users SET timezone = ? WHERE id = ?', timeZone, c.userId);
+      seedConnection(c.t, {
+        id: SW_ID,
+        userId: c.userId,
+        provider: 'superwall',
+        credentialsEnc: await encryptedCreds({ apiKey: KEY }),
+        config: { organizationId: ORG },
+        status: 'pending',
+      });
+      vi.spyOn(superwallAdapter, 'fetchSnapshot').mockResolvedValue(SNAP);
+      vi.spyOn(superwallAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+      vi.stubGlobal('fetch', fakeFetch([route('/v2/rates', { json: fxV2(FX_BODY) }), ...historyRoutes()]).fetch);
+      const r = await syncConnection(c.env, SW_ID, 'initial');
+      expect(r.ok).toBe(true);
+      expect(c.out.join('\n')).not.toContain(KEY);
+      const days = c.t.rows<{ day: string }>('SELECT day FROM snapshots WHERE connection_id = ? ORDER BY day', SW_ID).map((row) => row.day);
+      return { c, days };
+    }
+
+    it('ahead of UTC (Auckland, already 2026-11-06), the owner’s yesterday is stored: no gap before today', async () => {
+      const { c, days } = await firstSync('Pacific/Auckland'); // 2026-11-05T12:00Z = 2026-11-06 01:00 NZDT
+      expect(days).toEqual(dayRange('2026-08-08', '2026-11-06'));
+      const yesterday = c.t.rows<{ mrr: string; active_subscriptions: number }>(
+        'SELECT mrr, active_subscriptions FROM snapshots WHERE connection_id = ? AND day = ?',
+        SW_ID,
+        TODAY,
+      )[0]!;
+      expect(yesterday).toEqual({ mrr: '{"USD":407189}', active_subscriptions: 409 });
+      expect(c.out.join('\n')).not.toContain('"event":"sync_history_skipped"');
+    });
+
+    it('behind UTC (Los Angeles, still 2026-11-04), history ends the day before the owner’s today', async () => {
+      // 2026-11-05T03:00Z = 2026-11-04 19:00 PST: Superwall's yesterday is the owner's today.
+      const { c, days } = await firstSync('America/Los_Angeles', Date.parse('2026-11-05T03:00:00Z'));
+      expect(days).toEqual(dayRange('2026-08-08', '2026-11-04'));
+      expect(c.out.join('\n')).not.toContain('"event":"sync_history_skipped"');
+    });
   });
 });

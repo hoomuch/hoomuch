@@ -152,9 +152,9 @@ export function demoSnapshotHistory(
   config: ConnectionConfig,
   now: number,
   days: number = DEMO_HISTORY_DAYS,
+  today: string = dayKey(now),
 ): Array<{ day: string; snapshot: MetricsSnapshot }> {
   const p = params(config);
-  const today = dayKey(now);
   const out: Array<{ day: string; snapshot: MetricsSnapshot }> = [];
   for (let i = days; i >= 1; i--) {
     const day = addDays(today, -i);
@@ -185,7 +185,8 @@ export const demoAdapter: ProviderAdapter = {
   },
 
   async fetchSnapshotHistory(input, req, ctx) {
-    return demoSnapshotHistory(input.config, ctx.now(), Math.min(req.days, DEMO_HISTORY_DAYS));
+    // Days before the owner's local today, which the engine stores today's snapshot under.
+    return demoSnapshotHistory(input.config, ctx.now(), Math.min(req.days, DEMO_HISTORY_DAYS), req.today);
   },
 
   async fetchRevenue(input, req, ctx): Promise<RevenuePage> {

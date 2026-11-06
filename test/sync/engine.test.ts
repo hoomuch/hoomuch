@@ -240,7 +240,7 @@ describe('syncConnection — snapshot history hook', () => {
 
     expect(r.ok).toBe(true);
     expect(hook).toHaveBeenCalledTimes(1);
-    expect(hook.mock.calls[0]![1]).toEqual({ days: 90 });
+    expect(hook.mock.calls[0]![1]).toEqual({ days: 90, today }); // the owner's local day (UTC here)
     // The snapshot's own context, so the history shares its budget and deadline.
     expect(hook.mock.calls[0]![2]).toBe(snap.mock.calls[0]![1]);
     expect(snapshotDays(c)).toEqual([addDays(today, -2), addDays(today, -1), today]);

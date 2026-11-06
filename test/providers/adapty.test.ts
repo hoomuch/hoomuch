@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ADAPTY_TRIALS_SKIPPED_WARNING,
   ADAPTY_TRIALS_UNAVAILABLE_WARNING,
@@ -8,6 +8,10 @@ import {
 import { ProviderError, type ConnectionInput, type RevenuePage, type SnapshotHistoryPoint } from '../../src/providers/types';
 import { dayRange } from '../../src/lib/time';
 import { cleanSnapshotHistory } from '../../src/sync/aggregate';
+import { syncConnection } from '../../src/sync/engine';
+import { seedConnection } from '../fixtures/d1';
+import { fxV2 } from '../fixtures/fx';
+import { FX_BODY, SNAP, encryptedCreds, page, setup, teardown, type Ctx as SyncCtx } from '../sync/helpers';
 import {
   expectNoSecretsInLogs,
   fakeFetch,
@@ -851,5 +855,171 @@ describe('adapty fetchSnapshotHistory', () => {
     const e = await catchErr(adaptyAdapter.fetchSnapshotHistory!(input('public_live_abcdefghijklmnop'), { days: 90 }, makeCtx(fetch)));
     expect(e.kind).toBe('invalid_input');
     expect(calls).toHaveLength(0);
+  });
+
+  it('does not trust a series whose last day is null or missing, so it can’t be checked against value_to', async () => {
+    // Last day null, value_to far off: before, the check was skipped and 89 days were stored.
+    const nullLast = clone(mrrChart90);
+    values(nullLast, 'revenue').at(-1)!.y = null;
+    (nullLast.data.revenue as unknown as Metric).value_to = 9999.99;
+    const a = fakeFetch([historyRoutes({ mrr: { json: nullLast } })]);
+    const ctx = makeCtx(a.fetch);
+    expect(await catchErr(history(ctx))).toMatchObject({ kind: 'upstream' });
+    expect(ctx.logs.find((l) => l.event === 'adapty_series_unreadable')?.data).toMatchObject({ chart: 'mrr' });
+
+    // Neither the last day nor a documented level to compare it with: nothing to check the series against.
+    const unchecked = clone(subsChart90);
+    values(unchecked, 'common').pop();
+    Object.assign(unchecked.data.common, { value: null, value_to: null });
+    const b = fakeFetch([historyRoutes({ subscriptions_active: { json: unchecked } })]);
+    expect(await catchErr(history(makeCtx(b.fetch)))).toMatchObject({ kind: 'upstream' });
+  });
+
+  it('checks the last day against `value` when value_to is missing and the chart aggregates with last', async () => {
+    const off = clone(mrrChart90);
+    Object.assign(off.data.revenue, { value_to: null, value: 9999.99, default_aggregation: 'last' });
+    const a = fakeFetch([historyRoutes({ mrr: { json: off } })]);
+    expect(await catchErr(history(makeCtx(a.fetch)))).toMatchObject({ kind: 'upstream' });
+
+    const matching = clone(mrrChart90);
+    Object.assign(matching.data.revenue, { value_to: null, value: 4534.63, default_aggregation: 'last' });
+    const b = fakeFetch([historyRoutes({ mrr: { json: matching } })]);
+    const rows = await history(makeCtx(b.fetch));
+    expect(rows).toHaveLength(90);
+    expect(rows[89]).toEqual(point(TO, 453463, 511, 25));
+  });
+
+  it('leaves trials unknown when their series ends away from value_to', async () => {
+    const trials = clone(trialsChart90);
+    (trials.data.common as unknown as Metric).value_to = 999;
+    const { fetch } = fakeFetch([historyRoutes({ trials_active: { json: trials } })]);
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+    expect(rows).toHaveLength(90);
+    expect(rows.every((r) => r.snapshot.activeTrials === null)).toBe(true);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_trials_unavailable')?.data).toEqual({ reason: 'unreadable', status: null });
+  });
+
+  it('keeps MRR in the chart’s currency, with that currency’s minor unit (JPY has none)', async () => {
+    const yen = clone(mrrChart90);
+    const metric = yen.data.revenue as unknown as Metric & { unit: string; value: number };
+    for (const p of metric.data[0]!.values) p.y = p.y! * 150;
+    metric.value_to = metric.value_to! * 150;
+    metric.value = metric.value * 150;
+    metric.unit = 'JPY';
+    const { fetch } = fakeFetch([historyRoutes({ mrr: { json: yen } })]);
+    const rows = await history(makeCtx(fetch));
+    expect(rows).toHaveLength(90);
+    expect(rows[0]!.snapshot.mrr).toEqual({ JPY: 540000 }); // 3600.00 × 150 yen, not 54,000,000 "cents"
+  });
+
+  it('rounds a fractional subscription count to the nearest whole one', async () => {
+    const subs = clone(subsChart90);
+    values(subs, 'common')[0]!.y = 430.6;
+    const { fetch } = fakeFetch([historyRoutes({ subscriptions_active: { json: subs } })]);
+    const rows = await history(makeCtx(fetch));
+    expect(rows[0]).toEqual(point(FROM, 360000, 431, 20));
+  });
+
+  it('reads a one-day history from the same charts', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes()]);
+    expect(await history(makeCtx(fetch), 1)).toEqual([point(TO, 453463, 511, 25)]);
+    expect(charts(calls)).toEqual([`mrr ${TO}..${TO}`, `subscriptions_active ${TO}..${TO}`, `trials_active ${TO}..${TO}`]);
+  });
+
+  it('keeps every day, with trials unknown, when the deadline passes after the subscriptions chart', async () => {
+    let t = NOW;
+    const { fetch, calls } = fakeFetch([
+      historyRoutes({
+        subscriptions_active: () => {
+          t = NOW + 61_000;
+          return { json: subsChart90 };
+        },
+      }),
+    ]);
+    const ctx: TestCtx = { ...makeCtx(fetch), now: () => t, deadline: NOW + 60_000 };
+    const rows = await history(ctx);
+    expect(rows).toHaveLength(90);
+    expect(rows[89]).toEqual(point(TO, 453463, 511, null));
+    expect(calls).toHaveLength(2);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_trials_unavailable')?.data).toEqual({ reason: 'budget', status: null });
+  });
+
+  /** A level chart over the query's own range: `y` every day, value_to the last day's. */
+  const level = (base: Record<string, unknown>, metric: string, y: number) => (q: Query) => {
+    const days = dayRange(q.filters.date[0], q.filters.date[1]);
+    const row = { title: 'Total', type: 'total', value: y, values: days.map((x) => ({ x, y })) };
+    return { json: { data: { [metric]: { ...clone(base), value: y, value_to: y, data: [row] } } } };
+  };
+  /** MRR $10.00, 10 subscriptions and 2 trials on every day asked for. */
+  const flatRoutes = () =>
+    analytics({
+      mrr: level(mrrChart90.data.revenue, 'revenue', 10),
+      subscriptions_active: level(subsChart90.data.common, 'common', 10),
+      trials_active: level(trialsChart90.data.common, 'common', 2),
+    });
+
+  it('counts back from the day the engine says is today, when that isn’t the UTC day', async () => {
+    const { fetch, calls } = fakeFetch([flatRoutes()]);
+    const ahead = await adaptyAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-06' }, makeCtx(fetch));
+    expect(charts(calls)[0]).toBe('mrr 2026-08-08..2026-11-05');
+    // The owner's yesterday is Adapty's UTC today, whose level so far is what fetchSnapshot reads now.
+    expect(ahead.map((r) => r.day)).toEqual(dayRange('2026-08-08', '2026-11-05'));
+    expect(ahead.at(-1)).toEqual(point('2026-11-05', 1000, 10, 2));
+
+    const behind = await adaptyAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-11-04' }, makeCtx(fetch));
+    expect(charts(calls)[3]).toBe('mrr 2026-08-06..2026-11-03');
+    expect(behind.map((r) => r.day)).toEqual(dayRange('2026-08-06', '2026-11-03'));
+
+    // More than a day away from the UTC day can't be the owner's today: the UTC day is used.
+    await adaptyAdapter.fetchSnapshotHistory!(input(), { days: 90, today: '2026-10-01' }, makeCtx(fetch));
+    expect(charts(calls)[6]).toBe(`mrr ${FROM}..${TO}`);
+  });
+
+  describe('through the engine, for owners away from UTC', () => {
+    const ADAPTY_ID = 'ad-1';
+    afterEach(() => teardown());
+
+    async function firstSync(timeZone: string, now = NOW): Promise<{ c: SyncCtx; calls: RecordedCall[]; days: string[] }> {
+      const c = setup();
+      vi.setSystemTime(now);
+      c.t.exec('UPDATE users SET timezone = ? WHERE id = ?', timeZone, c.userId);
+      seedConnection(c.t, {
+        id: ADAPTY_ID,
+        userId: c.userId,
+        provider: 'adapty',
+        credentialsEnc: await encryptedCreds({ apiKey: KEY }),
+        status: 'pending',
+      });
+      vi.spyOn(adaptyAdapter, 'fetchSnapshot').mockResolvedValue(SNAP);
+      vi.spyOn(adaptyAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+      const { fetch, calls } = fakeFetch([
+        route('/v2/rates', { json: fxV2(FX_BODY) }),
+        flatRoutes(),
+      ]);
+      vi.stubGlobal('fetch', fetch);
+      const r = await syncConnection(c.env, ADAPTY_ID, 'initial');
+      expect(r.ok).toBe(true);
+      expect(c.out.join('\n')).not.toContain(KEY);
+      const days = c.t
+        .rows<{ day: string }>('SELECT day FROM snapshots WHERE connection_id = ? ORDER BY day', ADAPTY_ID)
+        .map((row) => row.day);
+      return { c, calls: calls.filter((call) => call.url.startsWith('https://api-admin.adapty.io/')), days };
+    }
+
+    it('ahead of UTC (Auckland, already 2026-11-06), the owner’s yesterday is stored: no gap before today', async () => {
+      const { c, calls, days } = await firstSync('Pacific/Auckland'); // 2026-11-05T12:00Z = 2026-11-06 01:00 NZDT
+      expect(days).toEqual(dayRange('2026-08-08', '2026-11-06'));
+      expect(charts(calls)[0]).toBe('mrr 2026-08-08..2026-11-05');
+      expect(c.out.join('\n')).not.toContain('"event":"sync_history_skipped"');
+    });
+
+    it('behind UTC (Los Angeles, still 2026-11-04), history ends the day before the owner’s today', async () => {
+      // 2026-11-05T03:00Z = 2026-11-04 19:00 PST: the UTC yesterday is the owner's today.
+      const { c, calls, days } = await firstSync('America/Los_Angeles', Date.parse('2026-11-05T03:00:00Z'));
+      expect(days).toEqual(dayRange('2026-08-06', '2026-11-04'));
+      expect(charts(calls)[0]).toBe('mrr 2026-08-06..2026-11-03');
+      expect(c.out.join('\n')).not.toContain('"event":"sync_history_skipped"');
+    });
   });
 });

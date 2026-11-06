@@ -13,7 +13,7 @@
  *   verify         mrr [today] + revenue [today]                                              2 requests
  *   fetchSnapshot  mrr, subscriptions_active, trials_active [today] + revenue [today−29, today] 4 requests
  *   fetchSnapshotHistory (a connection's first sync) mrr, subscriptions_active, trials_active
- *                  [today−90, today−1]: one day-resolution series each                          3 requests
+ *                  [today−90, today−1], today being the owner's local day: one series each      3 requests
  *   fetchRevenue   revenue + refund_money per window of ≤ 92 days                             2 per window
  *                  (fallback when a window's per-day series can't be read: the same two charts one day at a
  *                  time, read from the documented `value` field: 2 requests per day)
@@ -56,6 +56,7 @@ import {
   type ProviderContext,
   type RevenuePage,
   type SnapshotHistoryPoint,
+  type SnapshotHistoryRequest,
   type VerifyResult,
 } from './types';
 
@@ -368,8 +369,8 @@ function levelOn(metric: Record<string, unknown>, day: string): number | null {
 /**
  * A stock chart's (mrr, subscriptions_active, trials_active) level per day over [from, to]. A day without a value
  * is left out, never read as zero. A day listed twice is a shape we don't know, and the series is only trusted
- * when its last day matches the documented level at the end of the range: `value_to`, or `value` when Adapty
- * aggregates the chart with `last`.
+ * when its last day has a value that matches the documented level at the end of the range: `value_to`, or `value`
+ * when Adapty aggregates the chart with `last`. Without the last day or that level, nothing checks the series.
  */
 function levelSeries(metric: Record<string, unknown>, from: string, to: string): Map<string, number> | null {
   const points = seriesPoints(metric, from, to);
@@ -381,10 +382,19 @@ function levelSeries(metric: Record<string, unknown>, from: string, to: string):
     seen.add(p.day);
     if (p.value !== null) byDay.set(p.day, p.value);
   }
+  // No value on any day (Adapty's empty answer): nothing would be stored, so there is nothing to check.
+  if (byDay.size === 0) return byDay;
   const end = num(metric['value_to']) ?? (metric['default_aggregation'] === 'last' ? num(metric['value']) : null);
   const last = byDay.get(to);
-  if (end !== null && last !== undefined && Math.abs(end - last) > 0.01) return null;
+  if (end === null || last === undefined || Math.abs(end - last) > 0.01) return null;
   return byDay;
+}
+
+/** The day history counts back from: the engine's (the owner's local day) when it's within a day of UTC's. */
+function historyToday(req: SnapshotHistoryRequest, ctx: ProviderContext): string {
+  const utc = dayKey(ctx.now());
+  const day = req.today;
+  return day === addDays(utc, -1) || day === addDays(utc, 1) ? day : utc;
 }
 
 // ---------- snapshot ----------
@@ -674,7 +684,8 @@ export const adaptyAdapter: ProviderAdapter = {
 
   async fetchSnapshotHistory(input, req, ctx): Promise<SnapshotHistoryPoint[]> {
     const apiKey = requireKey(input);
-    const today = dayKey(ctx.now());
+    // Ahead of UTC, the owner's yesterday is Adapty's UTC today: its level so far, as fetchSnapshot reads it.
+    const today = historyToday(req, ctx);
     const days = Number.isFinite(req.days) ? Math.min(HISTORY_MAX_DAYS, Math.max(0, Math.floor(req.days))) : 0;
     if (days === 0) return [];
     const from = addDays(today, -days);

@@ -48,6 +48,14 @@ describe('demo adapter', () => {
     expect(demoSnapshotHistory(config, NOW)).toEqual(h);
   });
 
+  it('counts history back from the owner’s local today, not the UTC one', async () => {
+    // NOW is 2026-11-05T12:00Z, already 11-06 in Auckland: the day before it must not be left out.
+    const h = await demoAdapter.fetchSnapshotHistory!(input, { days: 90, today: '2026-11-06' }, makeCtx(noNetwork));
+    expect(h).toHaveLength(90);
+    expect(h[0]!.day).toBe('2026-08-08');
+    expect(h.at(-1)!.day).toBe('2026-11-05');
+  });
+
   it('returns deterministic revenue events within [since, now] with charges, fees and occasional refunds', async () => {
     const since = NOW - 90 * DAY;
     const r1 = await demoAdapter.fetchRevenue(input, { since, cursor: null }, makeCtx(noNetwork));

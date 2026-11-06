@@ -190,6 +190,11 @@ export interface MetricsSnapshot {
 export interface SnapshotHistoryRequest {
   /** How many days before today to return at most. Today itself comes from `fetchSnapshot`. */
   days: number;
+  /**
+   * 'YYYY-MM-DD' the engine stores today's snapshot under: the owner's local day, which can be a
+   * day either side of the UTC one. Return days before it. Absent: the UTC day of `ctx.now()`.
+   */
+  today?: string;
 }
 
 /** One past day's snapshot, as `fetchSnapshot` would have reported it at the end of that day. */
@@ -263,8 +268,8 @@ export interface ProviderAdapter {
    * Optional: snapshots for days before today, so a new connection's MRR trend starts with
    * history instead of a single point. Called while the connection has no snapshots (its first
    * sync, or after a key for another account cleared them), right after `fetchSnapshot` and with
-   * the same context (and what's left of its budget). Oldest first. Days that already have a
-   * snapshot keep it; a failure here doesn't fail the sync.
+   * the same context (and what's left of its budget). Count back from `req.today`. Oldest first.
+   * Days that already have a snapshot keep it; a failure here doesn't fail the sync.
    */
   fetchSnapshotHistory?(
     input: ConnectionInput,

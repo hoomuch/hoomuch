@@ -541,8 +541,10 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   hariç tutar (§6'dan farklı).
 - **Snapshot geçmişi (v1.1):** bağlantının henüz snapshot'ı yokken (§4.1) `fetchSnapshotHistory`, `mrr`, `subscriptions_active`
   ve `trials_active` grafiklerini dünden geriye en çok 90 gün için birer istekle okur (3 istek); MRR trendi tek noktayla değil
-  geçmişle başlar. Bu grafikler `last` ile toplanır: günlük seri ancak son günü belgelenmiş `value_to` ile tutarsa ve hiçbir gün
-  iki kez geçmiyorsa kullanılır (gün gün yedek sorgu yok). MRR'ı ya da aktif abonelik sayısı olmayan gün (`null` nokta,
+  geçmişle başlar. "Dün", sahibin yerel bugününden (engine'in geçirdiği `today`) önceki gündür; UTC'nin önündeki sahipte bu,
+  Adapty'nin henüz bitmemiş UTC bugünüdür ve o anki seviyesiyle okunur. Bu grafikler `last` ile toplanır: günlük seri ancak son
+  günün değeri belgelenmiş `value_to` (yoksa `value`) ile tutarsa ve hiçbir gün iki kez geçmiyorsa kullanılır; son günü boşsa ya
+  da karşılaştırılacak değer yoksa kullanılmaz (gün gün yedek sorgu yok). MRR'ı ya da aktif abonelik sayısı olmayan gün (`null` nokta,
   uygulamanın ilk aboneliğinden önceki günler) atlanır, sıfırla doldurulmaz. Deneme grafiği okunamazsa, reddedilirse ya da
   429'da kalırsa o günlerin denemesi `null`. Bütçe MRR ve abonelik grafiklerine yetmiyorsa istek yapılmaz; süre ikisinin arasında
   dolarsa da geçmiş boş döner. Zorunlu grafik reddedilirse çağrı hata verir: engine loglar, senkronizasyon yine başarılı olur.
@@ -571,16 +573,18 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 - **Snapshot:** grafik anahtarları sabit yazılmaz; `definitions.chart_types` içinden "MRR" ve "Active Subscriptions"
   adıyla bulunur. `POST /v2/charts/data` (salt okunur sorgu uç noktası, `readQuery`) → `breakdown: null`, son 7 gün, günlük,
   `environment: PRODUCTION`, organizasyon geneli. Değer son gün noktasıdır; bugünün noktası boşsa ya da dün >0 iken
-  0 görünüyorsa son tamamlanmış gün kullanılır (sahte sıfır yazılmaz). Aktif abonelik = "unexpired, paid" (deneme
-  hariç). **Aktif deneme** Superwall metriği değildir: `data:read` ile SQL'den türetilir (son olayı TRIAL dönemi,
-  `expiration` değil, bitişi gelecekte olan abonelik; iptal edilmiş deneme bitene kadar sayılır). Entegrasyon olayı
-  hiç yoksa `null`. Para birimi USD.
+  0 görünüyorsa son tamamlanmış gün kullanılır (sahte sıfır yazılmaz); negatif MRR, Adapty'deki gibi 0 sayılır.
+  Aktif abonelik = "unexpired, paid" (deneme hariç). **Aktif deneme** Superwall metriği değildir: `data:read` ile
+  SQL'den türetilir (son olayı TRIAL dönemi, `expiration` değil, bitişi gelecekte olan abonelik; iptal edilmiş deneme
+  bitene kadar sayılır). Entegrasyon olayı hiç yoksa `null`. Para birimi USD.
 - **Snapshot geçmişi (v1.1):** bağlantının henüz snapshot'ı yokken (§4.1) aynı iki grafik belgelenmiş `last_90_days` hazır aralığıyla okunur
-  (definitions + 2 istek). Aralık bugünle bittiği için dünden geriye en çok 89 gün gelir; bugünün snapshot'ıyla dashboard'un
-  90 günlük penceresi dolar. Değeri olmayan ya da hâlâ `incomplete` işaretli geçmiş noktalar ve iki grafikten yalnızca birinde
-  olan günler atlanır, sıfırla doldurulmaz. Geçmiş günlerin denemesi `null`: Superwall'da deneme serisi yok, SQL yalnızca
-  bugünü verir. Bütçe üç isteğe yetmiyorsa istek yapılmaz; süre grafikler arasında dolarsa da geçmiş boş döner. Reddedilen
-  (400) ya da birimi beklenmeyen grafik çağrıyı hata ile bitirir: engine loglar, senkronizasyon yine başarılı olur.
+  (definitions + 2 istek). Aralık Superwall'un (UTC) bugünüyle biter, istekte saat dilimi yoktur; günler sahibin yerel
+  bugününden geriye sayılır, dünden geriye en çok 89 gün gelir; bugünün snapshot'ıyla dashboard'un 90 günlük penceresi dolar.
+  UTC'nin önündeki sahipte dün Superwall'un bitmemiş bugünüdür: snapshot gibi okunur. Değeri olmayan (`y: null` dahil) ya da
+  hâlâ `incomplete` işaretli geçmiş noktalar ve iki grafikten yalnızca birinde olan günler atlanır, sıfırla doldurulmaz. Geçmiş
+  günlerin denemesi `null`: Superwall'da deneme serisi yok, SQL yalnızca bugünü verir. Bütçe üç isteğe yetmiyorsa istek
+  yapılmaz; süre grafikler arasında dolarsa da geçmiş boş döner. Reddedilen (400), birimi beklenmeyen ya da bir günü iki kez
+  veren grafik çağrıyı hata ile bitirir: engine loglar, senkronizasyon yine başarılı olur.
 - **Gelir geçmişi:** `GET /v2/organizations/{id}/query?query=…` (ClickHouse, salt okunur; ham SQL gövdeli POST yerine
   belgelenmiş GET kullanılır) ile `open_revenue.attributed_events_by_ts_rep FINAL` üzerinde gün bazında toplanır →
   `daily_revenue` (`source='provider'`, USD). Brüt = pozitif `price` toplamı, iade = negatif `price` toplamının mutlak
@@ -783,7 +787,7 @@ hoomuch/
 
 ### 9.1 Kontratlar (değiştirmek için Lead onayı gerekir)
 
-- `src/providers/types.ts` — `ProviderAdapter` (v1.1: isteğe bağlı `fetchSnapshotHistory`), `ProviderMeta` (v1.1: `webhook`, `dayZone`), `ProviderContext` (v1.1: `deadline`, `signal`), `MetricsSnapshot` (v1.1: `warnings`), `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
+- `src/providers/types.ts` — `ProviderAdapter` (v1.1: isteğe bağlı `fetchSnapshotHistory`; isteği sahibin yerel `today`'ini taşır), `ProviderMeta` (v1.1: `webhook`, `dayZone`), `ProviderContext` (v1.1: `deadline`, `signal`), `MetricsSnapshot` (v1.1: `warnings`), `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
 - `src/data/types.ts` — `DashboardData` (v1.1: `fx.daily`, `days`, dolu `warnings`), `CalendarMonth`, `CalendarDay`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail` (v1.1: `warnings`, `webhook`)
 - `src/services/connections.ts` — `createConnection`, `renameConnection`, `rotateCredentials`, `deleteConnection`, `triggerSync`, `startSync` (v1.1: senkronizasyonları kuyruğa koyar, `ExecutionContext` almaz); `src/services/webhooks.ts` — `setWebhook`, `receiveWebhook`
 - `src/data/*.ts` — `getDashboardData`, `getCalendarMonth`, `listTransactions`, `listConnectionSummaries`, `getConnectionDetail`

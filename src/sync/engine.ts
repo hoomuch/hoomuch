@@ -408,7 +408,7 @@ async function syncSnapshot(
     // whatever the revenue phase does next. Optional data: a failure is logged, and today's
     // snapshot is still written.
     try {
-      const history = await adapter.fetchSnapshotHistory(input, { days: SNAPSHOT_HISTORY_DAYS }, ctx);
+      const history = await adapter.fetchSnapshotHistory(input, { days: SNAPSHOT_HISTORY_DAYS, today }, ctx);
       const { rows, skipped } = cleanSnapshotHistory(history, today, SNAPSHOT_HISTORY_DAYS);
       if (skipped > 0) emit('warn', 'sync_history_skipped', { ...logCtx, skipped });
       stmts.push(...insertSnapshotHistory(db, row.id, rows, now));
