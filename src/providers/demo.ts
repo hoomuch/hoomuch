@@ -184,6 +184,10 @@ export const demoAdapter: ProviderAdapter = {
     return snapshotFor(params(input.config), dayKey(ctx.now()));
   },
 
+  async fetchSnapshotHistory(input, req, ctx) {
+    return demoSnapshotHistory(input.config, ctx.now(), Math.min(req.days, DEMO_HISTORY_DAYS));
+  },
+
   async fetchRevenue(input, req, ctx): Promise<RevenuePage> {
     const p = params(input.config);
     const now = ctx.now();

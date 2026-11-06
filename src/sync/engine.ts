@@ -4,8 +4,8 @@
  * One sync of one connection:
  *   1. lock      conditional UPDATE … RETURNING (fresh 'syncing' rows are skipped; a lock older than
  *                5 min is taken over) + open a `sync_runs` row.
- *   2. snapshot  fetchSnapshot → upsert today's row (+ demo history) in its own batch, so it
- *                survives a later revenue failure.
+ *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history on a first sync)
+ *                in its own batch, so it survives a later revenue failure.
  *                Both provider calls run against a wall-clock deadline (see `withDeadline`): once it
  *                passes, the page budget reads 0, so adapters checkpoint with a cursor and the final
  *                batch still commits inside waitUntil's 30 s.
@@ -26,7 +26,6 @@ import { decryptJson } from '../lib/crypto';
 import { MINUTE, dayKey } from '../lib/time';
 import { createProviderContext } from '../providers/context';
 import { BudgetExhaustedError } from '../providers/http';
-import { demoSnapshotHistory } from '../providers/demo';
 import { getAdapter, getProviderMeta } from '../providers/registry';
 import {
   ProviderError,
@@ -42,6 +41,7 @@ import {
   cleanDailyPoints,
   cleanEvents,
   cleanSnapshot,
+  cleanSnapshotHistory,
   planRevenue,
   type RevenueAdvance,
   type RevenuePlan,
@@ -93,6 +93,8 @@ export interface SyncResult {
  * 10 connections × (80 + 20) × 3 attempts = 3,000 subrequests (Workers Paid allows 10,000).
  */
 export const SNAPSHOT_PAGE_BUDGET = 80;
+/** Days of past snapshots asked of `fetchSnapshotHistory` on a first sync (the longest dashboard range). */
+export const SNAPSHOT_HISTORY_DAYS = 90;
 /** Upstream requests per sync for revenue paging (SPEC §4.1: 20 per connection). */
 export const REVENUE_PAGE_BUDGET = 20;
 /** A 'syncing' lock older than this is considered abandoned (matches services/connections.ts). */
@@ -411,14 +413,19 @@ async function syncSnapshot(
   const raw = await adapter.fetchSnapshot(input, ctx);
   const { snapshot, dropped } = cleanSnapshot(raw);
   if (dropped > 0) emit('warn', 'sync_snapshot_dropped', { ...logCtx, dropped });
-  const stmts = [upsertSnapshot(db, row.id, dayKey(now), snapshot, now)];
-  if (row.provider === 'demo') {
-    // A fresh demo gets its 90-day MRR trend; existing days are never overwritten.
-    const history = demoSnapshotHistory(input.config, now).map((h) => ({
-      day: h.day,
-      snapshot: cleanSnapshot(h.snapshot).snapshot,
-    }));
-    stmts.push(...insertSnapshotHistory(db, row.id, history, now));
+  const today = dayKey(now);
+  const stmts = [upsertSnapshot(db, row.id, today, snapshot, now)];
+  if (adapter.fetchSnapshotHistory && row.last_synced_at === null) {
+    // A connection's first successful sync can start its MRR trend with the provider's history.
+    // Optional data: a failure is logged, and today's snapshot is still written.
+    try {
+      const history = await adapter.fetchSnapshotHistory(input, { days: SNAPSHOT_HISTORY_DAYS }, ctx);
+      const { rows, skipped } = cleanSnapshotHistory(history, today, SNAPSHOT_HISTORY_DAYS);
+      if (skipped > 0) emit('warn', 'sync_history_skipped', { ...logCtx, skipped });
+      stmts.push(...insertSnapshotHistory(db, row.id, rows, now));
+    } catch (err) {
+      emit('warn', 'sync_history_failed', { ...logCtx, ...errorLogFields(err) });
+    }
   }
   // The snapshot is the first row the dashboard can see. On a fresh install the FX table is still
   // being fetched (in parallel with the provider calls); writing before it lands made the first

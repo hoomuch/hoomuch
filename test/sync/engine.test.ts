@@ -203,6 +203,82 @@ describe('syncConnection — demo end to end', () => {
   });
 });
 
+describe('syncConnection — snapshot history hook', () => {
+  type Hook = NonNullable<typeof stripeAdapter.fetchSnapshotHistory>;
+  const withHistory = (impl: Hook) => {
+    const hook = vi.fn(impl);
+    (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory = hook;
+    return hook;
+  };
+  afterEach(() => {
+    delete (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory;
+  });
+  const snapshotDays = (c: Ctx) =>
+    c.t.rows<{ day: string }>('SELECT day FROM snapshots WHERE connection_id = ? ORDER BY day', 'st-1').map((r) => r.day);
+
+  it('a first sync stores the adapter’s past days next to today’s, with the snapshot context', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const today = dayKey(NOW);
+    const hook = withHistory(async () => [
+      { day: addDays(today, -2), snapshot: { ...SNAP, mrr: { USD: 100 } } },
+      { day: addDays(today, -1), snapshot: SNAP },
+      { day: today, snapshot: SNAP }, // not before today: skipped
+      { day: 'nope', snapshot: SNAP },
+    ]);
+
+    const r = await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(r.ok).toBe(true);
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(hook.mock.calls[0]![1]).toEqual({ days: 90 });
+    expect(snapshotDays(c)).toEqual([addDays(today, -2), addDays(today, -1), today]);
+    expect(c.out.join('\n')).toContain('"event":"sync_history_skipped"');
+  });
+
+  it('is not asked again once the connection has synced', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1', { status: 'ok', lastSyncedAt: NOW - 3 * HOUR });
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const hook = withHistory(async () => []);
+
+    await syncConnection(c.env, 'st-1', 'cron');
+
+    expect(hook).not.toHaveBeenCalled();
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+  });
+
+  it('a failing history call is logged and the sync still succeeds with today’s snapshot', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    withHistory(async () => {
+      throw new ProviderError('upstream', 'charts are down');
+    });
+
+    const r = await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(r).toMatchObject({ ok: true, snapshot: true, error: null });
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+    expect(c.out.join('\n')).toContain('"event":"sync_history_failed"');
+  });
+
+  it('adapters without the hook only write today', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+
+    await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+  });
+});
+
 describe('syncConnection — revenue cursor', () => {
   it('stores a cursor, resumes with the same since, then clears it and advances the high-water mark', async () => {
     const c = ctx();

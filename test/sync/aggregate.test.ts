@@ -12,6 +12,7 @@ import {
   cleanDailyPoints,
   cleanEvents,
   cleanSnapshot,
+  cleanSnapshotHistory,
   dailyFromEvents,
   decodeBackfill,
   encodeBackfill,
@@ -150,6 +151,43 @@ describe('cleanDailyPoints', () => {
     ]);
     expect(points).toEqual([{ day: '2026-11-01', currency: 'USD', gross: 1100, refunds: 10, count: 4 }]);
     expect(skipped).toEqual({ duplicate: 1, day: 1, amount: 3, currency: 1, shape: 1 });
+  });
+});
+
+describe('cleanSnapshotHistory', () => {
+  const snap = { mrr: { USD: 100 }, activeSubscriptions: 2 };
+
+  it('keeps real past days, oldest first, one row per day (the first wins)', () => {
+    const { rows, skipped } = cleanSnapshotHistory(
+      [
+        { day: '2026-11-03', snapshot: { ...snap, mrr: { USD: 3 } } },
+        { day: '2026-11-01', snapshot: snap },
+        { day: '2026-11-03', snapshot: { ...snap, mrr: { USD: 999 } } },
+        { day: '2026-11-05', snapshot: snap }, // today
+        { day: '2026-02-30', snapshot: snap },
+        { day: '2026-11-02', snapshot: { mrr: {} } }, // no subscription count
+        'junk',
+      ],
+      '2026-11-05',
+      90,
+    );
+    expect(rows.map((r) => [r.day, r.snapshot.mrr])).toEqual([
+      ['2026-11-01', { USD: 100 }],
+      ['2026-11-03', { USD: 3 }],
+    ]);
+    expect(skipped).toBe(5);
+  });
+
+  it('keeps only the newest maxDays', () => {
+    const input = ['2026-11-01', '2026-11-02', '2026-11-03'].map((day) => ({ day, snapshot: snap }));
+    const { rows, skipped } = cleanSnapshotHistory(input, '2026-11-05', 2);
+    expect(rows.map((r) => r.day)).toEqual(['2026-11-02', '2026-11-03']);
+    expect(skipped).toBe(1);
+  });
+
+  it('treats a missing list as empty and anything else as one skip', () => {
+    expect(cleanSnapshotHistory(undefined, '2026-11-05', 90)).toEqual({ rows: [], skipped: 0 });
+    expect(cleanSnapshotHistory({}, '2026-11-05', 90)).toEqual({ rows: [], skipped: 1 });
   });
 });
 

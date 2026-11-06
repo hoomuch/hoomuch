@@ -203,6 +203,9 @@ references.
    - `fetchSnapshot`: MRR (normalised to monthly, trials excluded), active subscriptions and trials.
    - `fetchRevenue`: charges and refunds since `req.since`. Stop when `ctx.pageBudget` runs out and
      return a `nextCursor`, so the next sync can resume.
+   - `fetchSnapshotHistory` (optional): past days' snapshots, oldest first, if the provider has an MRR
+     series. It runs once, on a connection's first successful sync, so a new dashboard starts with a
+     trend. The demo adapter is the reference.
 4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
    `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.

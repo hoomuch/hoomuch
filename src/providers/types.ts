@@ -151,6 +151,18 @@ export interface MetricsSnapshot {
   mrrByProduct?: ProductMrr[] | null;
 }
 
+export interface SnapshotHistoryRequest {
+  /** How many days before today to return at most. Today itself comes from `fetchSnapshot`. */
+  days: number;
+}
+
+/** One past day's snapshot, as `fetchSnapshot` would have reported it at the end of that day. */
+export interface SnapshotHistoryPoint {
+  /** 'YYYY-MM-DD', before today. */
+  day: string;
+  snapshot: MetricsSnapshot;
+}
+
 /** One product's part of a snapshot's MRR. */
 export interface ProductMrr {
   /** Product or plan name as the provider shows it. Never customer PII. Null if it couldn't be read. */
@@ -211,6 +223,17 @@ export interface ProviderAdapter {
   verify(input: ConnectionInput, ctx: ProviderContext): Promise<VerifyResult>;
   /** Current MRR / subscriptions / trials. */
   fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot>;
+  /**
+   * Optional: snapshots for days before today, so a new connection's MRR trend starts with
+   * history instead of a single point. Called once, on the connection's first successful sync,
+   * right after `fetchSnapshot` and with the same context (and what's left of its budget).
+   * Oldest first. Days that already have a snapshot keep it; a failure here doesn't fail the sync.
+   */
+  fetchSnapshotHistory?(
+    input: ConnectionInput,
+    req: SnapshotHistoryRequest,
+    ctx: ProviderContext,
+  ): Promise<SnapshotHistoryPoint[]>;
   /** Revenue since `req.since`, resumable via cursor. */
   fetchRevenue(input: ConnectionInput, req: RevenueRequest, ctx: ProviderContext): Promise<RevenuePage>;
 }

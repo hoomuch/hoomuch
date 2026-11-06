@@ -238,6 +238,35 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
   };
 }
 
+/**
+ * Validates what `fetchSnapshotHistory` returned: real days before `today`, each a storable
+ * snapshot, one row per day (the first wins), at most `maxDays` of them (the newest).
+ */
+export function cleanSnapshotHistory(
+  input: unknown,
+  today: string,
+  maxDays: number,
+): { rows: Array<{ day: string; snapshot: MetricsSnapshot }>; skipped: number } {
+  if (!Array.isArray(input)) return { rows: [], skipped: input == null ? 0 : 1 };
+  const byDay = new Map<string, MetricsSnapshot>();
+  let skipped = 0;
+  for (const raw of input) {
+    const day = isRecord(raw) ? raw['day'] : null;
+    if (!isRecord(raw) || !isDayKey(day) || day >= today || byDay.has(day)) {
+      skipped++;
+      continue;
+    }
+    try {
+      byDay.set(day, cleanSnapshot(raw['snapshot']).snapshot);
+    } catch {
+      skipped++;
+    }
+  }
+  const rows = [...byDay].map(([day, snapshot]) => ({ day, snapshot })).sort((a, b) => (a.day < b.day ? -1 : 1));
+  skipped += Math.max(0, rows.length - maxDays);
+  return { rows: rows.slice(Math.max(0, rows.length - maxDays)), skipped };
+}
+
 // ---------- day ranges & the reference aggregation ----------
 
 export interface DayRange {
