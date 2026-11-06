@@ -16,7 +16,7 @@ import { Card as CossCard, CardPanel } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { CalendarMonth, ConnectionSummary, DashboardData, MrrDay } from '../../data/types';
 import { formatMoney, formatNumber, toMinor } from '../../lib/money';
-import { addDays, dayKey, HOUR, MINUTE } from '../../lib/time';
+import { addDays, dayKey, HOUR, MINUTE, zoneLabel } from '../../lib/time';
 import { cn } from '../../lib/utils';
 import { MrrChart } from '../charts/mrr-chart';
 import { RevenueChart } from '../charts/revenue-chart';
@@ -30,7 +30,7 @@ import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
 import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { useNow } from '../page-root';
+import { useNow, useTimeZone } from '../page-root';
 import { formatDay, formatWhen, listNames, SyncNotice, type SyncState } from './shared';
 
 export interface DashboardPageProps {
@@ -168,9 +168,11 @@ export function completenessNotes(input: {
   now: number;
   staleAfterMs: number;
   firstSyncShown?: boolean;
+  /** The user's zone, for sync times in the notes. */
+  timeZone?: string;
 }): DashboardNote[] {
   const cs = input.connections;
-  const when = (ms: number) => formatWhen(ms, input.now);
+  const when = (ms: number) => formatWhen(ms, input.now, input.timeZone);
   const notes: DashboardNote[] = [];
   const toConnections = { href: '/connections', label: 'See connections' };
 
@@ -319,7 +321,8 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; o
   const cur = data.currency;
   const k = data.kpis;
   const days = data.rangeDays;
-  const milestone = recentMilestone(data.mrrSeries, cur, dayKey(data.generatedAt));
+  // The series ends on the user's local today.
+  const milestone = recentMilestone(data.mrrSeries, cur, data.revenueSeries.at(-1)?.day ?? dayKey(data.generatedAt));
   const owl = props.owl ? mrrOwl({ milestone, deltaPct: k.mrr.deltaPct, notes: props.notes ?? [] }) : null;
   return (
     <CossCard render={<section aria-label="MRR" />} className={cn('min-w-0', props.className)}>
@@ -623,8 +626,20 @@ function NoNumbers(props: { notes: DashboardNote[] }) {
   );
 }
 
+/**
+ * "Days run midnight to midnight in Europe/Istanbul. RevenueCat reports its days in UTC; App Store
+ * Connect in Pacific Time." Providers that send daily totals keep their own days.
+ */
+export function dayZonesNote(days: DashboardData['days']): string {
+  const parts = days.otherZones.map((z, i) =>
+    i === 0 ? `${listNames(z.providers)} ${z.providers.length === 1 ? 'reports its' : 'report their'} days in ${z.label}` : `${listNames(z.providers)} in ${z.label}`,
+  );
+  return `Days run midnight to midnight in ${zoneLabel(days.timeZone)}. ${parts.join('; ')}.`;
+}
+
 export function DashboardPage(props: DashboardPageProps) {
   const requestNow = useNow();
+  const timeZone = useTimeZone();
   if (props.connections.length === 0) {
     return (
       <Layout {...props.chrome} title="Dashboard" nav="dashboard" noindex backdrop>
@@ -647,6 +662,7 @@ export function DashboardPage(props: DashboardPageProps) {
     now,
     staleAfterMs,
     firstSyncShown: Boolean(props.sync),
+    timeZone,
   });
 
   // Nothing has ever synced: a skeleton while the first sync runs, an explanation if it failed.
@@ -729,6 +745,8 @@ export function DashboardPage(props: DashboardPageProps) {
             })()}
           />
         ) : null}
+
+        {data.days.otherZones.length > 0 ? <p className="text-caption text-muted-foreground">{dayZonesNote(data.days)}</p> : null}
 
         {data.fx.asOf || data.fx.daily ? (
           <p className="text-caption text-muted-foreground">

@@ -9,12 +9,12 @@
  */
 
 import { normalizeCurrency, type MoneyMap } from '../lib/money';
-import { DAY, addDays, dayKey, dayStart } from '../lib/time';
+import { DAY, UTC, addDays, dayKey, dayStart, zonedDayKey, zonedDayStart } from '../lib/time';
 import { sanitizeErrorText } from '../providers/http';
 import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent } from '../providers/types';
 
 /**
- * The first sync covers this many UTC days INCLUDING today (SPEC F-07): exactly the dashboard's
+ * The first sync covers this many days INCLUDING today, in the owner's zone (SPEC F-07): exactly the dashboard's
  * longest range (`lastNDays(90)`), so that range's "previous period" is empty rather than one
  * stray day that would show a meaningless revenue delta.
  */
@@ -404,17 +404,19 @@ export interface RevenuePlan {
 }
 
 /**
- * Fresh pass: `since` = high-water − 2 days, or (first sync) midnight UTC at the start of the
+ * Fresh pass: `since` = high-water − 2 days, or (first sync) local midnight (the owner's zone) at the start of the
  * 90-day window, so its oldest day is complete. Resumed pass: the stored envelope's values.
  */
 export function planRevenue(
   state: { revenue_cursor: string | null; revenue_synced_until: number | null },
   now: number,
+  /** The owner's zone: a first backfill starts at its local midnight, so its oldest day is whole. */
+  tz: string = UTC,
 ): RevenuePlan {
   const freshSince =
     state.revenue_synced_until !== null && Number.isFinite(state.revenue_synced_until)
       ? Math.min(state.revenue_synced_until - REVENUE_OVERLAP_MS, now)
-      : dayStart(addDays(dayKey(now), -(BACKFILL_DAYS - 1)));
+      : zonedDayStart(addDays(zonedDayKey(now, tz), -(BACKFILL_DAYS - 1)), tz);
   const raw = state.revenue_cursor;
   if (!raw) return { since: freshSince, cursor: null, startedAt: now };
   const env = decodeBackfill(raw);

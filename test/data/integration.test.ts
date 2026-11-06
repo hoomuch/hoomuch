@@ -14,7 +14,7 @@ import { createTestD1, seedConnection, seedUser, testEnv, TEST_ENCRYPTION_KEY, t
 import { fakeFetch, route } from '../fixtures/harness';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 let t: TestD1;
 
 beforeEach(async () => {

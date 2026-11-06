@@ -18,6 +18,7 @@ import mrrByProduct from '../../migrations/0005_snapshot_mrr_by_product.sql?raw'
 import snapshotWarnings from '../../migrations/0006_snapshot_warnings.sql?raw';
 import syncQueue from '../../migrations/0007_sync_queue.sql?raw';
 import webhooks from '../../migrations/0008_webhooks.sql?raw';
+import userTimezone from '../../migrations/0009_user_timezone.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
 import { FakeQueue } from './queue';
@@ -108,6 +109,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(snapshotWarnings);
   sqlite.exec(syncQueue);
   sqlite.exec(webhooks);
+  sqlite.exec(userTimezone);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {
@@ -185,14 +187,17 @@ export function testEnv(db: D1Database, overrides: Partial<Bindings> = {}): Bind
 }
 
 /** Inserts a user and returns its id. */
-export function seedUser(t: TestD1, opts: { id?: string; email?: string; baseCurrency?: string } = {}): string {
+export function seedUser(t: TestD1, opts: { id?: string; email?: string; baseCurrency?: string; timeZone?: string } = {}): string {
   const id = opts.id ?? 'user-1';
   t.exec(
-    'INSERT INTO users (id, email, password_hash, base_currency, created_at, updated_at) VALUES (?, ?, ?, ?, 0, 0)',
+    `INSERT INTO users (id, email, password_hash, base_currency, timezone, timezone_source, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 0)`,
     id,
     opts.email ?? `${id}@example.com`,
     'pbkdf2$1$x$y',
     opts.baseCurrency ?? 'USD',
+    opts.timeZone ?? 'UTC',
+    opts.timeZone ? 'chosen' : 'default',
   );
   return id;
 }

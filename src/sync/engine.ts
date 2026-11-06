@@ -24,7 +24,7 @@
 import type { Bindings } from '../env';
 import { parseConfig, type ConnectionRow } from '../db/queries';
 import { decryptJson } from '../lib/crypto';
-import { MINUTE, dayKey } from '../lib/time';
+import { MINUTE, UTC, normalizeTimeZone, zonedDayKey } from '../lib/time';
 import { createProviderContext } from '../providers/context';
 import { BudgetExhaustedError } from '../providers/http';
 import { getAdapter, getProviderMeta } from '../providers/registry';
@@ -73,6 +73,7 @@ import {
   upsertSnapshot,
   upsertTransactions,
   type ConnectionFinish,
+  type LockedConnectionRow,
 } from './repo';
 
 export type SyncKind = 'cron' | 'manual' | 'initial' | 'webhook';
@@ -165,6 +166,11 @@ export function syncDeadlines(startedAt: number): { snapshot: number; revenue: n
   return { snapshot: startedAt + Math.floor(SYNC_DEADLINE_MS * SNAPSHOT_DEADLINE_SHARE), revenue: startedAt + SYNC_DEADLINE_MS };
 }
 
+/** The zone the connection's owner counts days in; UTC when unknown. */
+function ownerZone(row: LockedConnectionRow): string {
+  return normalizeTimeZone(row.owner_timezone) ?? UTC;
+}
+
 // ---------- syncConnection ----------
 
 /** Syncs one connection end to end. Never throws: failures are recorded on the connection. */
@@ -179,7 +185,7 @@ export async function syncConnection(env: Bindings, connectionId: string, kind: 
     durationMs: Date.now() - startedAt,
   });
 
-  let row: ConnectionRow | null;
+  let row: LockedConnectionRow | null;
   try {
     row = await acquireSyncLock(env.DB, connectionId, startedAt, startedAt - SYNC_LOCK_STALE_MS);
   } catch (err) {
@@ -254,7 +260,7 @@ interface RevenueOutcome {
 
 async function runLocked(
   env: Bindings,
-  row: ConnectionRow,
+  row: LockedConnectionRow,
   kind: SyncKind,
   now: number,
   runId: number | null,
@@ -305,7 +311,7 @@ async function runLocked(
     }
 
     if (!skipRevenue) {
-      const plan = planRevenue(row, now);
+      const plan = planRevenue(row, now, ownerZone(row));
       const revCtx = phaseContext(`sync:${row.id}:revenue`, REVENUE_PAGE_BUDGET, deadlines.revenue);
       try {
         revenue = await prepareRevenue(db, adapter, row, input, plan, now, revCtx, logCtx);
@@ -380,7 +386,7 @@ async function loadCredentials(env: Bindings, row: ConnectionRow, meta: Provider
 async function syncSnapshot(
   db: D1Database,
   adapter: ProviderAdapter,
-  row: ConnectionRow,
+  row: LockedConnectionRow,
   input: ConnectionInput,
   now: number,
   ctx: ProviderContext,
@@ -391,7 +397,8 @@ async function syncSnapshot(
   const raw = await adapter.fetchSnapshot(input, ctx);
   const { snapshot, dropped } = cleanSnapshot(raw);
   if (dropped > 0) emit('warn', 'sync_snapshot_dropped', { ...logCtx, dropped });
-  const today = dayKey(now);
+  // The owner's local day: the dashboard's "today" (SPEC §6).
+  const today = zonedDayKey(now, ownerZone(row));
   const stmts = [upsertSnapshot(db, row.id, today, snapshot, now)];
   if (adapter.fetchSnapshotHistory && row.last_synced_at === null) {
     // A connection's first successful sync can start its MRR trend with the provider's history.

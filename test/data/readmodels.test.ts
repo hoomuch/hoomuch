@@ -11,7 +11,7 @@ import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '..
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const TODAY = '2026-11-05';
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 
 let t: TestD1;
 
@@ -23,11 +23,19 @@ function snap(conn: string, day: string, mrr: Record<string, number>, subs: numb
   );
 }
 
+/**
+ * A day's revenue as the engine stores it: for a transactions provider, the charge and refund it's
+ * built from (at noon UTC) plus the derived daily_revenue row; for a provider total, the row only.
+ */
 function rev(conn: string, day: string, currency: string, gross: number, refunds = 0, source: 'transactions' | 'provider' = 'transactions') {
   t.exec(
     'INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES (?, ?, ?, ?, ?, 1, ?)',
     conn, day, currency, gross, refunds, source,
   );
+  if (source !== 'transactions') return;
+  const noon = Date.parse(`${day}T12:00:00.000Z`);
+  if (gross) tx(conn, `rev:${day}:${currency}:charge`, noon, gross, currency, null);
+  if (refunds) tx(conn, `rev:${day}:${currency}:refund`, noon + 1, -refunds, currency, null);
 }
 
 function fx(rates: Record<string, number>, day = '2026-11-04') {
@@ -200,7 +208,7 @@ describe('getDashboardData', () => {
   it('without any FX table only the display currency counts', async () => {
     seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
     snap('a', TODAY, { USD: 1000, EUR: 900 }, 2);
-    const d = await getDashboardData(testEnv(t.db), { ...user, baseCurrency: 'EUR' }, 7);
+    const d = await getDashboardData(testEnv(t.db), { ...user, baseCurrency: 'EUR', timeZone: 'UTC' }, 7);
     expect(d.currency).toBe('EUR');
     expect(d.kpis.mrr.value).toBe(900);
     expect(d.fx.missing).toEqual(['USD']);
@@ -518,7 +526,7 @@ describe('connection read models', () => {
         'c', i === 0 ? 'initial' : 'cron', 1000 + i, i === 11 ? null : 2000 + i, i === 11 ? null : i % 2, i, i % 2 ? null : 'boom',
       );
     }
-    const d = await getConnectionDetail(testEnv(t.db), { ...user, baseCurrency: 'USD' }, 'c');
+    const d = await getConnectionDetail(testEnv(t.db), { ...user, baseCurrency: 'USD', timeZone: 'UTC' }, 'c');
     expect(t.roundTrips()).toBe(1);
     expect(d).not.toBeNull();
     expect(d!.config).toEqual({ storeId: '42' });

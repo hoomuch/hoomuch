@@ -1,11 +1,12 @@
-/** Settings: display currency, password change, account deletion. Owner: Experience (routes). */
+/** Settings: display currency, time zone, password change, account deletion. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
-import { deleteUser, getCurrencySource, updateUserCurrency } from '../db/queries';
+import { deleteUser, getCurrencySource, getTimezoneSource, updateUserCurrency, updateUserTimezone } from '../db/queries';
 import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { isSupportedCurrency, normalizeCurrency } from '../lib/money';
+import { normalizeTimeZone, timeZoneOptions, zoneLabel } from '../lib/time';
 import { chrome, formLimit, readForm } from './util';
 import { renderPage } from '../views/render';
 
@@ -14,12 +15,24 @@ const PASSWORD_INPUT_MAX = 1024;
 export function registerSettingsRoutes(app: Hono<AppEnv>): void {
   app.get('/settings', requireUser, async (c) => {
     const user = currentUser(c);
-    const source = await getCurrencySource(c.env.DB, user.id);
+    const [source, zoneSource] = await Promise.all([getCurrencySource(c.env.DB, user.id), getTimezoneSource(c.env.DB, user.id)]);
     return renderPage(c, 'settings', {
         chrome: chrome(c),
         currency: user.baseCurrency,
         currencySource: source,
+        timeZone: user.timeZone,
+        timeZoneSource: zoneSource,
+        timeZones: timeZoneOptions(),
       });
+  });
+
+  app.post('/settings/timezone', requireUser, formLimit, async (c) => {
+    const user = currentUser(c);
+    const form = await readForm(c);
+    const zone = normalizeTimeZone(form.text('timezone', 64));
+    if (!zone) return redirectWithFlash(c, '/settings', 'error', 'Pick one of the listed time zones.');
+    await updateUserTimezone(c.env.DB, user.id, zone);
+    return redirectWithFlash(c, '/settings', 'success', `Saved. Days now run midnight to midnight in ${zoneLabel(zone)}.`);
   });
 
   app.post('/settings/currency', requireUser, formLimit, async (c) => {
@@ -44,6 +57,8 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
       return renderPage(c, 'settings', {
           chrome: chrome(c),
           currency: user.baseCurrency,
+          timeZone: user.timeZone,
+          timeZones: timeZoneOptions(),
           password: { error: result.error, fieldErrors: { [result.field]: result.error } },
         }, 422);
     }
@@ -68,6 +83,8 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
       return renderPage(c, 'settings', {
           chrome: chrome(c),
           currency: user.baseCurrency,
+          timeZone: user.timeZone,
+          timeZones: timeZoneOptions(),
           deleteAccount: { error: 'Your account was not deleted.', fieldErrors },
         }, 422);
     }

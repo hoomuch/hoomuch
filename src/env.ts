@@ -43,6 +43,8 @@ export interface SessionUser {
   id: string;
   email: string;
   baseCurrency: string;
+  /** IANA zone the user's days run in ('UTC' until known). See lib/time.ts and SPEC §6. */
+  timeZone: string;
 }
 
 export type FlashType = 'success' | 'error' | 'info';

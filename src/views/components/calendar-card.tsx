@@ -9,7 +9,7 @@
  *
  * Magnitude is one hue (brand), stronger for more, in four steps against the month's best day,
  * with a Less–More key. Every day also shows its amount (from sm up) and speaks it in full, so the
- * tint is never the only way to read it. Weeks start on Monday; days are UTC, like the rest.
+ * tint is never the only way to read it. Weeks start on Monday; days are the user's local days, like the rest.
  */
 
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -18,7 +18,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import type { CalendarDay, CalendarMonth, ConnectionSummary } from '../../data/types';
 import { formatMoney, formatNumber, toMajor } from '../../lib/money';
-import { addDays, dayStart } from '../../lib/time';
+import { addDays, dayStart, zoneLabel } from '../../lib/time';
+import { useTimeZone } from '../page-root';
 import { cn } from '../../lib/utils';
 import { ProviderDot } from './badges';
 import { Card, TextLink } from './ui';
@@ -369,6 +370,7 @@ export interface CalendarCardProps {
 }
 
 export function CalendarCard(props: CalendarCardProps) {
+  const timeZone = useTimeZone();
   const cal = props.calendar;
   const cur = cal.currency;
   const base = props.basePath ?? '/dashboard';
@@ -410,7 +412,7 @@ export function CalendarCard(props: CalendarCardProps) {
     <Card
       id="calendar"
       title="Calendar"
-      description="Net revenue per day (UTC). Pick a day to see what happened."
+      description={`Net revenue per day (${zoneLabel(timeZone)}). Pick a day to see what happened.`}
       className={props.className}
     >
       <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_17rem] md:gap-8">

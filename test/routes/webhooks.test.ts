@@ -153,11 +153,11 @@ describe('setWebhook and the connection page', () => {
     const first = await on();
     expect(await on()).toBe(first); // "Turn on" twice keeps the URL already pasted
     await setWebhook(env, 'u1', ID, 'rotate');
-    const detail = await getConnectionDetail(env, { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' }, ID);
+    const detail = await getConnectionDetail(env, { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' }, ID);
     expect(detail!.webhook!.path).toMatch(/^\/webhooks\/11111111-1111-4111-8111-111111111111\/[A-Za-z0-9_-]{43}$/);
     expect(detail!.webhook!.path).not.toBe(first);
     expect(await setWebhook(env, 'u1', ID, 'off')).toBe(true);
-    expect((await getConnectionDetail(env, { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' }, ID))!.webhook).toEqual({ path: null, lastCallAt: null });
+    expect((await getConnectionDetail(env, { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' }, ID))!.webhook).toEqual({ path: null, lastCallAt: null });
     expect(await setWebhook(env, 'u1', DEMO, 'on')).toBe(false);
     expect(await setWebhook(env, 'u2', ID, 'on')).toBe(false);
   });

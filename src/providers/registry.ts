@@ -261,6 +261,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
       'charts_metrics:charts:read — optional, enables daily revenue history',
     ],
     revenueHistory: 'daily',
+    dayZone: { tz: 'UTC', label: 'UTC' },
     productNames: false,
     mrrByProduct: false,
   },
@@ -343,6 +344,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     keyUrl: 'https://app.dodopayments.com/',
     permissions: ['Subscriptions: Read', 'Balances: Read'],
     revenueHistory: 'daily',
+    dayZone: { tz: 'UTC', label: 'UTC' },
     productNames: false,
     mrrByProduct: false,
     webhook: {
@@ -429,6 +431,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Adapty has no read-only keys: the Secret API key also opens Adapty’s server-side API (profiles, access levels, paywalls). hoomuch only uses it to read analytics, and stores it encrypted.',
     revenueHistory: 'daily',
+    dayZone: { tz: 'UTC', label: 'UTC' },
     productNames: false,
     mrrByProduct: false,
   },
@@ -472,6 +475,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'Superwall’s data:read scope can query all of your organization’s analytics data. hoomuch only runs aggregate revenue queries, but treat this key as sensitive and give it no other scopes.',
     revenueHistory: 'daily',
+    dayZone: { tz: 'UTC', label: 'UTC' },
     productNames: false,
     mrrByProduct: false,
   },
@@ -530,6 +534,7 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     warning:
       'App Store Connect team keys can’t be limited to reports: a key with the Sales role can also read your apps’ analytics, and an Admin key can manage your team. hoomuch only downloads Sales and Trends reports, and stores the .p8 key encrypted.',
     revenueHistory: 'daily',
+    dayZone: { tz: 'America/Los_Angeles', label: 'Pacific Time' },
     productNames: false,
     mrrByProduct: true,
   },

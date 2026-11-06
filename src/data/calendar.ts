@@ -9,10 +9,11 @@
 import type { ConnectionRow } from '../db/queries';
 import type { Bindings, SessionUser } from '../env';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
+import { addDays, dayKey, dayRange, dayStart, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import { BACKFILL_DAYS } from '../sync/aggregate';
 import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
+import { localDays, revenueRowsStatement } from './days';
 import type { CalendarDay, CalendarMonth } from './types';
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
@@ -33,12 +34,15 @@ export function monthBounds(month: string): { first: string; last: string } {
   return { first, last: addDays(`${addMonths(month, 1)}-01`, -1) };
 }
 
-/** A real 'YYYY-MM-DD' day from today back to OLDEST_MONTH, or null. Shared with /transactions?day=. */
-export function parseDayParam(v: string | undefined | null, now: number = Date.now()): string | null {
+/**
+ * A real 'YYYY-MM-DD' day from today (in `tz`) back to OLDEST_MONTH, or null. Shared with
+ * /transactions?day=.
+ */
+export function parseDayParam(v: string | undefined | null, now: number = Date.now(), tz: string = UTC): string | null {
   if (!v || !DAY_RE.test(v)) return null;
   const ms = dayStart(v);
   if (Number.isNaN(ms) || dayKey(ms) !== v) return null;
-  return v <= dayKey(now) && v.slice(0, 7) >= OLDEST_MONTH ? v : null;
+  return v <= zonedDayKey(now, tz) && v.slice(0, 7) >= OLDEST_MONTH ? v : null;
 }
 
 /**
@@ -50,9 +54,10 @@ export function parseCalendarQuery(
   monthParam: string | undefined,
   dayParam: string | undefined,
   now: number = Date.now(),
+  tz: string = UTC,
 ): { month: string; day: string | null } {
-  const current = dayKey(now).slice(0, 7);
-  const day = parseDayParam(dayParam, now);
+  const current = zonedDayKey(now, tz).slice(0, 7);
+  const day = parseDayParam(dayParam, now, tz);
   if (day) return { month: day.slice(0, 7), day };
   if (monthParam && MONTH_RE.test(monthParam) && monthParam <= current && monthParam >= OLDEST_MONTH) {
     return { month: monthParam, day: null };
@@ -91,9 +96,11 @@ interface Point {
 
 export async function getCalendarMonth(env: Bindings, user: SessionUser, month: string): Promise<CalendarMonth> {
   const now = Date.now();
-  const today = dayKey(now);
+  const tz = user.timeZone || UTC;
+  const today = zonedDayKey(now, tz);
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   const { first, last } = monthBounds(month);
+  const monthDays = localDays('t.occurred_at', first, last, tz);
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
@@ -113,22 +120,16 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
           WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
       )
       .bind(user.id, first, last),
+    revenueRowsStatement(db, user.id, tz, first, last),
+    // Charges and refunds per local day, the same days the revenue above is grouped on.
     db
       .prepare(
-        `SELECT d.connection_id, d.day, d.currency, d.gross, d.refunds FROM daily_revenue d
-           JOIN connections c ON c.id = d.connection_id
-          WHERE c.user_id = ? AND d.day >= ? AND d.day <= ?`,
-      )
-      .bind(user.id, first, last),
-    // Charges and refunds per UTC day, the same days daily_revenue adds them up on.
-    db
-      .prepare(
-        `SELECT strftime('%Y-%m-%d', t.occurred_at / 1000, 'unixepoch') AS day, t.type, COUNT(*) AS n
+        `SELECT ${monthDays.day.sql} AS day, t.type, COUNT(*) AS n
            FROM transactions t JOIN connections c ON c.id = t.connection_id
           WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
           GROUP BY day, t.type`,
       )
-      .bind(user.id, dayStart(first), dayStart(last) + DAY),
+      .bind(...monthDays.day.binds, user.id, monthDays.lo, monthDays.hi),
     db
       .prepare(
         `SELECT MIN(s.day) AS day FROM snapshots s JOIN connections c ON c.id = s.connection_id WHERE c.user_id = ?`,
@@ -165,7 +166,7 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
     }
     const contributes = hasRows.has(c.id) || (c.revenue_synced_until !== null && dailyOk && meta.revenueHistory !== 'none');
     if (!contributes) continue;
-    const from = addDays(dayKey(c.created_at), -(BACKFILL_DAYS - 1));
+    const from = addDays(zonedDayKey(c.created_at, tz), -(BACKFILL_DAYS - 1));
     if (revenueFrom === null || from < revenueFrom) revenueFrom = from;
   }
 

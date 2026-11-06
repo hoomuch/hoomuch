@@ -83,6 +83,11 @@ export interface ProviderMeta {
   /** How revenue history is sourced (SPEC §6). */
   revenueHistory: 'transactions' | 'daily' | 'none';
   /**
+   * For daily totals: the zone the provider's days are in. They can't be regrouped into the user's
+   * zone, so the dashboard says so when the two differ.
+   */
+  dayZone?: { tz: string; label: string };
+  /**
    * Its revenue events carry a product or plan name (`RevenueEvent.description`), so the dashboard
    * can split revenue by product. False for providers that report daily totals only.
    */
@@ -220,7 +225,7 @@ export interface RevenueEvent {
 }
 
 export interface DailyRevenuePoint {
-  /** 'YYYY-MM-DD' UTC. */
+  /** 'YYYY-MM-DD', the provider's own day (UTC unless `ProviderMeta.dayZone` says otherwise). */
   day: string;
   currency: string;
   /** Minor units, >= 0. */

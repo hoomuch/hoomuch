@@ -10,13 +10,14 @@
 import type { Bindings, SessionUser } from '../env';
 import type { ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
+import { addDays, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
 import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
 import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
 import { toSummary } from './connections';
+import { localDays, revenueRowsStatement } from './days';
 import type {
   BreakdownRow,
   DashboardData,
@@ -76,12 +77,15 @@ const daysBetween = (a: string, b: string) => Math.abs(Date.parse(a) - Date.pars
 export async function getDashboardData(env: Bindings, user: SessionUser, rangeDays: RangeDays): Promise<DashboardData> {
   const now = Date.now();
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
-  const today = dayKey(now);
+  // Days run midnight to midnight in the user's zone (SPEC §6).
+  const tz = user.timeZone || UTC;
+  const today = zonedDayKey(now, tz);
   const start = addDays(today, -(rangeDays - 1));
   const prevStart = addDays(start, -rangeDays);
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
+  const productDays = localDays('t.occurred_at', start, today, tz);
   const [connsR, windowR, latestR, beforeR, revR, fxR, productR, histR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     db
@@ -104,26 +108,20 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
             AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day < ?)`,
       )
       .bind(user.id, start),
-    db
-      .prepare(
-        `SELECT d.connection_id, d.day, d.currency, d.gross, d.refunds FROM daily_revenue d
-           JOIN connections c ON c.id = d.connection_id
-          WHERE c.user_id = ? AND d.day >= ? AND d.day <= ?`,
-      )
-      .bind(user.id, prevStart, today),
+    revenueRowsStatement(db, user.id, tz, prevStart, today),
     db.prepare(LATEST_FX_SQL),
-    // Same window as the revenue rows above (UTC days start..today), per product, currency and
+    // Same window as the revenue rows above (local days start..today), per product, currency and
     // day: each day converts at its own rate, like the revenue KPI.
     db
       .prepare(
         `SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
-                strftime('%Y-%m-%d', t.occurred_at / 1000, 'unixepoch') AS day,
+                ${productDays.day.sql} AS day,
                 SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges
            FROM transactions t JOIN connections c ON c.id = t.connection_id
           WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
           GROUP BY t.connection_id, product, t.currency, day`,
       )
-      .bind(user.id, dayStart(start), dayStart(today) + DAY),
+      .bind(...productDays.day.binds, user.id, productDays.lo, productDays.hi),
     fxHistoryStatement(db, user.id, currency, prevStart, today),
   ]);
 
@@ -238,7 +236,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       revenueTotal += revenue;
       if (row.revenue_synced_until !== null || hasDailyRows.has(row.id)) {
         revenueContributors++;
-        const historyStart = addDays(dayKey(row.created_at), -(BACKFILL_DAYS - 1));
+        const historyStart = addDays(zonedDayKey(row.created_at, tz), -(BACKFILL_DAYS - 1));
         if (historyStart > prevStart) previousCovered = false;
       }
     }
@@ -305,8 +303,22 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     revenueSeries,
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
+    days: { timeZone: tz, otherZones: otherDayZones(conns, tz) },
     warnings,
   };
+}
+
+/** Providers among `conns` whose days aren't the user's, grouped by the zone they're in. */
+function otherDayZones(conns: readonly ConnectionRow[], tz: string): Array<{ label: string; providers: string[] }> {
+  const byZone = new Map<string, { label: string; providers: string[] }>();
+  for (const c of conns) {
+    const meta = getProviderMeta(c.provider);
+    if (!meta.dayZone || meta.dayZone.tz === tz) continue;
+    const z = byZone.get(meta.dayZone.tz) ?? { label: meta.dayZone.label, providers: [] };
+    if (!z.providers.includes(meta.name)) z.providers.push(meta.name);
+    byZone.set(meta.dayZone.tz, z);
+  }
+  return [...byZone.values()];
 }
 
 /**

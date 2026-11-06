@@ -3,7 +3,8 @@
  * Owner: Lead — changes need Lead approval (SPEC.md §9.1).
  *
  * Conventions: money values are integer minor units in `currency` (the user's display
- * currency) unless a field says otherwise; timestamps are epoch ms; days are 'YYYY-MM-DD' UTC.
+ * currency) unless a field says otherwise; timestamps are epoch ms; days are 'YYYY-MM-DD' in the
+ * user's time zone (`SessionUser.timeZone`), except provider-reported daily totals (`ProviderMeta.dayZone`).
  */
 
 import type { ConnectionStatus } from '../db/queries';
@@ -174,6 +175,11 @@ export interface DashboardData {
     missing: string[];
   };
   /**
+   * The zone the user's days run in, and the providers whose daily totals keep their own days
+   * because they can't be regrouped (`ProviderMeta.dayZone`), by zone, only where it differs.
+   */
+  days: { timeZone: string; otherZones: Array<{ label: string; providers: string[] }> };
+  /**
    * What connections' latest syncs couldn't count, as "<connection name>: <sentence>"
    * (`MetricsSnapshot.warnings`), connections in breakdown order. Not repeated here:
    * sync problems (breakdown status / lastError / lastSyncedAt), currencies without a rate
@@ -213,11 +219,11 @@ export interface CalendarDay {
 }
 
 export interface CalendarMonth {
-  /** 'YYYY-MM' (UTC). */
+  /** 'YYYY-MM' (the user's zone). */
   month: string;
   /** Display currency. */
   currency: string;
-  /** UTC day the month was read on. */
+  /** The user's local day the month was read on. */
   today: string;
   /** Every day of the month, 1st → last. */
   days: CalendarDay[];
@@ -252,7 +258,7 @@ export interface TransactionPage {
   /** Display currency. */
   currency: string;
   provider: ProviderId | null;
-  /** One UTC day ('YYYY-MM-DD') the list is narrowed to, or null for every day. */
+  /** One local day ('YYYY-MM-DD') the list is narrowed to, or null for every day. */
   day?: string | null;
   items: TransactionRow[];
   page: number;

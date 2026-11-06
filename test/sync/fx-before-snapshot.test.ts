@@ -62,7 +62,7 @@ describe('FX is loaded before the first snapshot is visible', () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((n) => n > 0)).toBe(true);
 
-    const d = await getDashboardData(c.env, { id: c.userId, email: 'u@example.com', baseCurrency: 'USD' }, 30);
+    const d = await getDashboardData(c.env, { id: c.userId, email: 'u@example.com', baseCurrency: 'USD', timeZone: 'UTC' }, 30);
     expect(d.fx.missing).toEqual([]);
     expect(d.warnings).toEqual([]);
   });

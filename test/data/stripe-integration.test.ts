@@ -33,7 +33,7 @@ const clone = (v: unknown): Json => JSON.parse(JSON.stringify(v)) as Json;
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const NOW_S = Math.floor(NOW / 1000);
 const RK_TEST = 'rk_test_51FakeKeyForTestsOnly000000000000000000000000000000000000000000000000000000000000';
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 /** frankfurter.dev, USD base: 1 USD = 0.9 EUR. */
 const FX = { amount: 1, base: 'USD', date: '2026-11-04', rates: { EUR: 0.9 } };
 

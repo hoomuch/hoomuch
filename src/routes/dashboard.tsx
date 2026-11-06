@@ -31,7 +31,7 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
     const range = parseRange(rememberedQuery(c, 'range', 'hm_range', (v) => v === '7' || v === '30' || v === '90'));
     const poll = parsePoll(c.req.query('poll'));
     // The calendar's month and picked day (?month=, ?day=). Not remembered: a bare link is this month.
-    const cal = parseCalendarQuery(c.req.query('month'), c.req.query('day'));
+    const cal = parseCalendarQuery(c.req.query('month'), c.req.query('day'), Date.now(), user.timeZone);
 
     const [data, connections, calendar] = await Promise.all([
       getDashboardData(c.env, user, range),

@@ -196,6 +196,10 @@ Changes that affect data you've already synced:
   resync. Stripe sends ISK, UGX and MGA in its own units, which are now converted on sync. Rows synced
   before that read 100× off (ISK and UGX too large, MGA too small) until the connection is removed and
   added again.
+- **v1.1: time zones and exchange rates.** Days now follow your time zone, set once from where you
+  sign in (change it in **Settings**). Revenue from transaction-based providers is regrouped
+  automatically. Past revenue now converts at its own day's rate; the first cron after the upgrade
+  fetches about 200 days of rates.
 - **Stripe MRR by product.** The dashboard's **By product** card can now split Stripe MRR by product.
   It needs **Products: Read** on the Stripe key: edit the restricted key in Stripe (⋯ → **Edit key**)
   and the split appears after the next sync. Without it, Stripe syncs as before.
@@ -233,7 +237,11 @@ wasn't. The ones you'd notice:
   sale's day, because Gumroad doesn't date them.
 - **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
   (SPEC §6.9).
-- **Everywhere:** day boundaries are UTC. Revenue converts at the exchange rate of its own day and
+- **Days** run midnight to midnight in your time zone. It's picked up from where you first sign in,
+  and you can change it in **Settings**. RevenueCat, Dodo Payments, Adapty and Superwall report daily
+  totals in UTC, and App Store Connect in Pacific Time; those totals keep the provider's days (the
+  dashboard says so). MRR snapshots taken before v1.1 stay on UTC days.
+- **Exchange rates:** revenue converts at the exchange rate of its own day and
   MRR at the latest, both from [Frankfurter](https://frankfurter.dev): the ECB's reference rate where
   it publishes one, other central banks' otherwise. Rates before an instance's first sync reach back
   about 200 days; a currency that first shows up later converts its earlier days at its oldest rate.

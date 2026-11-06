@@ -4,6 +4,7 @@
  */
 
 import { ArrowLeft } from 'lucide-react';
+import { zoneLabel } from '../../lib/time';
 import type { ProviderMeta } from '../../providers/types';
 import { Alert, TextLink } from '../components/ui';
 
@@ -91,36 +92,38 @@ export function BackLink(props: { href: string; label: string }) {
   );
 }
 
-const DATE_TIME = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'UTC',
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
+const dateTimeFormats = new Map<string, Intl.DateTimeFormat>();
+const whenFormats = new Map<string, Intl.DateTimeFormat>();
+const yearFormats = new Map<string, Intl.DateTimeFormat>();
+
+function cached(cache: Map<string, Intl.DateTimeFormat>, tz: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  let f = cache.get(tz);
+  if (!f) cache.set(tz, (f = new Intl.DateTimeFormat('en-US', { timeZone: tz, ...opts })));
+  return f;
+}
 
 const DAY_FMT = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
 
-/** "Nov 5, 2026, 10:23" (UTC). */
-export function formatDateTime(ms: number): string {
-  return DATE_TIME.format(new Date(ms));
+/** "Nov 5, 2026, 10:23" in `tz` (the user's zone; UTC by default). */
+export function formatDateTime(ms: number, tz: string = 'UTC'): string {
+  return cached(dateTimeFormats, tz, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(
+    new Date(ms),
+  );
 }
 
-const WHEN_FMT = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'UTC',
-  month: 'short',
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
+/** "UTC", or the zone's name for a label: "Europe/Istanbul", "America/New York". */
+export function zoneName(tz: string): string {
+  return zoneLabel(tz);
+}
 
-/** "Nov 4, 09:14 UTC"; the year is added when it isn't the current one ("Dec 30, 2025, 09:14 UTC"). */
-export function formatWhen(ms: number, now: number = Date.now()): string {
-  if (new Date(ms).getUTCFullYear() !== new Date(now).getUTCFullYear()) return `${formatDateTime(ms)} UTC`;
-  return `${WHEN_FMT.format(new Date(ms))} UTC`;
+/**
+ * "Nov 4, 09:14 UTC" (or "… Europe/Istanbul"); the year is added when it isn't the current one
+ * ("Dec 30, 2025, 09:14 UTC").
+ */
+export function formatWhen(ms: number, now: number = Date.now(), tz: string = 'UTC'): string {
+  const year = cached(yearFormats, tz, { year: 'numeric' });
+  if (year.format(new Date(ms)) !== year.format(new Date(now))) return `${formatDateTime(ms, tz)} ${zoneName(tz)}`;
+  return `${cached(whenFormats, tz, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))} ${zoneName(tz)}`;
 }
 
 /** 'YYYY-MM-DD' → "Nov 5, 2026". */

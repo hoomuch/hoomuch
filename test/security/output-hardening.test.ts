@@ -60,7 +60,7 @@ describe('connection detail payload', () => {
       provider: 'stripe',
       config: { apiKey: 'rk_live_51ShouldNeverRender', reportingCurrency: 'EUR' },
     });
-    const detail = await getConnectionDetail(testEnv(t.db), { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' }, 'c1');
+    const detail = await getConnectionDetail(testEnv(t.db), { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' }, 'c1');
     expect(detail?.config).toEqual({ reportingCurrency: 'EUR' });
     expect(JSON.stringify(detail)).not.toContain('rk_live_51ShouldNeverRender');
   });

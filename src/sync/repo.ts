@@ -48,15 +48,20 @@ export function jsonChunks(rows: readonly unknown[], maxRows = BULK_MAX_ROWS, ma
  * Takes the per-connection sync lock and returns the locked row, or null when the connection is
  * missing or another sync holds a fresh lock. A lock older than `staleBefore` is taken over.
  */
-export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<ConnectionRow | null> {
+export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<LockedConnectionRow | null> {
   return db
     .prepare(
       `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2, queued_at = NULL
         WHERE id = ?1 AND NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?3)
-       RETURNING *`,
+       RETURNING *, (SELECT timezone FROM users WHERE users.id = connections.user_id) AS owner_timezone`,
     )
     .bind(id, now, staleBefore)
-    .first<ConnectionRow>();
+    .first<LockedConnectionRow>();
+}
+
+/** The locked row, plus its owner's zone: snapshot days and the first backfill follow it. */
+export interface LockedConnectionRow extends ConnectionRow {
+  owner_timezone: string | null;
 }
 
 export async function connectionExists(db: D1Database, id: string): Promise<boolean> {

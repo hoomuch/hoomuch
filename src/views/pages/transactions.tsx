@@ -19,7 +19,8 @@ import { ProviderDot } from '../components/badges';
 import { EmptyState } from '../components/empty-state';
 import { LinkButton, PageHeader, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { formatDateTime, formatDay } from './shared';
+import { formatDateTime, formatDay, zoneName } from './shared';
+import { useTimeZone } from '../page-root';
 
 export interface TransactionsPageProps {
   chrome: PageChrome;
@@ -34,7 +35,7 @@ export interface TransactionsPageProps {
 
 /**
  * "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter.
- * `day` (one UTC day, from the dashboard calendar) is kept across filters and pages.
+ * `day` (one of the user's local days, from the dashboard calendar) is kept across filters and pages.
  */
 function href(base: string, provider: ProviderId | null, page: number, day: string | null = null): string {
   const q = new URLSearchParams();
@@ -61,6 +62,7 @@ function AmountCell(props: { row: TransactionRow; currency: string }) {
 }
 
 export function TransactionsPage(props: TransactionsPageProps) {
+  const tz = useTimeZone();
   const base = props.basePath ?? '/transactions';
   const p = props.page;
   const cur = p.currency;
@@ -99,7 +101,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
         description={
           dayLabel ? (
             <>
-              Charges and refunds on {dayLabel} (UTC), newest first. Amounts in {cur}.{' '}
+              Charges and refunds on {dayLabel} ({zoneName(tz)}), newest first. Amounts in {cur}.{' '}
               <TextLink href={href(base, p.provider, 1)}>Show all days</TextLink>
             </>
           ) : (
@@ -147,7 +149,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
             </caption>
             <TableHeader>
               <TableRow>
-                <TableHead scope="col">Date (UTC)</TableHead>
+                <TableHead scope="col">Date ({zoneName(tz)})</TableHead>
                 <TableHead scope="col">Connection</TableHead>
                 <TableHead scope="col">Description</TableHead>
                 <TableHead scope="col">Type</TableHead>
@@ -166,7 +168,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
                   <TableRow key={`${t.connectionId}:${t.externalId}`}>
                     {/* The date is the row header: it's what each row is read against. */}
                     <TableRowHeader className="tabular-nums text-muted-foreground">
-                      <time dateTime={new Date(t.occurredAt).toISOString()}>{formatDateTime(t.occurredAt)}</time>
+                      <time dateTime={new Date(t.occurredAt).toISOString()}>{formatDateTime(t.occurredAt, tz)}</time>
                     </TableRowHeader>
                     <TableCell>
                       <a href={`/connections/${t.connectionId}`} className="inline-flex items-center gap-2 hover:underline">

@@ -7,6 +7,8 @@
  *  - `json` is the serialized payload, rendered back verbatim by <PagePayloadScript>.
  *  - `now` is the server's clock for that request. Relative times ("4 min ago") read it through
  *    useNow(), so the browser doesn't hydrate a different minute than the server rendered.
+ *  - `timeZone` is the signed-in user's zone (UTC when signed out). Dates and times read it
+ *    through useTimeZone(), never the browser's own zone, so both sides print the same time.
  */
 
 import { createContext, useContext, type ReactNode } from 'react';
@@ -14,6 +16,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 export interface PageContextValue {
   json: string;
   now: number;
+  timeZone?: string;
 }
 
 const PageContext = createContext<PageContextValue | null>(null);
@@ -21,6 +24,11 @@ const PageContext = createContext<PageContextValue | null>(null);
 /** The request's clock (server time). Outside a page (unit tests) it's the current time. */
 export function useNow(): number {
   return useContext(PageContext)?.now ?? Date.now();
+}
+
+/** The zone times are shown in (the user's, SPEC §6). Outside a page (unit tests) it's UTC. */
+export function useTimeZone(): string {
+  return useContext(PageContext)?.timeZone ?? 'UTC';
 }
 
 /** The page payload as a JSON data block. Not executed, so CSP script-src doesn't apply to it. */
@@ -32,7 +40,7 @@ export function PagePayloadScript() {
 
 export function PageRoot(props: PageContextValue & { children?: ReactNode }) {
   return (
-    <PageContext.Provider value={{ json: props.json, now: props.now }}>
+    <PageContext.Provider value={{ json: props.json, now: props.now, timeZone: props.timeZone ?? 'UTC' }}>
       {props.children}
     </PageContext.Provider>
   );

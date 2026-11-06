@@ -15,7 +15,7 @@ import { FIXTURE_CONNECTIONS } from '../../src/views/fixtures';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 const at = (iso: string) => Date.parse(iso);
 
 let t: TestD1;
@@ -35,11 +35,11 @@ function rev(conn: string, day: string, currency: string, gross: number, refunds
   );
 }
 
-function tx(conn: string, id: string, ms: number, amount: number) {
+function tx(conn: string, id: string, ms: number, amount: number, currency = 'USD') {
   t.exec(
     `INSERT INTO transactions (connection_id, external_id, occurred_at, type, amount, currency, fee, description)
-     VALUES (?, ?, ?, ?, ?, 'USD', NULL, 'Pro')`,
-    conn, id, ms, amount < 0 ? 'refund' : 'charge', amount,
+     VALUES (?, ?, ?, ?, ?, ?, NULL, 'Pro')`,
+    conn, id, ms, amount < 0 ? 'refund' : 'charge', amount, currency,
   );
 }
 
@@ -87,12 +87,9 @@ describe('getCalendarMonth', () => {
     synced('s');
     synced('l');
 
-    rev('s', '2026-10-31', 'USD', 999);
-    rev('s', '2026-11-03', 'USD', 1500, 300);
-    rev('s', '2026-11-03', 'EUR', 1000); // 0.5 EUR per USD → 2000
-    rev('s', '2026-11-04', 'USD', 500);
-    rev('x', '2026-11-03', 'USD', 100_000);
-
+    // Stripe's revenue is grouped from its transactions, per local (here UTC) day.
+    tx('s', 'o1', at('2026-10-31T12:00:00Z'), 999);
+    tx('s', 'e1', at('2026-11-03T12:00:00Z'), 1000, 'EUR'); // 0.5 EUR per USD → 2000
     tx('s', 'c1', at('2026-11-03T08:00:00Z'), 1000);
     tx('s', 'c2', at('2026-11-03T23:59:59Z'), 500);
     tx('s', 'r1', at('2026-11-03T10:00:00Z'), -300);
@@ -113,7 +110,7 @@ describe('getCalendarMonth', () => {
     expect(m.days[0]!.day).toBe('2026-11-01');
 
     const d3 = m.days[2]!;
-    expect(d3).toMatchObject({ day: '2026-11-03', net: 3200, gross: 3500, refunds: 300, byConnection: { s: 3200 }, charges: 2, refundCount: 1 });
+    expect(d3).toMatchObject({ day: '2026-11-03', net: 3200, gross: 3500, refunds: 300, byConnection: { s: 3200 }, charges: 3, refundCount: 1 });
     expect(m.days[3]).toMatchObject({ net: 500, charges: 1, refundCount: 0 });
     // A covered day without revenue is a real zero; days after today have nothing yet.
     expect(m.days[0]).toMatchObject({ net: 0, charges: 0 });
