@@ -11,6 +11,7 @@
 
 import { Check, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardPanel, CardTitle } from '@/components/ui/card';
+import { article } from '../../providers/registry';
 import type { ProviderMeta } from '../../providers/types';
 import { ProviderLogo } from './provider-logos';
 import { Alert, Button, Field, FormError, LinkButton, TextLink } from './ui';
@@ -53,7 +54,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
       <CardHeader className="px-5 pt-5 sm:px-6 sm:pt-6">
         <CardTitle render={<Heading id={props.headingId} />} className="flex items-center gap-2 text-base">
           <ProviderLogo provider={meta.id} size="md" />
-          Create a {meta.name} key
+          Create {article(meta.name)} {meta.name} key
         </CardTitle>
       </CardHeader>
       <CardPanel className="px-5 pb-5 sm:px-6 sm:pb-6">
@@ -76,7 +77,7 @@ export function KeyGuide(props: { meta: ProviderMeta; headingId: string; preview
         {meta.keyUrl && !props.preview ? (
           <p className="mt-4 pl-8">
             <TextLink href={meta.keyUrl} external className="inline-flex items-center gap-1">
-              Open {meta.name}
+              {meta.keyUrlLabel ?? `Open ${meta.name}`}
               <ExternalLink className="size-3.5 shrink-0" />
               <span className="sr-only"> (opens in a new tab)</span>
             </TextLink>

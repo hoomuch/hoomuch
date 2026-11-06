@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "id": "6b9d7c2e-0000-4000-8000-000000000002",
+      "status": "403",
+      "code": "FORBIDDEN_ERROR",
+      "title": "This request is forbidden for security reasons",
+      "detail": "The API key in use does not allow this request"
+    }
+  ]
+}

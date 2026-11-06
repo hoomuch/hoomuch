@@ -13,6 +13,8 @@ import { dodoAdapter } from './dodo';
 import { gumroadAdapter } from './gumroad';
 import { adaptyAdapter } from './adapty';
 import { superwallAdapter } from './superwall';
+import { appStoreAdapter } from './appstore';
+import { googlePlayAdapter } from './googleplay';
 import { demoAdapter } from './demo';
 
 export const PROVIDERS: readonly ProviderMeta[] = [
@@ -378,6 +380,108 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     mrrByProduct: false,
   },
   {
+    id: 'appstore',
+    name: 'App Store Connect',
+    color: '#007AFF',
+    dotClass: 'bg-[#007AFF]',
+    tagline: 'Sales and subscriptions on the App Store',
+    fields: [
+      {
+        name: 'issuerId',
+        label: 'Issuer ID',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: '57246542-96fe-1a63-e053-0824d011072a',
+        help: 'Shown at the top of Users and Access → Integrations → App Store Connect API.',
+      },
+      {
+        name: 'keyId',
+        label: 'Key ID',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: '2X9R4HXF34',
+        help: 'The 10-character ID in the key’s row. It’s also in the file name, AuthKey_2X9R4HXF34.p8.',
+      },
+      {
+        name: 'privateKey',
+        label: 'Private key (.p8)',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: '-----BEGIN PRIVATE KEY-----…',
+        help: 'Open the .p8 file in a text editor and paste all of it, including the BEGIN and END lines.',
+      },
+      {
+        name: 'vendorNumber',
+        label: 'Vendor number',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: '81234567',
+        help: 'In Payments and Financial Reports, under your name in the top left.',
+      },
+    ],
+    keySteps: [
+      'In App Store Connect, open Users and Access → Integrations → App Store Connect API, on the Team Keys tab. Only an Admin can create team keys.',
+      'Click “Generate API Key” (or +), name it “hoomuch”, and choose the Sales access role.',
+      'Download the key (Apple offers the .p8 file only once), then copy the Issuer ID and the key’s Key ID from the same page.',
+      'Copy your vendor number from Payments and Financial Reports, and paste all four here.',
+    ],
+    keyUrl: 'https://appstoreconnect.apple.com/access/integrations/api',
+    permissions: ['Access: Sales (Finance or Admin also work, but can do more)'],
+    warning:
+      'App Store Connect team keys can’t be limited to reports: a key with the Sales role can also read your apps’ analytics, and an Admin key can manage your team. hoomuch only downloads Sales and Trends reports, and stores the .p8 key encrypted.',
+    revenueHistory: 'daily',
+    productNames: false,
+    mrrByProduct: true,
+  },
+  {
+    id: 'googleplay',
+    name: 'Google Play',
+    color: '#1E8E3E',
+    dotClass: 'bg-[#1E8E3E]',
+    tagline: 'Sales and subscriptions on Google Play',
+    fields: [
+      {
+        name: 'serviceAccountJson',
+        label: 'Service account key (JSON)',
+        type: 'password',
+        required: true,
+        secret: true,
+        placeholder: '{"type": "service_account", …}',
+        help: 'Open the downloaded .json key file in a text editor and paste all of it.',
+      },
+      {
+        name: 'reportsBucket',
+        label: 'Cloud Storage URI',
+        type: 'text',
+        required: true,
+        secret: false,
+        placeholder: 'gs://pubsite_prod_rev_01234567890987654321',
+        help: 'In Play Console → Download reports → Financial, click “Copy Cloud Storage URI”.',
+      },
+    ],
+    keySteps: [
+      'In Google Cloud, pick or create a project, turn on the Google Play Android Developer API, and create a service account named “hoomuch” with no roles.',
+      'On the service account’s Keys tab, choose Add key → Create new key → JSON, and keep the downloaded file.',
+      'In Play Console → Users and permissions, invite the service account’s email with the account permissions listed below, for all apps.',
+      'Copy the Cloud Storage URI from Download reports → Financial, and paste it here with the JSON key. New access can take up to a day to reach the reports.',
+    ],
+    keyUrl: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
+    keyUrlLabel: 'Open Google Cloud service accounts',
+    permissions: [
+      'View app information and download bulk reports (read-only)',
+      'View financial data, orders and cancellation survey responses',
+    ],
+    warning:
+      'A service account key doesn’t expire unless your organisation sets a limit, so treat the JSON file like a password. hoomuch only reads your report bucket and your apps’ subscription prices, and stores the key encrypted. Give the service account no permissions beyond the two read-only ones below.',
+    revenueHistory: 'transactions',
+    productNames: true,
+    mrrByProduct: true,
+  },
+  {
     id: 'demo',
     name: 'Demo data',
     color: '#8A8F98',
@@ -404,6 +508,8 @@ const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
   gumroad: gumroadAdapter,
   adapty: adaptyAdapter,
   superwall: superwallAdapter,
+  appstore: appStoreAdapter,
+  googleplay: googlePlayAdapter,
   demo: demoAdapter,
 };
 
@@ -428,7 +534,16 @@ const KEY_OWNERS: ReadonlyArray<readonly [RegExp, ProviderId]> = [
   [/^polar_(oat|pat)_/, 'polar'],
   [/^dodo_(live|test)_/, 'dodo'],
   [/^secret_(live|test)_/, 'adapty'],
+  // A Google service-account file, and a bare PEM key (App Store Connect's .p8 is one). Both are private
+  // keys: pasted into another provider's box, they must not be sent there.
+  [/"type"\s*:\s*"service_account"/, 'googleplay'],
+  [/^-----BEGIN (EC )?PRIVATE KEY-----/, 'appstore'],
 ];
+
+/** "a" or "an" before a provider name ("a Stripe key", "an App Store Connect key"). */
+export function article(name: string): 'a' | 'an' {
+  return /^[AEIOU]/i.test(name) ? 'an' : 'a';
+}
 
 /** The provider a secret visibly belongs to, when that isn't `self`. */
 export function foreignKeyOwner(self: ProviderId, secret: string): ProviderId | null {
@@ -458,7 +573,8 @@ export function splitInput(
     }
     const owner = f.secret ? foreignKeyOwner(meta.id, v) : null;
     if (owner) {
-      errors[f.name] = `That looks like a ${getProviderMeta(owner).name} key. Paste your ${meta.name} key here.`;
+      const ownerName = getProviderMeta(owner).name;
+      errors[f.name] = `That looks like ${article(ownerName)} ${ownerName} key. Paste your ${meta.name} key here.`;
       continue;
     }
     (f.secret ? credentials : config)[f.name] = v;

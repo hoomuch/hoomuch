@@ -114,6 +114,19 @@ describe('a key pasted into the wrong provider form', () => {
     expect(getProviderMeta(owner).name).toBe(name);
   });
 
+  it('refuses a private key file pasted into another provider’s form', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg\n-----END PRIVATE KEY-----';
+    const sa = JSON.stringify({ type: 'service_account', client_email: 'x@y.iam.gserviceaccount.com', private_key: pem });
+    expect(foreignKeyOwner('chargebee', pem)).toBe('appstore');
+    expect(foreignKeyOwner('stripe', sa)).toBe('googleplay');
+    expect(foreignKeyOwner('appstore', sa)).toBe('googleplay');
+    expect(foreignKeyOwner('appstore', pem)).toBeNull();
+    expect(foreignKeyOwner('googleplay', sa)).toBeNull();
+    const { credentials, errors } = splitInput(getProviderMeta('revenuecat'), { apiKey: pem, projectId: 'proj1a2b3c4d' });
+    expect(credentials['apiKey']).toBeUndefined();
+    expect(errors['apiKey']).toBe('That looks like an App Store Connect key. Paste your RevenueCat key here.');
+  });
+
   it("accepts each provider's own key, and RevenueCat's sk_ keys", () => {
     expect(foreignKeyOwner('stripe', STRIPE_LIVE)).toBeNull();
     expect(foreignKeyOwner('revenuecat', 'sk_AbCdEfGhIjKlMnOpQrStUvWxYz012345')).toBeNull();

@@ -1,7 +1,7 @@
 /**
  * Shared HTTP client for provider adapters. Owner: Data Plane.
  *
- * Every upstream call goes through `fetchJson`, which
+ * Every upstream call goes through `fetchJson` (or `fetchBytes`, for report files), which
  *   - enforces a per-request timeout,
  *   - retries 429 / 5xx / network failures (max 3 attempts, honours Retry-After),
  *   - spends one unit of `ctx.pageBudget` per logical request (retries are free),
@@ -25,6 +25,8 @@ const SANITIZE_INPUT_MAX = 16 * 1024;
  * provider fault, and reading it whole could exhaust the Worker's 128 MB memory.
  */
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+/** How much of an error body is read for its message. */
+const ERROR_BODY_MAX_BYTES = 64 * 1024;
 
 export interface RequestSpec {
   /** Display name used in messages and logs, e.g. "Stripe". */
@@ -57,7 +59,26 @@ export interface RequestSpec {
    * endpoints documented as read-only queries: hoomuch never creates or changes anything at a provider.
    */
   readQuery?: unknown;
+  /**
+   * OAuth 2.0 token request only (Google's service-account JWT grant): sent as `POST` with
+   * `Content-Type: application/x-www-form-urlencoded`. It trades a signed assertion for a short-lived
+   * access token at the identity provider; it never creates or changes anything in the account.
+   */
+  tokenForm?: Record<string, string>;
 }
+
+/** A report file download (`fetchBytes`). */
+export interface DownloadSpec extends RequestSpec {
+  /** Largest body accepted, in bytes. Defaults to `MAX_REPORT_BYTES`. */
+  maxBytes?: number;
+}
+
+/**
+ * Largest report file read from a provider (App Store Connect's gzip reports, Google Play's zipped
+ * monthly sales report). Bigger than `MAX_RESPONSE_BYTES` because these are compressed exports of a
+ * whole day or month, not pages; they are decompressed as a stream, never held expanded in memory.
+ */
+export const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 
 /** Thrown when `ctx.pageBudget` is exhausted. Adapters should check `hasBudget` first and return a cursor. */
 export class BudgetExhaustedError extends ProviderError {
@@ -120,7 +141,11 @@ export function buildUrl(base: string, path: string, query: Record<string, Query
 // ---------- sanitising ----------
 
 const MASKS: Array<[RegExp, string]> = [
+  // PEM private keys (App Store Connect .p8 files, Google service-account keys), whole or cut short.
+  [/-----BEGIN [A-Z ]{0,20}PRIVATE KEY-----[\s\S]{0,8192}?(-----END [A-Z ]{0,20}PRIVATE KEY-----|$)/g, '[private key]'],
   [/(Bearer|Basic)\s+[^\s"',]+/gi, '$1 ***'],
+  // Google OAuth access tokens.
+  [/\bya29\.[A-Za-z0-9._-]+/g, 'ya29.***'],
   // Paddle (pdl_live_apikey_…, pdl_sdbx_apikey_…), Polar (polar_oat_…, polar_pat_…), Dodo, Creem.
   [/\b(pdl_(?:live|sdbx)_apikey|polar_[a-z]{2,4}|dodo_(?:live|test)|creem(?:_test)?)_[A-Za-z0-9_]+/g, '$1_***'],
   // Adapty secret / public SDK keys: secret_live_XXXXXXXX.<32 chars>.
@@ -200,18 +225,17 @@ class RetryableNetworkError extends Error {}
 
 export class ResponseTooLargeError extends Error {}
 
-/** Reads the body as text, giving up (and cancelling the stream) once it passes `max` bytes. */
-export async function readTextBounded(res: Response, max: number): Promise<string> {
+/** Reads the body as bytes, giving up (and cancelling the stream) once it passes `max` bytes. */
+export async function readBytesBounded(res: Response, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get('content-length') ?? NaN);
   if (Number.isFinite(declared) && declared > max) {
     await res.body?.cancel().catch(() => {});
     throw new ResponseTooLargeError();
   }
-  if (!res.body) return '';
+  if (!res.body) return new Uint8Array(0);
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
   let total = 0;
-  let out = '';
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -220,26 +244,43 @@ export async function readTextBounded(res: Response, max: number): Promise<strin
       await reader.cancel().catch(() => {});
       throw new ResponseTooLargeError();
     }
-    out += decoder.decode(value, { stream: true });
+    chunks.push(value);
   }
-  return out + decoder.decode();
+  if (chunks.length === 1) return chunks[0]!;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }
 
-async function fetchWithTimeout(
-  ctx: ProviderContext,
-  url: string,
-  headers: Record<string, string>,
-  timeoutMs: number,
-  body: string | undefined,
-) {
+/** Reads the body as text, giving up (and cancelling the stream) once it passes `max` bytes. */
+export async function readTextBounded(res: Response, max: number): Promise<string> {
+  return new TextDecoder().decode(await readBytesBounded(res, max));
+}
+
+interface WireRequest {
+  method: 'GET' | 'POST';
+  headers: Record<string, string>;
+  body: string | undefined;
+}
+
+async function fetchWithTimeout(ctx: ProviderContext, url: string, req: WireRequest, timeoutMs: number, maxBytes: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     // Never follow redirects: the request carries the provider key, and these APIs don't redirect.
-    const method = body === undefined ? 'GET' : 'POST';
-    const res = await ctx.fetch(url, { method, headers, body, signal: controller.signal, redirect: 'manual' });
-    const text = await readTextBounded(res, MAX_RESPONSE_BYTES);
-    return { res, text };
+    const res = await ctx.fetch(url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      signal: controller.signal,
+      redirect: 'manual',
+    });
+    const bytes = await readBytesBounded(res, maxBytes);
+    return { res, bytes };
   } catch (err) {
     if (err instanceof ResponseTooLargeError) throw err; // not a network blip: retrying won't help
     throw new RetryableNetworkError(controller.signal.aborted ? 'timeout' : err instanceof Error ? err.name : 'network');
@@ -258,10 +299,36 @@ function parseJsonOrNull(text: string): unknown {
 }
 
 /**
- * GETs `spec.url` (or POSTs `spec.readQuery` to a read-only query endpoint) and returns the parsed JSON
- * body. Throws `ProviderError` on every failure. Read-only by design: hoomuch never writes to a provider.
+ * GETs `spec.url` (or POSTs `spec.readQuery` to a read-only query endpoint, or `spec.tokenForm` to an
+ * OAuth token endpoint) and returns the parsed JSON body. Throws `ProviderError` on every failure.
+ * Read-only by design: hoomuch never writes to a provider.
  */
 export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: RequestSpec): Promise<T> {
+  return (await request(ctx, spec, 'json', MAX_RESPONSE_BYTES)) as T;
+}
+
+/**
+ * GETs a report file (gzip, zip, CSV) and returns its bytes, with the same budget, retry, redirect
+ * and error rules as `fetchJson`. Error bodies are still read as JSON for their message.
+ */
+export async function fetchBytes(ctx: ProviderContext, spec: DownloadSpec): Promise<Uint8Array> {
+  return (await request(ctx, spec, 'bytes', spec.maxBytes ?? MAX_REPORT_BYTES)) as Uint8Array;
+}
+
+function wireRequest(spec: RequestSpec, mode: 'json' | 'bytes'): WireRequest {
+  const headers: Record<string, string> = { Accept: mode === 'json' ? 'application/json' : '*/*', ...spec.headers };
+  if (spec.tokenForm !== undefined) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    return { method: 'POST', headers, body: new URLSearchParams(spec.tokenForm).toString() };
+  }
+  if (spec.readQuery !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    return { method: 'POST', headers, body: JSON.stringify(spec.readQuery) };
+  }
+  return { method: 'GET', headers, body: undefined };
+}
+
+async function request(ctx: ProviderContext, spec: RequestSpec, mode: 'json' | 'bytes', maxBytes: number): Promise<unknown> {
   if (!hasBudget(ctx)) throw new BudgetExhaustedError(spec.provider);
   ctx.pageBudget -= 1;
 
@@ -269,19 +336,22 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
   const path = pathOf(spec.url);
   const maxAttempts = Math.max(1, spec.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
   const timeoutMs = spec.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const headers: Record<string, string> = { Accept: 'application/json', ...spec.headers };
-  const queryBody = spec.readQuery === undefined ? undefined : JSON.stringify(spec.readQuery);
-  if (queryBody !== undefined) headers['Content-Type'] = 'application/json';
+  const wire = wireRequest(spec, mode);
 
   for (let attempt = 1; ; attempt++) {
     let res: Response;
-    let text: string;
+    let bytes: Uint8Array;
     try {
-      ({ res, text } = await fetchWithTimeout(ctx, spec.url, headers, timeoutMs, queryBody));
+      ({ res, bytes } = await fetchWithTimeout(ctx, spec.url, wire, timeoutMs, maxBytes));
     } catch (err) {
       if (err instanceof ResponseTooLargeError) {
         ctx.log('http_error', { provider, path, attempt, reason: 'too_large' });
-        throw new ProviderError('upstream', `${provider} sent a response too large to read.`);
+        throw new ProviderError(
+          'upstream',
+          mode === 'bytes'
+            ? `${provider} sent a report file too large to read (over ${Math.round(maxBytes / (1024 * 1024))} MB).`
+            : `${provider} sent a response too large to read.`,
+        );
       }
       const reason = err instanceof RetryableNetworkError ? err.message : 'network';
       if (attempt < maxAttempts) {
@@ -296,6 +366,10 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
       );
     }
 
+    if (res.ok && mode === 'bytes') return bytes;
+
+    // Error bodies are small JSON; a report-sized one is a fault, and only its start can matter.
+    const text = new TextDecoder().decode(res.ok ? bytes : bytes.subarray(0, ERROR_BODY_MAX_BYTES));
     const body = parseJsonOrNull(text);
 
     if (res.ok) {
@@ -305,7 +379,7 @@ export async function fetchJson<T = unknown>(ctx: ProviderContext, spec: Request
           status: res.status,
         });
       }
-      return body as T;
+      return body;
     }
 
     const status = res.status;

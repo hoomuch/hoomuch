@@ -1,0 +1,8 @@
+Order Number,Order Charged Date,Order Charged Timestamp,Financial Status,Device Model,Product Title,Package ID,Product Type,SKU ID,Currency of Sale,Item Price,Taxes Collected,Charged Amount,City of Buyer,State of Buyer,Postcode of Buyer,Country of Buyer,Base Plan or Purchase Option ID,Offer ID,Group ID,First USD 1M Eligible,Promotion ID,Coupon Value,Discount Rate,Featured Products ID,Price Experiment ID
+GPA.3301-1111-2222-33333,2026-11-01,1793527200,Charged,shiba,"Acme Pro, monthly (Acme)",com.acme.app,Subscription,acme_pro,USD,9.99,0.80,10.79,Boston,MA,02140,US,monthly,,,,,,,,
+GPA.3302-1111-2222-44444..3,2026-11-02,1793608200,Charged,shiba,"Acme Pro ""Yearly"" (Acme)",com.acme.app,Subscription,acme_pro,EUR,"1,007.56",191.44,"1,199.00",Berlin,BE,10115,DE,yearly,,,,,,,,
+GPA.3301-1111-2222-33333,2026-11-03,1793697300,Refund,shiba,"Acme Pro, monthly (Acme)",com.acme.app,Subscription,acme_pro,USD,-9.99,-0.80,-10.79,Boston,MA,02140,US,monthly,,,,,,,,
+GPA.3303-1111-2222-55555,2026-11-03,1793707200,Charged,shiba,100 coins (Acme),com.acme.app,One-time product,coins_100,JPY,"1,200",0,"1,200",Osaka,,530-0001,JP,,,,,,,,,
+GPA.3303-1111-2222-55555,2026-11-04,1793775600,Partial refund,shiba,100 coins (Acme),com.acme.app,One-time product,coins_100,JPY,-200,0,-200,Osaka,,530-0001,JP,,,,,,,,,
+GPA.3303-1111-2222-55555,2026-11-04,1793775600,Partial refund,shiba,100 coins (Acme),com.acme.app,One-time product,coins_100,JPY,-300,0,-300,Osaka,,530-0001,JP,,,,,,,,,
+GPA.3304-1111-2222-66666,2026-11-04,1793790000,Cancelled,shiba,"Acme Pro, monthly (Acme)",com.acme.app,Subscription,acme_pro,USD,9.99,0.80,10.79,Toronto,ON,M5B 1L6,CA,monthly,,,,,,,,

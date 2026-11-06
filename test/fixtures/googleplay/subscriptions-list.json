@@ -1,0 +1,135 @@
+{
+  "subscriptions": [
+    {
+      "packageName": "com.acme.app",
+      "productId": "acme_pro",
+      "listings": [
+        {
+          "languageCode": "de-DE",
+          "title": "Acme Pro DE"
+        },
+        {
+          "languageCode": "en-US",
+          "title": "Acme Pro",
+          "benefits": [
+            "No ads"
+          ]
+        }
+      ],
+      "basePlans": [
+        {
+          "basePlanId": "monthly",
+          "state": "ACTIVE",
+          "autoRenewingBasePlanType": {
+            "billingPeriodDuration": "P1M",
+            "gracePeriodDuration": "P7D",
+            "resubscribeState": "RESUBSCRIBE_STATE_ACTIVE",
+            "legacyCompatible": true
+          },
+          "regionalConfigs": [
+            {
+              "regionCode": "US",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "USD",
+                "units": "9",
+                "nanos": 990000000
+              }
+            },
+            {
+              "regionCode": "JP",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "JPY",
+                "units": "1200"
+              }
+            },
+            {
+              "regionCode": "DE",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "EUR",
+                "units": "9",
+                "nanos": 990000000
+              }
+            }
+          ],
+          "otherRegionsConfig": {
+            "usdPrice": {
+              "currencyCode": "USD",
+              "units": "9",
+              "nanos": 990000000
+            },
+            "eurPrice": {
+              "currencyCode": "EUR",
+              "units": "9",
+              "nanos": 990000000
+            },
+            "newSubscriberAvailability": true
+          }
+        },
+        {
+          "basePlanId": "yearly",
+          "state": "ACTIVE",
+          "autoRenewingBasePlanType": {
+            "billingPeriodDuration": "P1Y"
+          },
+          "regionalConfigs": [
+            {
+              "regionCode": "DE",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "EUR",
+                "units": "59",
+                "nanos": 990000000
+              }
+            },
+            {
+              "regionCode": "US",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "USD",
+                "units": "59",
+                "nanos": 990000000
+              }
+            }
+          ]
+        }
+      ],
+      "taxAndComplianceSettings": {
+        "eeaWithdrawalRightType": "WITHDRAWAL_RIGHT_SERVICE"
+      }
+    },
+    {
+      "packageName": "com.acme.app",
+      "productId": "acme_pass",
+      "listings": [
+        {
+          "languageCode": "en-US",
+          "title": "Acme Pass"
+        }
+      ],
+      "basePlans": [
+        {
+          "basePlanId": "prepaid-30d",
+          "state": "ACTIVE",
+          "prepaidBasePlanType": {
+            "billingPeriodDuration": "P30D",
+            "timeExtension": "TIME_EXTENSION_ACTIVE"
+          },
+          "regionalConfigs": [
+            {
+              "regionCode": "US",
+              "newSubscriberAvailability": true,
+              "price": {
+                "currencyCode": "USD",
+                "units": "4",
+                "nanos": 990000000
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
