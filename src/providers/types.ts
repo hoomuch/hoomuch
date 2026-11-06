@@ -83,6 +83,11 @@ export interface ProviderMeta {
   /** How revenue history is sourced (SPEC §6). */
   revenueHistory: 'transactions' | 'daily' | 'none';
   /**
+   * For daily totals: the zone the provider's days are in. They can't be regrouped into the user's
+   * zone, so the dashboard says so when the two differ.
+   */
+  dayZone?: { tz: string; label: string };
+  /**
    * Its revenue events carry a product or plan name (`RevenueEvent.description`), so the dashboard
    * can split revenue by product. False for providers that report daily totals only.
    */
@@ -92,6 +97,21 @@ export interface ProviderMeta {
    * reading product names. The dashboard's "By product" card shows that split.
    */
   mrrByProduct: boolean;
+  /**
+   * How to point the provider's webhooks at hoomuch (SPEC F-17), for providers whose API shows a
+   * change within minutes. A call only queues a sync; the payload is never read. Absent: the
+   * connection page doesn't offer real-time updates.
+   */
+  webhook?: ProviderWebhookSetup;
+}
+
+export interface ProviderWebhookSetup {
+  /** Short, ordered steps in the provider's dashboard, ending with pasting the URL. */
+  steps: string[];
+  /** Event names to select, exactly as the provider lists them; empty when there's no choice. */
+  events: string[];
+  /** One caveat worth knowing before saving, e.g. "Gumroad has one Ping URL per account." */
+  note?: string;
 }
 
 // ---------- runtime ----------
@@ -105,6 +125,15 @@ export interface ProviderContext {
   log: (event: string, data?: Record<string, unknown>) => void;
   /** Max upstream HTTP requests for this call. Stop and return a cursor when exhausted. */
   pageBudget: number;
+  /**
+   * Epoch ms (compared with `now()`) after which no new upstream request starts: `hasBudget` reads
+   * false and `fetchJson` throws `BudgetExhaustedError` with `reason: 'deadline'`, so a resumable
+   * adapter returns its cursor exactly as it does when the budget runs out. Requests already in
+   * flight finish under their own timeouts. Absent: no deadline.
+   */
+  deadline?: number;
+  /** Hard stop: aborts requests in flight, and every later one, once it fires. Absent: never. */
+  signal?: AbortSignal;
 }
 
 /** Secret fields (decrypted). */
@@ -149,6 +178,25 @@ export interface MetricsSnapshot {
    * provider doesn't split it or couldn't this time (e.g. the key can't read product names).
    */
   mrrByProduct?: ProductMrr[] | null;
+  /**
+   * What this sync couldn't count, in a short sentence each, shown on the dashboard and the
+   * connection page until a later sync no longer reports it. E.g. "MRR is before discounts: the
+   * key can't read Coupons." Only for data the user can act on or should know is incomplete; never
+   * customer PII, keys or raw provider bodies. The engine keeps at most 5, each ≤ 200 characters.
+   */
+  warnings?: string[];
+}
+
+export interface SnapshotHistoryRequest {
+  /** How many days before today to return at most. Today itself comes from `fetchSnapshot`. */
+  days: number;
+}
+
+/** One past day's snapshot, as `fetchSnapshot` would have reported it at the end of that day. */
+export interface SnapshotHistoryPoint {
+  /** 'YYYY-MM-DD', before today. */
+  day: string;
+  snapshot: MetricsSnapshot;
 }
 
 /** One product's part of a snapshot's MRR. */
@@ -177,7 +225,7 @@ export interface RevenueEvent {
 }
 
 export interface DailyRevenuePoint {
-  /** 'YYYY-MM-DD' UTC. */
+  /** 'YYYY-MM-DD', the provider's own day (UTC unless `ProviderMeta.dayZone` says otherwise). */
   day: string;
   currency: string;
   /** Minor units, >= 0. */
@@ -211,6 +259,17 @@ export interface ProviderAdapter {
   verify(input: ConnectionInput, ctx: ProviderContext): Promise<VerifyResult>;
   /** Current MRR / subscriptions / trials. */
   fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot>;
+  /**
+   * Optional: snapshots for days before today, so a new connection's MRR trend starts with
+   * history instead of a single point. Called once, on the connection's first successful sync,
+   * right after `fetchSnapshot` and with the same context (and what's left of its budget).
+   * Oldest first. Days that already have a snapshot keep it; a failure here doesn't fail the sync.
+   */
+  fetchSnapshotHistory?(
+    input: ConnectionInput,
+    req: SnapshotHistoryRequest,
+    ctx: ProviderContext,
+  ): Promise<SnapshotHistoryPoint[]>;
   /** Revenue since `req.since`, resumable via cursor. */
   fetchRevenue(input: ConnectionInput, req: RevenueRequest, ctx: ProviderContext): Promise<RevenuePage>;
 }

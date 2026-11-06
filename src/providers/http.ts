@@ -5,6 +5,7 @@
  *   - enforces a per-request timeout,
  *   - retries 429 / 5xx / network failures (max 3 attempts, honours Retry-After),
  *   - spends one unit of `ctx.pageBudget` per logical request (retries are free),
+ *   - starts nothing after `ctx.deadline`, and stops at once when `ctx.signal` aborts,
  *   - maps failures to `ProviderError` with user-safe messages,
  *   - never logs headers, keys, query strings or response bodies verbatim.
  */
@@ -80,11 +81,23 @@ export interface DownloadSpec extends RequestSpec {
  */
 export const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 
-/** Thrown when `ctx.pageBudget` is exhausted. Adapters should check `hasBudget` first and return a cursor. */
+/**
+ * Thrown when a request can't start: `ctx.pageBudget` is spent (`reason: 'budget'`), or the context's
+ * deadline has passed or its signal aborted (`'deadline'`). Adapters should check `hasBudget` first
+ * and return a cursor.
+ */
 export class BudgetExhaustedError extends ProviderError {
-  constructor(provider: string) {
-    super('upstream', `Stopped after the per-sync request limit for ${provider}.`);
+  readonly reason: 'budget' | 'deadline';
+
+  constructor(provider: string, reason: 'budget' | 'deadline' = 'budget') {
+    super(
+      'upstream',
+      reason === 'deadline'
+        ? `Stopped at the per-sync time limit for ${provider}.`
+        : `Stopped after the per-sync request limit for ${provider}.`,
+    );
     this.name = 'BudgetExhaustedError';
+    this.reason = reason;
   }
 }
 
@@ -99,9 +112,27 @@ export class RateLimitedError extends ProviderError {
   }
 }
 
-/** True when at least `n` more upstream requests are allowed for this call. */
+/** Contexts whose deadline was already logged (once per context). */
+const deadlineLogged = new WeakSet<ProviderContext>();
+
+/** True once the context's deadline has passed or its signal fired. Logs the first time. */
+export function outOfTime(ctx: ProviderContext): boolean {
+  const late = ctx.signal?.aborted === true || (ctx.deadline !== undefined && ctx.now() >= ctx.deadline);
+  if (late && !deadlineLogged.has(ctx)) {
+    deadlineLogged.add(ctx);
+    ctx.log('sync_deadline_reached', { unusedBudget: Math.max(0, ctx.pageBudget) });
+  }
+  return late;
+}
+
+/** True when at least `n` more upstream requests are allowed for this call (budget and time). */
 export function hasBudget(ctx: ProviderContext, n = 1): boolean {
-  return ctx.pageBudget >= n;
+  return ctx.pageBudget >= n && !outOfTime(ctx);
+}
+
+/** A retry wait that would end past the deadline isn't worth starting: the retry could never run. */
+function canWait(ctx: ProviderContext, ms: number): boolean {
+  return ctx.deadline === undefined || ctx.now() + ms < ctx.deadline;
 }
 
 // ---------- sleeping (overridable in tests) ----------
@@ -267,22 +298,27 @@ interface WireRequest {
   body: string | undefined;
 }
 
+/** The context's signal fired mid-request: the sync is out of time, so nothing is retried. */
+class AbortedBySyncError extends Error {}
+
 async function fetchWithTimeout(ctx: ProviderContext, url: string, req: WireRequest, timeoutMs: number, maxBytes: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const signal = ctx.signal ? AbortSignal.any([controller.signal, ctx.signal]) : controller.signal;
   try {
     // Never follow redirects: the request carries the provider key, and these APIs don't redirect.
     const res = await ctx.fetch(url, {
       method: req.method,
       headers: req.headers,
       body: req.body,
-      signal: controller.signal,
+      signal,
       redirect: 'manual',
     });
     const bytes = await readBytesBounded(res, maxBytes);
     return { res, bytes };
   } catch (err) {
     if (err instanceof ResponseTooLargeError) throw err; // not a network blip: retrying won't help
+    if (ctx.signal?.aborted) throw new AbortedBySyncError();
     throw new RetryableNetworkError(controller.signal.aborted ? 'timeout' : err instanceof Error ? err.name : 'network');
   } finally {
     clearTimeout(timer);
@@ -329,7 +365,8 @@ function wireRequest(spec: RequestSpec, mode: 'json' | 'bytes'): WireRequest {
 }
 
 async function request(ctx: ProviderContext, spec: RequestSpec, mode: 'json' | 'bytes', maxBytes: number): Promise<unknown> {
-  if (!hasBudget(ctx)) throw new BudgetExhaustedError(spec.provider);
+  if (outOfTime(ctx)) throw new BudgetExhaustedError(spec.provider, 'deadline');
+  if (ctx.pageBudget < 1) throw new BudgetExhaustedError(spec.provider);
   ctx.pageBudget -= 1;
 
   const provider = spec.provider;
@@ -344,6 +381,11 @@ async function request(ctx: ProviderContext, spec: RequestSpec, mode: 'json' | '
     try {
       ({ res, bytes } = await fetchWithTimeout(ctx, spec.url, wire, timeoutMs, maxBytes));
     } catch (err) {
+      if (err instanceof AbortedBySyncError) {
+        outOfTime(ctx); // logs the deadline once
+        ctx.log('http_error', { provider, path, attempt, reason: 'aborted' });
+        throw new BudgetExhaustedError(provider, 'deadline');
+      }
       if (err instanceof ResponseTooLargeError) {
         ctx.log('http_error', { provider, path, attempt, reason: 'too_large' });
         throw new ProviderError(
@@ -354,9 +396,10 @@ async function request(ctx: ProviderContext, spec: RequestSpec, mode: 'json' | '
         );
       }
       const reason = err instanceof RetryableNetworkError ? err.message : 'network';
-      if (attempt < maxAttempts) {
+      const wait = backoffMs(attempt);
+      if (attempt < maxAttempts && canWait(ctx, wait) && !ctx.signal?.aborted) {
         ctx.log('http_retry', { provider, path, attempt, reason });
-        await sleepImpl(backoffMs(attempt));
+        await sleepImpl(wait);
         continue;
       }
       ctx.log('http_error', { provider, path, attempt, reason });
@@ -391,8 +434,8 @@ async function request(ctx: ProviderContext, spec: RequestSpec, mode: 'json' | '
     const retryable = status === 429 || status >= 500;
     if (retryable && attempt < maxAttempts) {
       const hinted = retryAfterMs(res, body, ctx.now());
-      if (hinted === null || hinted <= MAX_RETRY_WAIT_MS) {
-        const wait = hinted ?? backoffMs(attempt);
+      const wait = hinted ?? backoffMs(attempt);
+      if (wait <= MAX_RETRY_WAIT_MS && canWait(ctx, wait) && !ctx.signal?.aborted) {
         ctx.log('http_retry', { provider, path, status, attempt, waitMs: wait });
         await sleepImpl(wait);
         continue;

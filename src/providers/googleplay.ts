@@ -56,6 +56,8 @@ import {
   type VerifyResult,
 } from './types';
 
+/** Where a report row with a date but no timestamp is placed within its UTC day. */
+const DATE_ONLY_NOON_MS = 12 * 60 * 60 * 1000;
 const PROVIDER = 'Google Play';
 export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const GCS_API_BASE = 'https://storage.googleapis.com/storage/v1';
@@ -403,7 +405,9 @@ export async function parseSalesZip(ctx: ProviderContext, zip: Uint8Array, since
       }
       const secs = parseDecimal(field(row, c['ts']!));
       const dateText = field(row, c['date']!);
-      const at = secs !== null && secs > 0 ? Math.round(secs * 1000) : /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dayStart(dateText) : NaN;
+      // A row with only a date sits at noon UTC, so it stays on that date in every zone within ±12 h
+      // of UTC rather than sliding to the day before west of Greenwich.
+      const at = secs !== null && secs > 0 ? Math.round(secs * 1000) : /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dayStart(dateText) + DATE_ONLY_NOON_MS : NaN;
       const currencyRaw = field(row, c['currency']!);
       const value = parseDecimal(field(row, c['charged']!));
       if (!order || !Number.isFinite(at) || !/^[A-Za-z]{3}$/.test(currencyRaw) || value === null) {

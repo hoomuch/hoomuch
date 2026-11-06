@@ -91,6 +91,15 @@ describe('CSRF', () => {
     expect(t.sqlite.prepare("SELECT base_currency FROM users WHERE id = 'u1'").get()).toEqual({ base_currency: 'USD' });
   });
 
+  it('skips CSRF for provider webhooks only: the owner’s webhook form keeps it', async () => {
+    const crossSite = { ...session, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' };
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect((await postForm(`/connections/${id}/webhook`, { action: 'off' }, crossSite)).status).toBe(403);
+    expect((await postForm('/webhooksx/settings', { currency: 'EUR' }, crossSite)).status).toBe(403);
+    // A provider's form-encoded call reaches the webhook route (404: no such connection), not a 403.
+    expect((await postForm(`/webhooks/${id}/${'A'.repeat(43)}`, { email: 'x' }, crossSite)).status).toBe(404);
+  });
+
   it('rejects a POST with neither Origin nor Sec-Fetch-Site', async () => {
     const res = await postForm('/settings/currency', { currency: 'EUR' }, session);
     expect(res.status).toBe(403);

@@ -18,18 +18,25 @@ export interface PagePayload {
   props: unknown;
   /** Server clock for this request (epoch ms); see useNow(). */
   now: number;
+  /** The signed-in user's zone; see useTimeZone(). */
+  timeZone: string;
 }
 
 /** The full document for a page, doctype included. Exported for tests. */
-export function renderDocument<N extends PageName>(name: N, props: PagePropsOf<N>, now: number = Date.now()): string {
-  const json = serializePayload({ name, props, now } satisfies PagePayload);
+export function renderDocument<N extends PageName>(
+  name: N,
+  props: PagePropsOf<N>,
+  now: number = Date.now(),
+  timeZone: string = 'UTC',
+): string {
+  const json = serializePayload({ name, props, now, timeZone } satisfies PagePayload);
   // The registry's union of components can't be called with a generic N's props; the signature
   // above already ties `name` to its props.
   const Page = PAGES[name] as unknown as ComponentType<Record<string, unknown>>;
   return (
     '<!doctype html>' +
     renderToString(
-      <PageRoot json={json} now={now}>
+      <PageRoot json={json} now={now} timeZone={timeZone}>
         <Page {...(props as Record<string, unknown>)} />
       </PageRoot>,
     )
@@ -42,5 +49,6 @@ export function renderPage<N extends PageName>(
   props: PagePropsOf<N>,
   status?: ContentfulStatusCode,
 ): Response {
-  return c.html(renderDocument(name, props), status);
+  const user = (c.get('user') as { timeZone?: string } | null | undefined) ?? null;
+  return c.html(renderDocument(name, props, Date.now(), user?.timeZone ?? 'UTC'), status);
 }

@@ -8,6 +8,8 @@ import { getDashboardData } from '../../src/data/dashboard';
 import { runScheduledSync, syncConnection } from '../../src/sync/engine';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
+import { fxV2 } from '../fixtures/fx';
+import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, setup, teardown, type Ctx } from './helpers';
 
 afterEach(() => teardown());
@@ -15,9 +17,9 @@ afterEach(() => teardown());
 /** FX answers only after a real delay, so a snapshot written "alongside" it would win the race. */
 function slowFx(): void {
   const { fetch } = fakeFetch([
-    route('/v1/latest', async () => {
+    route('/v2/rates', async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
-      return { json: FX_BODY };
+      return { json: fxV2(FX_BODY) };
     }),
   ]);
   vi.stubGlobal('fetch', fetch);
@@ -60,7 +62,7 @@ describe('FX is loaded before the first snapshot is visible', () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((n) => n > 0)).toBe(true);
 
-    const d = await getDashboardData(c.env, { id: c.userId, email: 'u@example.com', baseCurrency: 'USD' }, 30);
+    const d = await getDashboardData(c.env, { id: c.userId, email: 'u@example.com', baseCurrency: 'USD', timeZone: 'UTC' }, 30);
     expect(d.fx.missing).toEqual([]);
     expect(d.warnings).toEqual([]);
   });
@@ -72,13 +74,14 @@ describe('FX is loaded before the first snapshot is visible', () => {
     const seen = watchSnapshotWrites(c);
 
     await runScheduledSync(c.env, NOW);
+    await drainQueue(c.env); // the cron settles FX before it queues anything
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((n) => n > 0)).toBe(true);
   });
 
   it('an FX outage still lets the sync finish (rates are best effort)', async () => {
     const c = setup();
-    vi.stubGlobal('fetch', fakeFetch([route('/v1/latest', { status: 503, json: {} })]).fetch);
+    vi.stubGlobal('fetch', fakeFetch([route('/v2/rates', { status: 503, json: {} })]).fetch);
     seedDemo(c);
     const r = await syncConnection(c.env, 'demo', 'initial');
     expect(r.ok).toBe(true);

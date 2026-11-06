@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { demoAdapter } from '../../src/providers/demo';
 import { BudgetExhaustedError, fetchJson, hasBudget } from '../../src/providers/http';
 import { revenueCatAdapter } from '../../src/providers/revenuecat';
@@ -14,14 +15,12 @@ import { DAY, HOUR, MINUTE, addDays, dayKey, dayStart } from '../../src/lib/time
 import { dailyFromEvents, decodeBackfill } from '../../src/sync/aggregate';
 import {
   BACKFILL_CONTINUES_MESSAGE,
-  CRON_SYNC_DEADLINE_MS,
-  INTERACTIVE_SYNC_DEADLINE_MS,
   REVENUE_PAGE_BUDGET,
   SNAPSHOT_PAGE_BUDGET,
   SYNC_BUSY_MESSAGE,
+  SYNC_DEADLINE_MS,
   syncConnection,
   syncDeadlines,
-  withDeadline,
 } from '../../src/sync/engine';
 import { INTERRUPTED_RUN_MESSAGE, SYNC_RUNS_KEPT } from '../../src/sync/repo';
 import { DECRYPT_ERROR } from '../../src/sync/errors';
@@ -122,7 +121,7 @@ describe('syncConnection — demo end to end', () => {
     expect(dailyRows(c.t, 'demo-1', 'provider')).toEqual([]);
 
     // FX filled by ensureFx on a fresh install.
-    expect(c.fxCalls).toHaveLength(1);
+    expect(c.fxCalls).toHaveLength(2); // the blended rates, then the ECB's
     expect(c.t.rows('SELECT day, base FROM fx_rates')).toEqual([{ day: '2026-11-04', base: 'USD' }]);
 
     expect(runs(c.t)).toEqual([
@@ -160,7 +159,7 @@ describe('syncConnection — demo end to end', () => {
     expect(c.t.rows('SELECT * FROM transactions ORDER BY external_id')).toEqual(before.tx);
     expect(c.t.rows('SELECT * FROM daily_revenue ORDER BY day, currency')).toEqual(before.daily);
     expect(snapshotTable()).toEqual(before.snaps);
-    expect(c.fxCalls).toHaveLength(1); // ensureFx only fetches into an empty table
+    expect(c.fxCalls).toHaveLength(2); // ensureFx only fetches into an empty table
     expect(runs(c.t).map((x) => [x.kind, x.ok])).toEqual([
       ['initial', 1],
       ['manual', 1],
@@ -200,6 +199,100 @@ describe('syncConnection — demo end to end', () => {
     expect(JSON.parse(today.mrr)).toEqual(expected.mrr);
     expect(today).toMatchObject({ active_subscriptions: expected.activeSubscriptions, captured_at: NOW });
     expect(c.t.rows('SELECT 1 FROM snapshots WHERE connection_id = ?', 'demo-1')).toHaveLength(91);
+  });
+});
+
+describe('syncConnection — snapshot history hook', () => {
+  type Hook = NonNullable<typeof stripeAdapter.fetchSnapshotHistory>;
+  const withHistory = (impl: Hook) => {
+    const hook = vi.fn(impl);
+    (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory = hook;
+    return hook;
+  };
+  afterEach(() => {
+    delete (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory;
+  });
+  const snapshotDays = (c: Ctx) =>
+    c.t.rows<{ day: string }>('SELECT day FROM snapshots WHERE connection_id = ? ORDER BY day', 'st-1').map((r) => r.day);
+
+  it('a first sync stores the adapter’s past days next to today’s, with the snapshot context', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const today = dayKey(NOW);
+    const hook = withHistory(async () => [
+      { day: addDays(today, -2), snapshot: { ...SNAP, mrr: { USD: 100 } } },
+      { day: addDays(today, -1), snapshot: SNAP },
+      { day: today, snapshot: SNAP }, // not before today: skipped
+      { day: 'nope', snapshot: SNAP },
+    ]);
+
+    const r = await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(r.ok).toBe(true);
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(hook.mock.calls[0]![1]).toEqual({ days: 90 });
+    expect(snapshotDays(c)).toEqual([addDays(today, -2), addDays(today, -1), today]);
+    expect(c.out.join('\n')).toContain('"event":"sync_history_skipped"');
+  });
+
+  it('is not asked again once the connection has synced', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1', { status: 'ok', lastSyncedAt: NOW - 3 * HOUR });
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const hook = withHistory(async () => []);
+
+    await syncConnection(c.env, 'st-1', 'cron');
+
+    expect(hook).not.toHaveBeenCalled();
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+  });
+
+  it('a failing history call is logged and the sync still succeeds with today’s snapshot', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    withHistory(async () => {
+      throw new ProviderError('upstream', 'charts are down');
+    });
+
+    const r = await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(r).toMatchObject({ ok: true, snapshot: true, error: null });
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+    expect(c.out.join('\n')).toContain('"event":"sync_history_failed"');
+  });
+
+  it('adapters without the hook only write today', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+
+    await syncConnection(c.env, 'st-1', 'initial');
+
+    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+  });
+});
+
+describe('syncConnection — snapshot warnings', () => {
+  it('stores the snapshot’s warnings with it, and a later clean snapshot clears them', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const snap = vi.spyOn(stripeAdapter, 'fetchSnapshot').mockResolvedValue({ ...SNAP, warnings: ['MRR is before discounts.', 'MRR is before discounts.'] });
+    const stored = () => c.t.rows<{ warnings: string | null }>('SELECT warnings FROM snapshots WHERE connection_id = ?', 'st-1')[0]!.warnings;
+
+    await syncConnection(c.env, 'st-1', 'initial');
+    expect(stored()).toBe('["MRR is before discounts."]');
+
+    snap.mockResolvedValue(SNAP);
+    vi.setSystemTime(NOW + HOUR);
+    await syncConnection(c.env, 'st-1', 'cron');
+    expect(stored()).toBeNull();
   });
 });
 
@@ -698,7 +791,7 @@ describe('syncConnection — lock', () => {
 /** A provider endpoint where every request takes `stepMs` of wall-clock time. */
 function slowApi(stepMs: number): void {
   const { fetch } = fakeFetch([
-    route('/v1/latest', { json: FX_BODY }),
+    route('/v2/rates', { json: fxV2(FX_BODY) }),
     route('/v1/slow', (url) => {
       vi.setSystemTime(Date.now() + stepMs);
       return { json: { n: Number(url.searchParams.get('after') ?? 0) + 1 } };
@@ -722,70 +815,67 @@ async function pagedRevenue(req: RevenueRequest, ctx: ProviderContext, total = 1
   return page(events);
 }
 
-describe('withDeadline / syncDeadlines', () => {
-  it('reads the real budget until the deadline, then 0, and logs it once', () => {
+describe('context deadlines / syncDeadlines', () => {
+  it('hasBudget reads true until the deadline, then false, and logs it once', () => {
     ctx();
     const logs: unknown[] = [];
-    const dctx = withDeadline({ fetch, now: () => Date.now(), log: (e, d) => logs.push([e, d]), pageBudget: 5 }, NOW + 1_000);
+    const dctx: ProviderContext = { fetch, now: () => Date.now(), log: (e, d) => logs.push([e, d]), pageBudget: 5, deadline: NOW + 1_000 };
     expect(hasBudget(dctx)).toBe(true);
     dctx.pageBudget -= 1;
-    expect(dctx.pageBudget).toBe(4);
-    expect(dctx.deadlineHit).toBe(false);
 
     vi.setSystemTime(NOW + 1_000);
-    expect(dctx.pageBudget).toBe(0);
     expect(hasBudget(dctx)).toBe(false);
-    expect(dctx.pageBudget).toBe(0);
-    expect(dctx.deadlineHit).toBe(true);
+    expect(hasBudget(dctx)).toBe(false);
+    expect(dctx.pageBudget).toBe(4); // the budget itself is untouched
     expect(logs).toEqual([['sync_deadline_reached', { unusedBudget: 4 }]]);
   });
 
-  it('fetchJson refuses to start a request once the deadline has passed', async () => {
+  it('fetchJson refuses to start a request once the deadline has passed, with reason "deadline"', async () => {
     ctx();
     slowApi(1);
-    const dctx = withDeadline(makeCtx(fetch, { pageBudget: 10 }), NOW - 1);
-    await expect(slowGet(dctx, 0)).rejects.toBeInstanceOf(BudgetExhaustedError);
+    const dctx: ProviderContext = { ...makeCtx(fetch, { pageBudget: 10 }), deadline: NOW - 1 };
+    const err = await slowGet(dctx, 0).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(dctx.pageBudget).toBe(10);
   });
 
-  it('interactive syncs get ~20 s (snapshot first, revenue the rest), cron syncs ~60 s', () => {
-    expect(INTERACTIVE_SYNC_DEADLINE_MS).toBe(20_000);
-    expect(CRON_SYNC_DEADLINE_MS).toBe(60_000);
-    expect(syncDeadlines('initial', NOW)).toEqual({ snapshot: NOW + 12_000, revenue: NOW + 20_000 });
-    expect(syncDeadlines('manual', NOW)).toEqual({ snapshot: NOW + 12_000, revenue: NOW + 20_000 });
-    expect(syncDeadlines('cron', NOW)).toEqual({ snapshot: NOW + 36_000, revenue: NOW + 60_000 });
+  it('every sync gets ~60 s in its queue invocation: the snapshot first, revenue the rest', () => {
+    expect(SYNC_DEADLINE_MS).toBe(60_000);
+    expect(syncDeadlines(NOW)).toEqual({ snapshot: NOW + 36_000, revenue: NOW + 60_000 });
   });
 });
 
 describe('syncConnection — deadlines and budgets', () => {
-  it('a slow initial sync checkpoints its cursor at the deadline and commits well inside waitUntil’s 30 s', async () => {
+  it('a slow initial sync checkpoints its cursor at the deadline and commits', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
     stripeSnapshotOk();
-    slowApi(3_000);
+    slowApi(10_000);
     const rev = vi.spyOn(stripeAdapter, 'fetchRevenue').mockImplementation((_input, req, pctx) => pagedRevenue(req, pctx));
 
     const r = await syncConnection(c.env, 'st-1', 'initial');
 
-    // Pages at t = 0, 3, …, 18 s; at 21 s the budget reads 0, the adapter returns a cursor, the batch commits.
-    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 7, error: null });
-    expect(Date.now() - NOW).toBe(21_000);
-    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '7', since: FIRST_SINCE });
-    expect(txRows(c.t, 'st-1')).toHaveLength(7);
-    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 7, message: BACKFILL_CONTINUES_MESSAGE });
+    // Pages at t = 0, 10, …, 50 s; at 60 s hasBudget reads false, the adapter returns a cursor, the batch commits.
+    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 6, error: null });
+    expect(Date.now() - NOW).toBe(60_000);
+    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '6', since: FIRST_SINCE });
+    expect(txRows(c.t, 'st-1')).toHaveLength(6);
+    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 6, message: BACKFILL_CONTINUES_MESSAGE });
     expect(c.out.some((l) => l.includes('sync_deadline_reached'))).toBe(true);
 
     // The next (cron) run resumes from the checkpoint.
     vi.setSystemTime(NOW + HOUR);
     const r2 = await syncConnection(c.env, 'st-1', 'cron');
-    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '7' });
-    expect(r2).toMatchObject({ ok: true, events: REVENUE_PAGE_BUDGET });
+    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '6' });
+    expect(r2).toMatchObject({ ok: true, events: 6 }); // the same 60 s again, from the checkpoint
     expectDailyMatchesTransactions(c, 'st-1');
   });
 
   it('a snapshot that runs out of time fails honestly; revenue still gets the rest of the deadline', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
-    slowApi(3_000);
+    slowApi(5_000); // 10 pages need 50 s; the snapshot's share is 36 s
     vi.spyOn(stripeAdapter, 'fetchSnapshot').mockImplementation(async (_input, pctx) => {
       // Like Stripe: a partial MRR would be wrong, so it lists everything or throws.
       for (let after = 0; after < 10; ) after = (await slowGet(pctx, after)).n;

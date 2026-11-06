@@ -7,6 +7,7 @@
  * `GET /v1/products?ids[]=…`). Then the split stays null and MRR is untouched, as the second test shows.
  */
 import { renderToStaticMarkup } from 'react-dom/server';
+import { fxV2 } from '../fixtures/fx';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDashboardData } from '../../src/data/dashboard';
@@ -32,7 +33,7 @@ const clone = (v: unknown): Json => JSON.parse(JSON.stringify(v)) as Json;
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const NOW_S = Math.floor(NOW / 1000);
 const RK_TEST = 'rk_test_51FakeKeyForTestsOnly000000000000000000000000000000000000000000000000000000000000';
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 /** frankfurter.dev, USD base: 1 USD = 0.9 EUR. */
 const FX = { amount: 1, base: 'USD', date: '2026-11-04', rates: { EUR: 0.9 } };
 
@@ -135,7 +136,7 @@ function stripeRoutes(productsResponse: FakeResponse | ((url: URL) => FakeRespon
   ];
   const trialing = [sub([item(price(2900, 'prod_Team'))], { status: 'trialing' })];
   return [
-    route('/v1/latest', { json: FX }),
+    route('/v2/rates', { json: fxV2(FX) }),
     route('/v1/subscriptions', { json: list(active, '/v1/subscriptions') }, { query: { status: 'active' } }),
     route('/v1/subscriptions', { json: list([], '/v1/subscriptions') }, { query: { status: 'past_due' } }),
     route('/v1/subscriptions', { json: list(trialing, '/v1/subscriptions') }, { query: { status: 'trialing' } }),

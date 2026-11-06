@@ -3,7 +3,8 @@
  * Owner: Lead — changes need Lead approval (SPEC.md §9.1).
  *
  * Conventions: money values are integer minor units in `currency` (the user's display
- * currency) unless a field says otherwise; timestamps are epoch ms; days are 'YYYY-MM-DD' UTC.
+ * currency) unless a field says otherwise; timestamps are epoch ms; days are 'YYYY-MM-DD' in the
+ * user's time zone (`SessionUser.timeZone`), except provider-reported daily totals (`ProviderMeta.dayZone`).
  */
 
 import type { ConnectionStatus } from '../db/queries';
@@ -166,13 +167,21 @@ export interface DashboardData {
   /** Days in the window that have snapshots, oldest → newest (may be sparse early on). */
   mrrSeries: MrrDay[];
   fx: {
-    /** Day of the FX table used, null if none was needed / available. */
+    /** Day of the latest rates MRR was converted at, null if none was needed / available. */
     asOf: string | null;
+    /** Some revenue was converted from another currency, at the rate of its own day. */
+    daily: boolean;
     /** Currencies that couldn't be converted and were left out of totals. */
     missing: string[];
   };
   /**
-   * Human-readable notices the structured fields can't express (empty today). Not repeated here:
+   * The zone the user's days run in, and the providers whose daily totals keep their own days
+   * because they can't be regrouped (`ProviderMeta.dayZone`), by zone, only where it differs.
+   */
+  days: { timeZone: string; otherZones: Array<{ label: string; providers: string[] }> };
+  /**
+   * What connections' latest syncs couldn't count, as "<connection name>: <sentence>"
+   * (`MetricsSnapshot.warnings`), connections in breakdown order. Not repeated here:
    * sync problems (breakdown status / lastError / lastSyncedAt), currencies without a rate
    * (fx.missing) and providers without daily revenue (BreakdownRow.periodRevenue). The dashboard
    * turns those into sentences next to the figure they affect.
@@ -210,11 +219,11 @@ export interface CalendarDay {
 }
 
 export interface CalendarMonth {
-  /** 'YYYY-MM' (UTC). */
+  /** 'YYYY-MM' (the user's zone). */
   month: string;
   /** Display currency. */
   currency: string;
-  /** UTC day the month was read on. */
+  /** The user's local day the month was read on. */
   today: string;
   /** Every day of the month, 1st → last. */
   days: CalendarDay[];
@@ -249,7 +258,7 @@ export interface TransactionPage {
   /** Display currency. */
   currency: string;
   provider: ProviderId | null;
-  /** One UTC day ('YYYY-MM-DD') the list is narrowed to, or null for every day. */
+  /** One local day ('YYYY-MM-DD') the list is narrowed to, or null for every day. */
   day?: string | null;
   items: TransactionRow[];
   page: number;
@@ -266,7 +275,7 @@ export interface SnapshotRow {
 }
 
 export interface SyncRunRow {
-  kind: 'cron' | 'manual' | 'initial';
+  kind: 'cron' | 'manual' | 'initial' | 'webhook';
   startedAt: number;
   finishedAt: number | null;
   ok: boolean | null;
@@ -285,4 +294,12 @@ export interface ConnectionDetail extends ConnectionSummary {
   snapshots: SnapshotRow[];
   /** Latest first, up to 10. */
   recentRuns: SyncRunRow[];
+  /** What the latest snapshot couldn't count (`MetricsSnapshot.warnings`); [] when nothing. */
+  warnings: string[];
+  /**
+   * Real-time updates (SPEC F-17), for providers with webhook setup (`ProviderMeta.webhook`); null
+   * for the others. `path` is the webhook URL without its origin (the page adds the one it was
+   * served from), null while webhooks are off.
+   */
+  webhook: { path: string | null; lastCallAt: number | null } | null;
 }

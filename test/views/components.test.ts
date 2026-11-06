@@ -88,7 +88,7 @@ function tags(out: string, tag: string, ...needles: string[]): string[] {
   return [...out.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'))].map((m) => m[0]).filter((t) => needles.every((n) => t.includes(n)));
 }
 
-const user = { id: 'u1', email: 'ada@example.com', baseCurrency: 'USD' };
+const user = { id: 'u1', email: 'ada@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 
 describe('Layout', () => {
   it('renders the shell with doctype, title, skip link, nav state and Settings apart on the right', async () => {
@@ -996,6 +996,16 @@ describe('connection page', () => {
     expect(out).toContain('Last sync failed');
   });
 
+  it('shows what the last sync couldn’t count, one sentence plain, several as a list', async () => {
+    const one = await render('connection-warning', page({ ...fixtureConnectionDetail(0), warnings: ['MRR is before discounts.'] }));
+    expect(one).toContain('One thing the last sync couldn’t count');
+    expect(one).toContain('MRR is before discounts.');
+    const two = await render('connection-warnings', page({ ...fixtureConnectionDetail(0), warnings: ['First.', 'Second.'] }));
+    expect(two).toContain('What the last sync couldn’t count');
+    expect(two).toMatch(/<li>First\.<\/li><li>Second\.<\/li>/);
+    expect(await render('connection-no-warnings', page(fixtureConnectionDetail(0)))).not.toContain('couldn’t count');
+  });
+
   it('removes demo data from the header in one click, with no Manage section or checkbox', async () => {
     const demo = { ...fixtureConnectionDetail(0), provider: 'demo' as const, name: 'Demo data', keyHint: null };
     const out = await render('connection-demo', page(demo));
@@ -1039,7 +1049,7 @@ describe('currencies whose ISO 4217 digits differ from CLDR', () => {
     vi.setSystemTime(FIXTURE_NOW);
     const today = new Date(FIXTURE_NOW).toISOString().slice(0, 10);
     const t = createTestD1();
-    seedUser(t, { id: 'u-huf', baseCurrency: 'EUR' });
+    seedUser(t, { id: 'u-huf', baseCurrency: 'EUR', timeZone: 'UTC' });
     seedConnection(t, { id: 'stripe-huf', userId: 'u-huf', provider: 'stripe', name: 'Budapest', status: 'ok', lastSyncedAt: FIXTURE_NOW - MINUTE });
     t.exec('INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)', today, 'USD', JSON.stringify({ EUR: 0.9, HUF: 400 }), FIXTURE_NOW);
     t.exec(
@@ -1053,7 +1063,7 @@ describe('currencies whose ISO 4217 digits differ from CLDR', () => {
       'stripe-huf', 'txn_FakeHuf', FIXTURE_NOW - HOUR,
     );
     const env = testEnv(t.db);
-    const hufUser = { id: 'u-huf', email: 'u-huf@example.com', baseCurrency: 'EUR' };
+    const hufUser = { id: 'u-huf', email: 'u-huf@example.com', baseCurrency: 'EUR', timeZone: 'UTC' };
 
     const data = await getDashboardData(env, hufUser, 30);
     expect(data.kpis.mrr.value).toBe(1123); // HUF 4,990 → $12.475 → €11.2275; the old reading was €1,122.75

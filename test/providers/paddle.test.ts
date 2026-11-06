@@ -3,9 +3,15 @@ import { BudgetExhaustedError, RateLimitedError } from '../../src/providers/http
 import {
   DISCOUNTS_WARNING,
   PADDLE_API_VERSION,
+  PADDLE_COUNT_CAPPED_WARNING,
+  PADDLE_DISCOUNTS_WARNING,
+  PADDLE_METRICS_PERMISSION_WARNING,
+  PADDLE_METRICS_UNAVAILABLE_WARNING,
   REFUND_LOOKBACK_MS,
   REJECTED_KEY_MESSAGE,
   paddleAdapter,
+  paddleDiscountsUnresolvedWarning,
+  paddleUnpricedItemsWarning,
 } from '../../src/providers/paddle';
 import { ProviderError } from '../../src/providers/types';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type Route } from '../fixtures/harness';
@@ -716,6 +722,82 @@ describe('paddle fetchSnapshot (estimate from subscriptions)', () => {
     expect(err.kind).toBe('upstream');
     expect(calls).toHaveLength(1);
     expect(ctx.logs.some((l) => l.event === 'paddle_bad_payload')).toBe(true);
+  });
+});
+
+describe('paddle fetchSnapshot: warnings', () => {
+  it('has no warnings when Paddle’s metric is there, nor for a clean sandbox estimate', async () => {
+    const m = metrics([['2026-11-05T00:00:00Z', '5000']], '2026-11-05T03:00:00Z');
+    const { fetch } = fakeFetch([route('/metrics/monthly-recurring-revenue', { json: m }), ...countRoutes(3, 1)]);
+    expect((await paddleAdapter.fetchSnapshot(input(), makeCtx(fetch))).warnings).toBeUndefined();
+
+    const d = pid('dsc');
+    // Sandbox has no metric, so the estimate is the normal case there and isn't warned about.
+    const { snap } = await estimate({ discounts: [discount(d, { type: 'percentage', amount: '10' })], subs: [simple(4000, { discount: subDiscount(d) })] });
+    expect(snap.mrr).toEqual({ USD: 3600 });
+    expect(snap.warnings).toBeUndefined();
+  });
+
+  it('says MRR is an estimate when a live key falls back, and asks for Metrics: Read when that is why', async () => {
+    const cases: Array<[Json, string]> = [
+      [{ json: metrics([], '2026-11-05T03:00:00Z') }, PADDLE_METRICS_UNAVAILABLE_WARNING],
+      [{ status: 403, json: errorForbiddenFx }, PADDLE_METRICS_PERMISSION_WARNING],
+      [{ status: 404, json: errorNotInSandboxFx }, PADDLE_METRICS_UNAVAILABLE_WARNING],
+    ];
+    for (const [responder, warning] of cases) {
+      const { snap, ctx } = await estimate({ key: LIVE_KEY, subs: [simple(4000)], extra: [route('/metrics/monthly-recurring-revenue', responder)] });
+      expect(snap.warnings).toEqual([warning]);
+      expectNoSecretsInLogs(ctx, [LIVE_KEY, LIVE_KEY.slice(16)]);
+    }
+  });
+
+  it('says the estimate is before discounts when the key lacks Discounts: Read, without a count', async () => {
+    const { snap, ctx } = await estimate({
+      extra: [route('/discounts', { status: 403, json: errorForbiddenFx })],
+      subs: [simple(4000, { discount: subDiscount(pid('dsc')) }), simple(5000, { discount: subDiscount(pid('dsc')) })],
+    });
+    expect(snap.warnings).toEqual([PADDLE_DISCOUNTS_WARNING]);
+    expectNoSecretsInLogs(ctx, [SANDBOX_KEY, SANDBOX_KEY.slice(16)]);
+  });
+
+  it('counts discounts it couldn’t apply and items it couldn’t price', async () => {
+    const eur = pid('dsc');
+    const { snap } = await estimate({
+      discounts: [discount(eur, { type: 'flat', amount: '500', currency_code: 'EUR' })],
+      subs: [
+        simple(4000, { discount: subDiscount(eur) }),
+        simple(4000, { discount: subDiscount(pid('dsc')) }),
+        sub([item({ amount: 500 })], { currency: 'CAD' }),
+      ],
+    });
+    expect(snap.warnings).toEqual([paddleDiscountsUnresolvedWarning(2), paddleUnpricedItemsWarning(1)]);
+    expect(snap.warnings).toEqual([
+      '2 discounts couldn’t be read or applied, so MRR is shown before them.',
+      '1 subscription item has no price in its subscription’s currency, so it counts as 0 in MRR.',
+    ]);
+  });
+
+  it('says a subscription count above 100,000 is capped, once', async () => {
+    const m = metrics([['2026-11-05T00:00:00Z', '5000']], '2026-11-05T03:00:00Z');
+    const { fetch } = fakeFetch([route('/metrics/monthly-recurring-revenue', { json: m }), ...countRoutes(100_001, 100_001)]);
+    const snap = await paddleAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeSubscriptions).toBe(100_001);
+    expect(snap.warnings).toEqual([PADDLE_COUNT_CAPPED_WARNING]);
+  });
+
+  it('keeps every sentence short and free of IDs', () => {
+    const all = [
+      PADDLE_METRICS_PERMISSION_WARNING,
+      PADDLE_METRICS_UNAVAILABLE_WARNING,
+      PADDLE_DISCOUNTS_WARNING,
+      PADDLE_COUNT_CAPPED_WARNING,
+      ...[1, 2, 100_000].flatMap((n) => [paddleUnpricedItemsWarning(n), paddleDiscountsUnresolvedWarning(n)]),
+    ];
+    for (const w of all) {
+      expect(w.length).toBeLessThanOrEqual(200);
+      expect(w).toMatch(/\.$/);
+      expect(w).not.toMatch(/https?:|pdl_|dsc_|sub_|pri_/);
+    }
   });
 });
 

@@ -4,6 +4,7 @@
  */
 
 import { vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { encryptJson } from '../../src/lib/crypto';
 import { DAY } from '../../src/lib/time';
 import type { DailyRevenuePoint, MetricsSnapshot, RevenueEvent, RevenuePage } from '../../src/providers/types';
@@ -35,7 +36,7 @@ export interface Ctx {
 export function setup(opts: { fx?: FakeResponse | FakeResponse[]; env?: Parameters<typeof testEnv>[1] } = {}): Ctx {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
-  const { fetch, calls } = fakeFetch([route('/v1/latest', opts.fx ?? { json: FX_BODY })]);
+  const { fetch, calls } = fakeFetch([route('/v2/rates', opts.fx ?? { json: fxV2(FX_BODY) })]);
   vi.stubGlobal('fetch', fetch);
   const out: string[] = [];
   for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {

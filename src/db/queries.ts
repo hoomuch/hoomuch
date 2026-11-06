@@ -15,6 +15,9 @@ export interface UserRow {
   base_currency: string;
   /** When the address was confirmed through a mailed link (ms); null = never. */
   email_verified_at: number | null;
+  /** IANA zone the user's days run in (migration 0009). */
+  timezone: string;
+  timezone_source: TimezoneSource;
   created_at: number;
   updated_at: number;
 }
@@ -36,6 +39,12 @@ export interface ConnectionRow {
   last_error: string | null;
   revenue_cursor: string | null;
   revenue_synced_until: number | null;
+  /** A sync is on the queue and hasn't started (migration 0007). */
+  queued_at: number | null;
+  /** Webhooks are on when set; part of the webhook URL's HMAC input (migration 0008). */
+  webhook_nonce: string | null;
+  /** Last valid webhook call (migration 0008). */
+  webhook_last_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -72,6 +81,30 @@ export async function updateUserCurrency(db: D1Database, userId: string, currenc
 }
 
 export type CurrencySource = 'default' | 'inferred' | 'chosen';
+export type TimezoneSource = CurrencySource;
+
+export async function getTimezoneSource(db: D1Database, userId: string): Promise<TimezoneSource> {
+  const row = await db.prepare('SELECT timezone_source FROM users WHERE id = ?').bind(userId).first<{ timezone_source: string }>();
+  const v = row?.timezone_source;
+  return v === 'inferred' || v === 'chosen' ? v : 'default';
+}
+
+/** The user picked a time zone in Settings: never infer it again. */
+export async function updateUserTimezone(db: D1Database, userId: string, timezone: string): Promise<void> {
+  await db
+    .prepare("UPDATE users SET timezone = ?, timezone_source = 'chosen', updated_at = ? WHERE id = ?")
+    .bind(timezone, Date.now(), userId)
+    .run();
+}
+
+/** Sets the zone taken from the user's request, once: only while it's still the untouched default. */
+export async function setInferredTimezone(db: D1Database, userId: string, timezone: string): Promise<boolean> {
+  const r = await db
+    .prepare("UPDATE users SET timezone = ?, timezone_source = 'inferred', updated_at = ? WHERE id = ? AND timezone_source = 'default'")
+    .bind(timezone, Date.now(), userId)
+    .run();
+  return (r.meta?.changes ?? 0) > 0;
+}
 
 export async function getCurrencySource(db: D1Database, userId: string): Promise<CurrencySource> {
   const row = await db.prepare('SELECT currency_source FROM users WHERE id = ?').bind(userId).first<{ currency_source: string }>();
@@ -130,6 +163,8 @@ export interface SessionJoinRow {
   email: string;
   base_currency: string;
   email_verified_at: number | null;
+  timezone: string;
+  timezone_source: TimezoneSource;
 }
 
 /** A live session: not expired, and created after `minCreatedAt` (absolute lifetime cap). */
@@ -141,7 +176,8 @@ export function getSessionWithUser(
 ): Promise<SessionJoinRow | null> {
   return db
     .prepare(
-      `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.base_currency, u.email_verified_at
+      `SELECT s.id AS session_id, s.expires_at, u.id AS user_id, u.email, u.base_currency, u.email_verified_at,
+              u.timezone, u.timezone_source
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.id = ? AND s.expires_at > ? AND s.created_at > ?`,
     )

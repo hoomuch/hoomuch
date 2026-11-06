@@ -1,7 +1,8 @@
-/** Settings (GET /settings): display currency, password, session (log out), account deletion. Owner: Experience (pages). */
+/** Settings (GET /settings): display currency, time zone, password, session (log out), account deletion. Owner: Experience (pages). */
 
 import { PASSWORD_MIN } from '../../lib/password-policy';
 import { SUPPORTED_CURRENCIES } from '../../lib/money';
+import { zoneLabel } from '../../lib/time';
 import { DangerZone } from '../components/danger-zone';
 import { Button, Card, ConfirmCheckbox, Field, FormError, PageHeader, SelectField } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
@@ -12,6 +13,12 @@ export interface SettingsPageProps {
   currency: string;
   /** "inferred": picked from their numbers, so say so next to the select. */
   currencySource?: 'default' | 'inferred' | 'chosen';
+  /** The zone the user's days run in (IANA). */
+  timeZone?: string;
+  /** "inferred": taken from where they signed in from, so say so next to the select. */
+  timeZoneSource?: 'default' | 'inferred' | 'chosen';
+  /** Every zone to offer (from the server, so the browser hydrates the same list). */
+  timeZones?: string[];
   /** Errors from a failed password change (re-rendered with 422). */
   password?: { error?: string | null; fieldErrors?: { current?: string; next?: string } };
   /** Errors from a failed account deletion (re-rendered with 422). */
@@ -61,7 +68,7 @@ export function SettingsPage(props: SettingsPageProps) {
         <Card
           id="display-currency"
           title="Display currency"
-          description="Converted at the latest ECB rates, past days included. Transactions also show the original amount."
+          description="Revenue converts at the exchange rate of the day it came in, MRR at the latest rates. Transactions also show the original amount."
         >
           <form method="post" action="/settings/currency">
             <SelectField
@@ -72,6 +79,23 @@ export function SettingsPage(props: SettingsPageProps) {
               help={props.currencySource === 'inferred' ? 'Picked automatically: most of your MRR is in this currency.' : undefined}
             />
             <Button variant="secondary">Save currency</Button>
+          </form>
+        </Card>
+
+        <Card
+          id="time-zone"
+          title="Time zone"
+          description="Days on the dashboard, the calendar and transactions run midnight to midnight here."
+        >
+          <form method="post" action="/settings/timezone">
+            <SelectField
+              name="timezone"
+              label="Time zone"
+              options={(props.timeZones ?? [props.timeZone ?? 'UTC']).map((z) => ({ value: z, label: zoneLabel(z) }))}
+              value={props.timeZone ?? 'UTC'}
+              help={props.timeZoneSource === 'inferred' ? 'Picked automatically from where you signed in.' : undefined}
+            />
+            <Button variant="secondary">Save time zone</Button>
           </form>
         </Card>
 

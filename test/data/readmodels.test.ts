@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
 import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
 import { cleanSnapshot } from '../../src/sync/aggregate';
+import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/stripe';
 import { listTransactions } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
@@ -10,7 +11,7 @@ import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '..
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const TODAY = '2026-11-05';
-const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD' };
+const user: SessionUser = { id: 'u1', email: 'u1@example.com', baseCurrency: 'USD', timeZone: 'UTC' };
 
 let t: TestD1;
 
@@ -22,11 +23,19 @@ function snap(conn: string, day: string, mrr: Record<string, number>, subs: numb
   );
 }
 
+/**
+ * A day's revenue as the engine stores it: for a transactions provider, the charge and refund it's
+ * built from (at noon UTC) plus the derived daily_revenue row; for a provider total, the row only.
+ */
 function rev(conn: string, day: string, currency: string, gross: number, refunds = 0, source: 'transactions' | 'provider' = 'transactions') {
   t.exec(
     'INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES (?, ?, ?, ?, ?, 1, ?)',
     conn, day, currency, gross, refunds, source,
   );
+  if (source !== 'transactions') return;
+  const noon = Date.parse(`${day}T12:00:00.000Z`);
+  if (gross) tx(conn, `rev:${day}:${currency}:charge`, noon, gross, currency, null);
+  if (refunds) tx(conn, `rev:${day}:${currency}:refund`, noon + 1, -refunds, currency, null);
 }
 
 function fx(rates: Record<string, number>, day = '2026-11-04') {
@@ -73,7 +82,7 @@ describe('getDashboardData', () => {
     expect(d.revenueSeries.every((r) => r.total === 0)).toBe(true);
     expect(d.kpis.mrr).toEqual({ value: 0, previous: null, deltaPct: null });
     expect(d.kpis.revenue.previous).toBeNull();
-    expect(d.fx).toEqual({ asOf: null, missing: [] });
+    expect(d.fx).toEqual({ asOf: null, daily: false, missing: [] });
     expect(d.warnings).toEqual([]);
   });
 
@@ -104,7 +113,7 @@ describe('getDashboardData', () => {
       ['stripe1', 250_00, 29.4],
     ]);
     expect(d.breakdown[0]).toMatchObject({ provider: 'lemonsqueezy', color: '#AD7D00', status: 'ok', activeTrials: null });
-    expect(d.fx).toEqual({ asOf: '2026-11-04', missing: [] });
+    expect(d.fx).toMatchObject({ asOf: '2026-11-04', missing: [] });
     // MRR series: only days with snapshots, other connections carried forward.
     expect(d.mrrSeries).toEqual([
       { day: '2026-10-10', total: 110_00 + 500_00 },
@@ -199,7 +208,7 @@ describe('getDashboardData', () => {
   it('without any FX table only the display currency counts', async () => {
     seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
     snap('a', TODAY, { USD: 1000, EUR: 900 }, 2);
-    const d = await getDashboardData(testEnv(t.db), { ...user, baseCurrency: 'EUR' }, 7);
+    const d = await getDashboardData(testEnv(t.db), { ...user, baseCurrency: 'EUR', timeZone: 'UTC' }, 7);
     expect(d.currency).toBe('EUR');
     expect(d.kpis.mrr.value).toBe(900);
     expect(d.fx.missing).toEqual(['USD']);
@@ -366,11 +375,11 @@ describe('getDashboardData products', () => {
 
 describe('getDashboardData MRR by product', () => {
   type Split = Array<{ name: string | null; mrr: Record<string, number>; subscriptions: number }> | null;
-  function snapSplit(conn: string, day: string, mrr: Record<string, number>, split: Split) {
+  function snapSplit(conn: string, day: string, mrr: Record<string, number>, split: Split, warnings: string[] | null = null) {
     t.exec(
-      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, mrr_by_product, captured_at)
-       VALUES (?, ?, ?, 1, NULL, ?, 0)`,
-      conn, day, JSON.stringify(mrr), split === null ? null : JSON.stringify(split),
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, mrr_by_product, warnings, captured_at)
+       VALUES (?, ?, ?, 1, NULL, ?, ?, 0)`,
+      conn, day, JSON.stringify(mrr), split === null ? null : JSON.stringify(split), warnings ? JSON.stringify(warnings) : null,
     );
   }
 
@@ -387,8 +396,8 @@ describe('getDashboardData MRR by product', () => {
       { name: 'Team', mrr: { USD: 30_00 }, subscriptions: 2 },
       { name: null, mrr: { USD: 10_00 }, subscriptions: 1 },
     ]);
-    snapSplit('st2', TODAY, { USD: 40_00 }, null); // its key can't read product names
-    snapSplit('st3', TODAY, {}, null); // no MRR: nothing to ask for
+    snapSplit('st2', TODAY, { USD: 40_00 }, null, [STRIPE_PRODUCTS_WARNING]); // its key can't read product names
+    snapSplit('st3', TODAY, {}, null, [STRIPE_PRODUCTS_WARNING]); // no MRR: nothing to ask for
     snapSplit('ls', TODAY, { USD: 50_00 }, null); // Lemon Squeezy doesn't split MRR
     snapSplit('x', TODAY, { USD: 999_00 }, [{ name: 'Secret', mrr: { USD: 999_00 }, subscriptions: 9 }]);
 
@@ -408,6 +417,18 @@ describe('getDashboardData MRR by product', () => {
     expect(m.needsPermission).toEqual(['Acme EU']);
     expect(m.unnamedProviders).toEqual(['Lemon Squeezy']);
     expect(m.more).toBeNull();
+    // The Products: Read warning is the By product card's to say, not a dashboard note.
+    expect(d.warnings).toEqual([]);
+  });
+
+  it('a split missing for another reason (no Products warning) is plain unnamed MRR, not a permission ask', async () => {
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    seedConnection(t, { id: 'as', userId: 'u1', provider: 'appstore', name: 'iOS' });
+    snapSplit('st', TODAY, { USD: 40_00 }, null, ['Product names were skipped this sync.']);
+    snapSplit('as', TODAY, { USD: 10_00 }, null);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.productMrr).toMatchObject({ needsPermission: [], unnamedProviders: ['Stripe', 'App Store Connect'] });
+    expect(d.warnings).toEqual(['Acme: Product names were skipped this sync.']);
   });
 
   it(`merges one name within a connection and folds products past ${PRODUCT_ROWS} into one row`, async () => {
@@ -443,7 +464,9 @@ describe('getDashboardData MRR by product', () => {
     await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot(raw).snapshot, NOW)]);
     expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr.rows.map((r) => [r.name, r.mrr])).toEqual([['Pro', 30_00]]);
 
-    await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot({ ...raw, mrrByProduct: null }).snapshot, NOW)]);
+    await t.db.batch([
+      upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot({ ...raw, mrrByProduct: null, warnings: [STRIPE_PRODUCTS_WARNING] }).snapshot, NOW),
+    ]);
     expect(t.rows('SELECT mrr_by_product FROM snapshots')).toEqual([{ mrr_by_product: null }]);
     expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr).toMatchObject({ split: false, needsPermission: ['Acme'] });
   });
@@ -503,7 +526,7 @@ describe('connection read models', () => {
         'c', i === 0 ? 'initial' : 'cron', 1000 + i, i === 11 ? null : 2000 + i, i === 11 ? null : i % 2, i, i % 2 ? null : 'boom',
       );
     }
-    const d = await getConnectionDetail(testEnv(t.db), { ...user, baseCurrency: 'USD' }, 'c');
+    const d = await getConnectionDetail(testEnv(t.db), { ...user, baseCurrency: 'USD', timeZone: 'UTC' }, 'c');
     expect(t.roundTrips()).toBe(1);
     expect(d).not.toBeNull();
     expect(d!.config).toEqual({ storeId: '42' });
@@ -513,11 +536,67 @@ describe('connection read models', () => {
     expect(d!.recentRuns[0]).toEqual({ kind: 'cron', startedAt: 1011, finishedAt: null, ok: null, events: 11, message: null });
     expect(d!.recentRuns[1]).toMatchObject({ ok: false, message: 'boom' });
     expect(d!.recentRuns[2]).toMatchObject({ ok: true });
+    expect(d!.warnings).toEqual([]);
+  });
+
+  it('carries the latest snapshot’s warnings only', async () => {
+    seedConnection(t, { id: 'c', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    t.exec(
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, warnings, captured_at) VALUES
+         ('c', ?, '{}', 0, '["Old news."]', 0), ('c', ?, '{}', 0, '["MRR is before discounts.","MRR is before discounts.", 7]', 0)`,
+      addDays(TODAY, -1),
+      TODAY,
+    );
+    const d = await getConnectionDetail(testEnv(t.db), user, 'c');
+    expect(d!.warnings).toEqual(['MRR is before discounts.']);
   });
 
   it("returns null for someone else’s connection", async () => {
     seedConnection(t, { id: 'c', userId: 'u2', provider: 'stripe' });
     expect(await getConnectionDetail(testEnv(t.db), user, 'c')).toBeNull();
     expect(await listConnectionSummaries(testEnv(t.db), 'u1')).toEqual([]);
+  });
+});
+
+describe('revenue at each day’s exchange rate (SPEC §6)', () => {
+  const at = (day: string) => Date.parse(`${day}T12:00:00.000Z`);
+
+  beforeEach(async () => {
+    // 1 USD = 0.5 € on Nov 2, 0.8 € from Nov 4 (the latest). Nov 3 has no row (a holiday).
+    fx({ EUR: 0.5 }, '2026-11-02');
+    fx({ EUR: 0.8 }, '2026-11-04');
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    tx('st', 'a', at('2026-11-02'), 100_00, 'EUR', 'Pro');
+    tx('st', 'b', at('2026-11-03'), 100_00, 'EUR', 'Pro');
+    tx('st', 'c', at('2026-11-04'), 100_00, 'EUR', null);
+    await t.db.batch(recomputeDailyRevenue(t.db, 'st', { from: '2026-11-02', to: '2026-11-04' }));
+    snap('st', TODAY, { EUR: 80_00 }, 1);
+  });
+
+  it('dashboard: each day’s revenue at its own rate, MRR at the latest, products adding up to the KPI', async () => {
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    const byDay = Object.fromEntries(d.revenueSeries.map((r) => [r.day, r.total]));
+    expect(byDay['2026-11-02']).toBe(200_00); // 100 € at 0.5
+    expect(byDay['2026-11-03']).toBe(200_00); // the holiday takes Nov 2's rate
+    expect(byDay['2026-11-04']).toBe(125_00); // 100 € at 0.8
+    expect(d.kpis.revenue.value).toBe(525_00);
+    expect(d.kpis.mrr.value).toBe(100_00); // 80 € at the latest 0.8
+    expect(d.fx).toEqual({ asOf: '2026-11-04', daily: true, missing: [] });
+    expect(d.products.rows.map((p) => [p.name, p.revenue])).toEqual([['Pro', 400_00]]);
+    expect(d.products.rows.reduce((s, p) => s + p.revenue, 0) + d.products.unnamed.revenue).toBe(d.kpis.revenue.value);
+  });
+
+  it('calendar and transactions use the same day rates', async () => {
+    const { getCalendarMonth } = await import('../../src/data/calendar');
+    const cal = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    const net = Object.fromEntries(cal.days.filter((x) => x.day <= '2026-11-04').map((x) => [x.day, x.net]));
+    expect(net).toMatchObject({ '2026-11-02': 200_00, '2026-11-03': 200_00, '2026-11-04': 125_00 });
+
+    const page = await listTransactions(testEnv(t.db), user, { provider: null, page: 1 });
+    expect(page.items.map((i) => [i.externalId, i.displayAmount])).toEqual([
+      ['c', 125_00],
+      ['b', 200_00],
+      ['a', 200_00],
+    ]);
   });
 });

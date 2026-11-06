@@ -13,6 +13,8 @@ import { loadFlash } from './lib/flash';
 import { limitRequests } from './lib/rate-limit';
 import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
+import { WEBHOOK_PATH_PREFIX } from './services/webhooks';
+import { handleSyncBatch } from './sync/consumer';
 import { runScheduledSync } from './sync/engine';
 
 const app = new Hono<AppEnv>();
@@ -67,7 +69,10 @@ const turnstilePageHeaders = secureHeaders(
 app.use('*', (c, next) =>
   (TURNSTILE_PAGES.has(c.req.path) && turnstileSiteKey(c.env) ? turnstilePageHeaders : pageHeaders)(c, next),
 );
-app.use('*', csrf());
+// Provider webhooks come from servers, not browsers, and carry no session: CSRF doesn't apply
+// (routes/webhooks.ts checks its own per-connection token). Every other path keeps it.
+const pageCsrf = csrf();
+app.use('*', (c, next) => (c.req.path.startsWith(WEBHOOK_PATH_PREFIX) ? next() : pageCsrf(c, next)));
 // Pages carry revenue figures and the user's email: never keep them in browser or shared caches
 // (Back after "Log out" on a shared machine). Static assets are served before the Worker runs.
 app.use('*', async (c, next) => {
@@ -89,6 +94,10 @@ registerRoutes(app);
 
 export default {
   fetch: app.fetch,
+  // Every sync runs here, one message per invocation (sync/queue.ts, sync/consumer.ts).
+  async queue(batch, env) {
+    await handleSyncBatch(batch, env);
+  },
   async scheduled(controller, env, ctx) {
     const now = controller.scheduledTime;
     ctx.waitUntil(

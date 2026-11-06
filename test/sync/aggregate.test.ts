@@ -12,6 +12,10 @@ import {
   cleanDailyPoints,
   cleanEvents,
   cleanSnapshot,
+  cleanSnapshotHistory,
+  cleanWarnings,
+  parseStoredWarnings,
+  MAX_SNAPSHOT_WARNINGS,
   dailyFromEvents,
   decodeBackfill,
   encodeBackfill,
@@ -150,6 +154,67 @@ describe('cleanDailyPoints', () => {
     ]);
     expect(points).toEqual([{ day: '2026-11-01', currency: 'USD', gross: 1100, refunds: 10, count: 4 }]);
     expect(skipped).toEqual({ duplicate: 1, day: 1, amount: 3, currency: 1, shape: 1 });
+  });
+});
+
+describe('cleanWarnings / parseStoredWarnings', () => {
+  it('keeps strings, one line each, masked, capped in length and number, without duplicates', () => {
+    const long = 'x'.repeat(500);
+    const out = cleanWarnings(['  MRR is\n before discounts. ', 'MRR is before discounts.', 7, 'key sk_live_abcdefghijklmnop1234 leaked', long, 'a', 'b', 'c'])!;
+    expect(out).toHaveLength(MAX_SNAPSHOT_WARNINGS);
+    expect(out[0]).toBe('MRR is before discounts.');
+    expect(out[1]).not.toContain('sk_live_abcdefghijklmnop1234');
+    expect(out[2]!.length).toBeLessThanOrEqual(200);
+    expect(cleanWarnings([])).toBeNull();
+    expect(cleanWarnings('nope')).toBeNull();
+  });
+
+  it('reads stored JSON back, and anything unreadable as none', () => {
+    expect(parseStoredWarnings('["One.","Two."]')).toEqual(['One.', 'Two.']);
+    expect(parseStoredWarnings(null)).toEqual([]);
+    expect(parseStoredWarnings('{oops')).toEqual([]);
+  });
+
+  it('cleanSnapshot keeps them, and leaves the key out when there are none', () => {
+    expect(cleanSnapshot({ mrr: {}, activeSubscriptions: 0, warnings: ['Heads up.'] }).snapshot.warnings).toEqual(['Heads up.']);
+    expect('warnings' in cleanSnapshot({ mrr: {}, activeSubscriptions: 0, warnings: [] }).snapshot).toBe(false);
+  });
+});
+
+describe('cleanSnapshotHistory', () => {
+  const snap = { mrr: { USD: 100 }, activeSubscriptions: 2 };
+
+  it('keeps real past days, oldest first, one row per day (the first wins)', () => {
+    const { rows, skipped } = cleanSnapshotHistory(
+      [
+        { day: '2026-11-03', snapshot: { ...snap, mrr: { USD: 3 } } },
+        { day: '2026-11-01', snapshot: snap },
+        { day: '2026-11-03', snapshot: { ...snap, mrr: { USD: 999 } } },
+        { day: '2026-11-05', snapshot: snap }, // today
+        { day: '2026-02-30', snapshot: snap },
+        { day: '2026-11-02', snapshot: { mrr: {} } }, // no subscription count
+        'junk',
+      ],
+      '2026-11-05',
+      90,
+    );
+    expect(rows.map((r) => [r.day, r.snapshot.mrr])).toEqual([
+      ['2026-11-01', { USD: 100 }],
+      ['2026-11-03', { USD: 3 }],
+    ]);
+    expect(skipped).toBe(5);
+  });
+
+  it('keeps only the newest maxDays', () => {
+    const input = ['2026-11-01', '2026-11-02', '2026-11-03'].map((day) => ({ day, snapshot: snap }));
+    const { rows, skipped } = cleanSnapshotHistory(input, '2026-11-05', 2);
+    expect(rows.map((r) => r.day)).toEqual(['2026-11-02', '2026-11-03']);
+    expect(skipped).toBe(1);
+  });
+
+  it('treats a missing list as empty and anything else as one skip', () => {
+    expect(cleanSnapshotHistory(undefined, '2026-11-05', 90)).toEqual({ rows: [], skipped: 0 });
+    expect(cleanSnapshotHistory({}, '2026-11-05', 90)).toEqual({ rows: [], skipped: 1 });
   });
 });
 

@@ -26,8 +26,9 @@ export function registerTransactionRoutes(app: Hono<AppEnv>): void {
     const p = rememberedQuery(c, 'provider', 'hm_provider', (v) => v === 'all' || isProviderId(v));
     const provider = p !== undefined && isProviderId(p) ? p : null;
     const page = parsePage(c.req.query('page'));
-    // ?day= narrows the list to one UTC day (the dashboard calendar links here). Not remembered.
-    const day = parseDayParam(c.req.query('day'));
+    // ?day= narrows the list to one of the user's local days (the dashboard calendar links here).
+    // Not remembered.
+    const day = parseDayParam(c.req.query('day'), Date.now(), user.timeZone);
 
     const [txns, connections] = await Promise.all([
       listTransactions(c.env, user, { provider, page, day }),

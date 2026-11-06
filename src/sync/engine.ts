@@ -4,11 +4,12 @@
  * One sync of one connection:
  *   1. lock      conditional UPDATE … RETURNING (fresh 'syncing' rows are skipped; a lock older than
  *                5 min is taken over) + open a `sync_runs` row.
- *   2. snapshot  fetchSnapshot → upsert today's row (+ demo history) in its own batch, so it
- *                survives a later revenue failure.
- *                Both provider calls run against a wall-clock deadline (see `withDeadline`): once it
- *                passes, the page budget reads 0, so adapters checkpoint with a cursor and the final
- *                batch still commits inside waitUntil's 30 s.
+ *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history on a first sync)
+ *                in its own batch, so it survives a later revenue failure.
+ *                Both provider calls run against a wall-clock deadline (`ProviderContext.deadline`):
+ *                once it passes no new request starts, so adapters checkpoint with a cursor, and a
+ *                hard stop shortly after it aborts anything still in flight, so the final batch
+ *                always gets to commit.
  *   3. revenue   fetchRevenue(since, cursor) → validate → ONE final batch that upserts transactions,
  *                rebuilds daily_revenue for the affected days, upserts provider daily points,
  *                moves the cursor / high-water mark, releases the lock and closes the run.
@@ -23,10 +24,9 @@
 import type { Bindings } from '../env';
 import { parseConfig, type ConnectionRow } from '../db/queries';
 import { decryptJson } from '../lib/crypto';
-import { MINUTE, dayKey } from '../lib/time';
+import { MINUTE, UTC, normalizeTimeZone, zonedDayKey } from '../lib/time';
 import { createProviderContext } from '../providers/context';
 import { BudgetExhaustedError } from '../providers/http';
-import { demoSnapshotHistory } from '../providers/demo';
 import { getAdapter, getProviderMeta } from '../providers/registry';
 import {
   ProviderError,
@@ -42,6 +42,7 @@ import {
   cleanDailyPoints,
   cleanEvents,
   cleanSnapshot,
+  cleanSnapshotHistory,
   planRevenue,
   type RevenueAdvance,
   type RevenuePlan,
@@ -55,7 +56,8 @@ import {
   genericSyncError,
   isStaleCursorError,
 } from './errors';
-import { ensureFx, refreshFxIfStale } from './fx';
+import { ensureFx, ensureFxHistory, refreshFxIfStale } from './fx';
+import { QUEUED_STALE_MS, enqueueSyncs } from './queue';
 import {
   acquireSyncLock,
   closeSyncRun,
@@ -71,9 +73,10 @@ import {
   upsertSnapshot,
   upsertTransactions,
   type ConnectionFinish,
+  type LockedConnectionRow,
 } from './repo';
 
-export type SyncKind = 'cron' | 'manual' | 'initial';
+export type SyncKind = 'cron' | 'manual' | 'initial' | 'webhook';
 
 export interface SyncResult {
   ok: boolean;
@@ -93,24 +96,26 @@ export interface SyncResult {
  * 10 connections × (80 + 20) × 3 attempts = 3,000 subrequests (Workers Paid allows 10,000).
  */
 export const SNAPSHOT_PAGE_BUDGET = 80;
+/** Days of past snapshots asked of `fetchSnapshotHistory` on a first sync (the longest dashboard range). */
+export const SNAPSHOT_HISTORY_DAYS = 90;
 /** Upstream requests per sync for revenue paging (SPEC §4.1: 20 per connection). */
 export const REVENUE_PAGE_BUDGET = 20;
 /** A 'syncing' lock older than this is considered abandoned (matches services/connections.ts). */
 export const SYNC_LOCK_STALE_MS = 5 * MINUTE;
-/** Connections per cron tick (SPEC §4.1). */
-export const CRON_BATCH_SIZE = 10;
-/** The cron stops starting new syncs after this much wall time (Workers cron limit is 15 min). */
-export const CRON_WALL_TIME_MS = 10 * MINUTE;
+/**
+ * Connections the cron queues per tick (SPEC §4.1): one `sendBatch`. Due times only move forward
+ * and the order is per-tenant round robin, so anything left over goes first on the next tick.
+ */
+export const CRON_QUEUE_LIMIT = 100;
 export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 /** A connection in 'error' is retried after this many intervals since its last attempt. */
 export const ERROR_BACKOFF_INTERVALS = 3;
 /**
- * Wall-clock budget of one 'initial' / 'manual' sync. Those run in waitUntil (30 s after the
- * response) or while the user waits, so the final batch must commit well before that.
+ * Wall-clock budget of one sync. Every sync runs in its own queue consumer invocation (15 min of
+ * wall time), so this bounds how long a slow provider keeps one connection's sync open, not a
+ * platform limit; a backfill that needs longer continues on the next sync from its cursor.
  */
-export const INTERACTIVE_SYNC_DEADLINE_MS = 20_000;
-/** Wall-clock budget of one connection's sync inside the cron (10 × 60 s ≈ CRON_WALL_TIME_MS). */
-export const CRON_SYNC_DEADLINE_MS = 60_000;
+export const SYNC_DEADLINE_MS = 60_000;
 /** Share of the deadline the snapshot may use; revenue (resumable) gets the remainder. */
 export const SNAPSHOT_DEADLINE_SHARE = 0.6;
 /**
@@ -139,44 +144,31 @@ const globalFetch: typeof fetch = (input, init) => fetch(input, init);
 
 // ---------- deadlines ----------
 
-export interface DeadlineContext extends ProviderContext {
-  /** True once anything read the budget after the deadline. */
-  readonly deadlineHit: boolean;
-}
-
 /**
- * Wraps a provider context so `pageBudget` reads 0 once `Date.now()` passes `deadline`.
- * Adapters check `hasBudget` before each page and return a cursor; `fetchJson` refuses to start
- * another request. Requests already in flight are not cut short (they keep http.ts's own timeouts).
+ * After a phase's deadline no new request starts (`ProviderContext.deadline`), so adapters
+ * checkpoint with a cursor. A request already in flight may finish, but no later than this much
+ * past the deadline: then the context's signal aborts it, so the final batch always gets to commit.
  */
-export function withDeadline(base: ProviderContext, deadline: number): DeadlineContext {
-  let budget = base.pageBudget;
-  let hit = false;
-  return {
-    fetch: base.fetch,
-    now: base.now,
-    log: base.log,
-    get pageBudget(): number {
-      if (Date.now() < deadline) return budget;
-      if (!hit) {
-        hit = true;
-        base.log('sync_deadline_reached', { unusedBudget: Math.max(0, budget) });
-      }
-      return 0;
-    },
-    set pageBudget(v: number) {
-      budget = v;
-    },
-    get deadlineHit(): boolean {
-      return hit;
-    },
-  };
+export const HARD_STOP_GRACE_MS = 5_000;
+
+/** A phase's provider context: its budget, its deadline and the hard stop just after it. */
+function phaseContext(tag: string, pageBudget: number, deadline: number): ProviderContext {
+  return createProviderContext({
+    pageBudget,
+    tag,
+    deadline,
+    signal: AbortSignal.timeout(Math.max(1, deadline - Date.now() + HARD_STOP_GRACE_MS)),
+  });
 }
 
 /** Absolute deadlines for a sync that started at `startedAt`. */
-export function syncDeadlines(kind: SyncKind, startedAt: number): { snapshot: number; revenue: number } {
-  const total = kind === 'cron' ? CRON_SYNC_DEADLINE_MS : INTERACTIVE_SYNC_DEADLINE_MS;
-  return { snapshot: startedAt + Math.floor(total * SNAPSHOT_DEADLINE_SHARE), revenue: startedAt + total };
+export function syncDeadlines(startedAt: number): { snapshot: number; revenue: number } {
+  return { snapshot: startedAt + Math.floor(SYNC_DEADLINE_MS * SNAPSHOT_DEADLINE_SHARE), revenue: startedAt + SYNC_DEADLINE_MS };
+}
+
+/** The zone the connection's owner counts days in; UTC when unknown. */
+function ownerZone(row: LockedConnectionRow): string {
+  return normalizeTimeZone(row.owner_timezone) ?? UTC;
 }
 
 // ---------- syncConnection ----------
@@ -193,7 +185,7 @@ export async function syncConnection(env: Bindings, connectionId: string, kind: 
     durationMs: Date.now() - startedAt,
   });
 
-  let row: ConnectionRow | null;
+  let row: LockedConnectionRow | null;
   try {
     row = await acquireSyncLock(env.DB, connectionId, startedAt, startedAt - SYNC_LOCK_STALE_MS);
   } catch (err) {
@@ -268,7 +260,7 @@ interface RevenueOutcome {
 
 async function runLocked(
   env: Bindings,
-  row: ConnectionRow,
+  row: LockedConnectionRow,
   kind: SyncKind,
   now: number,
   runId: number | null,
@@ -290,9 +282,9 @@ async function runLocked(
     if (firstError === null) firstError = shown;
   };
   /** Engine-owned wording for running out of requests or time (never "the next sync continues" for a snapshot). */
-  const exhausted = (phase: 'snapshot' | 'revenue', err: unknown, ctx: DeadlineContext): unknown =>
-    err instanceof BudgetExhaustedError ? new SyncError(exhaustedMessage(phase, meta.name, ctx.deadlineHit)) : err;
-  const deadlines = syncDeadlines(kind, now);
+  const exhausted = (phase: 'snapshot' | 'revenue', err: unknown): unknown =>
+    err instanceof BudgetExhaustedError ? new SyncError(exhaustedMessage(phase, meta.name, err.reason === 'deadline')) : err;
+  const deadlines = syncDeadlines(now);
 
   let snapshot = false;
   let revenue: RevenueOutcome | null = null;
@@ -308,29 +300,23 @@ async function runLocked(
 
   if (input) {
     let skipRevenue = false;
-    const snapCtx = withDeadline(
-      createProviderContext({ pageBudget: SNAPSHOT_PAGE_BUDGET, tag: `sync:${row.id}:snapshot` }),
-      deadlines.snapshot,
-    );
+    const snapCtx = phaseContext(`sync:${row.id}:snapshot`, SNAPSHOT_PAGE_BUDGET, deadlines.snapshot);
     try {
       await syncSnapshot(db, adapter, row, input, now, snapCtx, logCtx, fx);
       snapshot = true;
     } catch (err) {
-      fail('snapshot', err, exhausted('snapshot', err, snapCtx));
+      fail('snapshot', err, exhausted('snapshot', err));
       // The same key would fail the same way on the revenue endpoints.
       skipRevenue = err instanceof ProviderError && (err.kind === 'auth' || err.kind === 'permission');
     }
 
     if (!skipRevenue) {
-      const plan = planRevenue(row, now);
-      const revCtx = withDeadline(
-        createProviderContext({ pageBudget: REVENUE_PAGE_BUDGET, tag: `sync:${row.id}:revenue` }),
-        deadlines.revenue,
-      );
+      const plan = planRevenue(row, now, ownerZone(row));
+      const revCtx = phaseContext(`sync:${row.id}:revenue`, REVENUE_PAGE_BUDGET, deadlines.revenue);
       try {
         revenue = await prepareRevenue(db, adapter, row, input, plan, now, revCtx, logCtx);
       } catch (err) {
-        fail('revenue', err, exhausted('revenue', err, revCtx));
+        fail('revenue', err, exhausted('revenue', err));
         if (plan.cursor !== null && isStaleCursorError(err)) {
           keptCursor = null; // restart the backfill next time instead of failing on this cursor forever
           emit('warn', 'sync_cursor_reset', logCtx);
@@ -400,7 +386,7 @@ async function loadCredentials(env: Bindings, row: ConnectionRow, meta: Provider
 async function syncSnapshot(
   db: D1Database,
   adapter: ProviderAdapter,
-  row: ConnectionRow,
+  row: LockedConnectionRow,
   input: ConnectionInput,
   now: number,
   ctx: ProviderContext,
@@ -411,14 +397,20 @@ async function syncSnapshot(
   const raw = await adapter.fetchSnapshot(input, ctx);
   const { snapshot, dropped } = cleanSnapshot(raw);
   if (dropped > 0) emit('warn', 'sync_snapshot_dropped', { ...logCtx, dropped });
-  const stmts = [upsertSnapshot(db, row.id, dayKey(now), snapshot, now)];
-  if (row.provider === 'demo') {
-    // A fresh demo gets its 90-day MRR trend; existing days are never overwritten.
-    const history = demoSnapshotHistory(input.config, now).map((h) => ({
-      day: h.day,
-      snapshot: cleanSnapshot(h.snapshot).snapshot,
-    }));
-    stmts.push(...insertSnapshotHistory(db, row.id, history, now));
+  // The owner's local day: the dashboard's "today" (SPEC §6).
+  const today = zonedDayKey(now, ownerZone(row));
+  const stmts = [upsertSnapshot(db, row.id, today, snapshot, now)];
+  if (adapter.fetchSnapshotHistory && row.last_synced_at === null) {
+    // A connection's first successful sync can start its MRR trend with the provider's history.
+    // Optional data: a failure is logged, and today's snapshot is still written.
+    try {
+      const history = await adapter.fetchSnapshotHistory(input, { days: SNAPSHOT_HISTORY_DAYS }, ctx);
+      const { rows, skipped } = cleanSnapshotHistory(history, today, SNAPSHOT_HISTORY_DAYS);
+      if (skipped > 0) emit('warn', 'sync_history_skipped', { ...logCtx, skipped });
+      stmts.push(...insertSnapshotHistory(db, row.id, rows, now));
+    } catch (err) {
+      emit('warn', 'sync_history_failed', { ...logCtx, ...errorLogFields(err) });
+    }
   }
   // The snapshot is the first row the dashboard can see. On a fresh install the FX table is still
   // being fetched (in parallel with the provider calls); writing before it lands made the first
@@ -476,14 +468,19 @@ function syncIntervalMs(env: Bindings): number {
   return (Number.isFinite(n) && n > 0 ? n : DEFAULT_SYNC_INTERVAL_MINUTES) * MINUTE;
 }
 
-/** Cron entry point: refresh FX daily, then sync the most overdue connections (SPEC §4.1). */
+/**
+ * Cron entry point (SPEC §4.1): refresh FX daily, then put the most overdue connections on the sync
+ * queue. The syncs themselves run in the queue consumer (sync/consumer.ts), one per invocation.
+ */
 export async function runScheduledSync(env: Bindings, now: number = Date.now()): Promise<void> {
   const wallStart = Date.now();
-  const summary: Record<string, unknown> = { due: 0, started: 0, ok: 0, failed: 0, busy: 0, stoppedEarly: false };
+  const summary: Record<string, unknown> = { due: 0, queued: 0 };
 
-  // Settled before any sync writes a snapshot, so a dashboard never renders a fresh install's
-  // numbers without rates. Usually one D1 read; refreshFxIfStale never throws (catch is belt and braces).
+  // Settled before any sync is queued, so a dashboard never renders a fresh install's numbers
+  // without rates (cron syncs skip ensureFx). refreshFxIfStale never throws (catch is belt and braces).
   const fx = await refreshFxIfStale(env.DB, globalFetch, now).catch(() => 'failed');
+  // Past days' rates, fetched once after an install or upgrade (usually one D1 read and done).
+  summary['fxHistory'] = await ensureFxHistory(env.DB, globalFetch, now).catch(() => 'failed');
 
   try {
     const intervalMs = syncIntervalMs(env);
@@ -495,21 +492,12 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
       // A never-synced connection whose first sync was killed is retried as soon as its lock is stale.
       retryWaitMs: SYNC_LOCK_STALE_MS,
       staleBefore: now - SYNC_LOCK_STALE_MS,
-      limit: CRON_BATCH_SIZE,
+      queuedBefore: now - QUEUED_STALE_MS,
+      limit: CRON_QUEUE_LIMIT,
     });
     summary['due'] = ids.length;
-    let started = 0;
-    for (const id of ids) {
-      if (Date.now() - wallStart >= CRON_WALL_TIME_MS) {
-        summary['stoppedEarly'] = true;
-        break;
-      }
-      started++;
-      const r = await syncConnection(env, id, 'cron');
-      const bucket = r.ok ? 'ok' : r.error === SYNC_BUSY_MESSAGE ? 'busy' : 'failed';
-      summary[bucket] = (summary[bucket] as number) + 1;
-    }
-    summary['started'] = started;
+    await enqueueSyncs(env, ids, 'cron', now);
+    summary['queued'] = ids.length;
   } catch (err) {
     summary['error'] = errorLogFields(err);
   }

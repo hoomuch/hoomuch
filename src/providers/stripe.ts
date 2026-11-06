@@ -128,6 +128,22 @@ export const COUPONS_PERMISSION_WARNING =
 export const PRODUCTS_PERMISSION_WARNING =
   'This key can’t read product names, so MRR isn’t split by product. Add Products: Read to fix it.';
 
+// Snapshot warnings (`MetricsSnapshot.warnings`). The permission ones say the same as verify's, word for word.
+export const STRIPE_COUPONS_WARNING = COUPONS_PERMISSION_WARNING;
+/** The dashboard matches this exact string to name the Stripe connections it can't split by product. */
+export const STRIPE_PRODUCTS_WARNING = PRODUCTS_PERMISSION_WARNING;
+export const STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING =
+  'MRR isn’t split by product this time, because Stripe didn’t return the product names; the next sync tries again.';
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export const stripeUnpricedItemsWarning = (items: number) =>
+  `${plural(items, 'subscription item has a price', 'subscription items have prices')} hoomuch can’t read, so ${items === 1 ? 'it counts' : 'they count'} as 0 in MRR.`;
+export const stripeDiscountsUnresolvedWarning = (discounts: number) =>
+  `${plural(discounts, 'discount', 'discounts')} couldn’t be read or applied, so MRR is shown before ${discounts === 1 ? 'it' : 'them'}.`;
+export const stripeInclusiveTaxWarning = (items: number) =>
+  `MRR includes tax on ${plural(items, 'subscription item', 'subscription items')}: ${items === 1 ? 'its price is' : 'their prices are'} tax-inclusive under Stripe Tax, which doesn’t say the rate.`;
+
 // ---------- key handling ----------
 
 interface ParsedKey {
@@ -384,18 +400,23 @@ interface SnapshotStats {
  */
 class CouponResolver {
   private readonly cache = new Map<string, StripeCoupon | null>();
-  private permissionMissing = false;
+  private missing = false;
 
   constructor(
     private readonly ctx: ProviderContext,
     private readonly key: string,
   ) {}
 
+  /** True once a coupon lookup answered 403: every discount after it is left unapplied. */
+  get permissionMissing(): boolean {
+    return this.missing;
+  }
+
   async get(ref: string | StripeCoupon | null | undefined): Promise<StripeCoupon | null> {
     if (!ref) return null;
     if (typeof ref !== 'string') return ref;
     if (this.cache.has(ref)) return this.cache.get(ref) ?? null;
-    if (this.permissionMissing) return null;
+    if (this.missing) return null;
     try {
       const coupon = await stripeGet<StripeCoupon>(
         this.ctx,
@@ -408,7 +429,7 @@ class CouponResolver {
     } catch (err) {
       if (!(err instanceof ProviderError)) throw err;
       if (err.kind === 'permission') {
-        this.permissionMissing = true;
+        this.missing = true;
         this.ctx.log('stripe_coupon_permission_missing', { effect: 'mrr_before_discounts' });
         return null;
       }
@@ -786,11 +807,17 @@ const PRODUCT_IDS_PER_REQUEST = 100;
  * leaves MRR as it is: the split by product is extra, so it never fails the snapshot. A product the
  * list doesn't return (or one without a name) is simply missing from the map.
  */
-async function productNames(ids: readonly string[], ctx: ProviderContext, key: string): Promise<Map<string, string> | null> {
+async function productNames(
+  ids: readonly string[],
+  ctx: ProviderContext,
+  key: string,
+  warnings: Set<string>,
+): Promise<Map<string, string> | null> {
   const names = new Map<string, string>();
   for (let i = 0; i < ids.length; i += PRODUCT_IDS_PER_REQUEST) {
     if (!hasBudget(ctx)) {
       ctx.log('stripe_product_names_skipped', { reason: 'budget', products: ids.length });
+      warnings.add(STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING);
       return null;
     }
     const chunk = ids.slice(i, i + PRODUCT_IDS_PER_REQUEST);
@@ -805,6 +832,7 @@ async function productNames(ids: readonly string[], ctx: ProviderContext, key: s
         reason: err.kind,
         effect: 'mrr_not_split_by_product',
       });
+      warnings.add(err.kind === 'permission' ? STRIPE_PRODUCTS_WARNING : STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING);
       return null;
     }
     for (const raw of page.data) {
@@ -874,9 +902,15 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   if (unresolvedDiscounts > 0) ctx.log('stripe_discounts_unresolved', { discounts: unresolvedDiscounts });
   if (unpricedItems > 0) ctx.log('stripe_items_unpriced', { items: unpricedItems });
   if (inclusiveTaxUnknown > 0) ctx.log('stripe_inclusive_tax_unknown', { items: inclusiveTaxUnknown });
+  const warnings = new Set<string>();
+  // Without Coupons: Read every discount is unresolved; the permission warning says it all.
+  if (env.coupons.permissionMissing) warnings.add(STRIPE_COUPONS_WARNING);
+  else if (unresolvedDiscounts > 0) warnings.add(stripeDiscountsUnresolvedWarning(unresolvedDiscounts));
+  if (tieredUnpriced + unpricedItems > 0) warnings.add(stripeUnpricedItemsWarning(tieredUnpriced + unpricedItems));
+  if (inclusiveTaxUnknown > 0) warnings.add(stripeInclusiveTaxWarning(inclusiveTaxUnknown));
   // Names last, so a missing permission or a spent budget can only cost the split, never the MRR.
   const ids = [...byProduct.keys()].filter((id) => id !== '');
-  const names = ids.length > 0 ? await productNames(ids, ctx, key) : new Map<string, string>();
+  const names = ids.length > 0 ? await productNames(ids, ctx, key, warnings) : new Map<string, string>();
   const mrrByProduct =
     names === null
       ? null
@@ -898,6 +932,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriodDays: null,
     newCustomers: null,
     mrrByProduct,
+    ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
   };
 }
 

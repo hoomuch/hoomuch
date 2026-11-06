@@ -117,6 +117,16 @@ export const CONFIG_STORE_CURRENCIES = 'storeCurrencies';
 export const CONFIG_TEST_MODE = 'testMode';
 export const CONFIG_STORE_ID = 'storeId';
 
+// Snapshot warnings (`MetricsSnapshot.warnings`).
+export const LS_DISCOUNTS_BUDGET_WARNING =
+  'MRR is shown before discounts this time, because there were too many discounts to read in one sync.';
+export const LS_DISCOUNTS_UNAVAILABLE_WARNING =
+  'MRR is shown before discounts, because Lemon Squeezy didn’t let this key read them.';
+export const lsUnpricedWarning = (subscriptions: number) =>
+  subscriptions === 1
+    ? '1 subscription has no price hoomuch can read, so it counts as 0 in MRR.'
+    : `${subscriptions} subscriptions have no price hoomuch can read, so they count as 0 in MRR.`;
+
 // ---------------------------------------------------------------------------------------------
 // JSON:API plumbing
 // ---------------------------------------------------------------------------------------------
@@ -671,12 +681,14 @@ async function recurringDiscounts(
   keyTestMode: boolean,
   orders: ReadonlySet<string>,
   now: number,
+  warnings: Set<string>,
 ): Promise<Map<string, LsRedemption[]> | null> {
   const out = new Map<string, LsRedemption[]>();
   if (orders.size === 0) return out;
   let requests = 0;
-  const skip = (reason: string): null => {
+  const skip = (reason: 'budget' | 'not_found' | 'permission'): null => {
     ctx.log('ls_discounts_skipped', { reason, requests });
+    warnings.add(reason === 'budget' ? LS_DISCOUNTS_BUDGET_WARNING : LS_DISCOUNTS_UNAVAILABLE_WARNING);
     return null;
   };
   try {
@@ -843,7 +855,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   }
 
   const orderIds = new Set(priced.map((p) => p.orderId).filter((id): id is string => id !== null));
-  const discounts = await recurringDiscounts(ctx, apiKey, scope, keyTestMode, orderIds, now);
+  const warnings = new Set<string>();
+  if (stats.unpriced > 0) warnings.add(lsUnpricedWarning(stats.unpriced));
+  const discounts = await recurringDiscounts(ctx, apiKey, scope, keyTestMode, orderIds, now, warnings);
   const mrr: MoneyMap = {};
   for (const p of priced) {
     let amount = p.amount;
@@ -875,6 +889,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null,
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
   };
 }
 

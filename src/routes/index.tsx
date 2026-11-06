@@ -13,6 +13,7 @@ import { registerErrorHandlers } from './errors';
 import { registerSettingsRoutes } from './settings';
 import { registerTransactionRoutes } from './transactions';
 import { registerVerifyEmailRoutes } from './verify-email';
+import { registerWebhookRoutes } from './webhooks';
 
 export function registerRoutes(app: Hono<AppEnv>): void {
   registerAuthRoutes(app);
@@ -21,5 +22,6 @@ export function registerRoutes(app: Hono<AppEnv>): void {
   registerConnectionRoutes(app);
   registerTransactionRoutes(app);
   registerSettingsRoutes(app);
+  registerWebhookRoutes(app);
   registerErrorHandlers(app);
 }

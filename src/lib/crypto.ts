@@ -123,6 +123,41 @@ export async function decryptJson<T>(keyB64: string, blob: string): Promise<T> {
   return JSON.parse(dec.decode(pt)) as T;
 }
 
+// ---------- derived MAC keys (HKDF-SHA256 → HMAC-SHA256) ----------
+
+const macKeyCache = new Map<string, Promise<CryptoKey>>();
+
+/**
+ * An HMAC-SHA256 key derived from ENCRYPTION_KEY for one purpose (`info`), so a MAC never uses the
+ * encryption key itself and two purposes never share a key.
+ */
+function derivedMacKey(keyB64: string, info: string): Promise<CryptoKey> {
+  const cacheKey = `${info}\u0000${keyB64}`;
+  let p = macKeyCache.get(cacheKey);
+  if (!p) {
+    p = (async () => {
+      const raw = base64ToBytes(keyB64);
+      if (raw.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes, base64-encoded (openssl rand -base64 32)');
+      const ikm = await crypto.subtle.importKey('raw', raw as BufferSource, 'HKDF', false, ['deriveKey']);
+      return crypto.subtle.deriveKey(
+        { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: enc.encode(info) },
+        ikm,
+        { name: 'HMAC', hash: 'SHA-256', length: 256 },
+        false,
+        ['sign'],
+      );
+    })();
+    macKeyCache.set(cacheKey, p);
+  }
+  return p;
+}
+
+/** base64url HMAC-SHA256 of `message` under the ENCRYPTION_KEY-derived key for `info` (43 chars). */
+export async function derivedMac(keyB64: string, info: string, message: string): Promise<string> {
+  const sig = await crypto.subtle.sign('HMAC', await derivedMacKey(keyB64, info), enc.encode(message));
+  return bytesToBase64Url(new Uint8Array(sig));
+}
+
 /** "…a1b2" — last 4 characters of a secret, safe to show in the UI. */
 export function keyHint(secret: string): string {
   const s = secret.trim();

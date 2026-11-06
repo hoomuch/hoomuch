@@ -5,6 +5,7 @@ import {
   CHARGEBEE_PERMISSION,
   LATE_SETTLEMENT_WINDOW_MS,
   chargebeeAdapter,
+  chargebeeUnpricedItemsWarning,
   parseSite,
   toMinorUnits,
 } from '../../src/providers/chargebee';
@@ -400,6 +401,7 @@ describe('chargebee fetchSnapshot', () => {
     expect(snap.activeSubscriptions).toBe(9);
     expect(ctx.logs.find((l) => l.event === 'chargebee_mrr_computed')?.data).toEqual({ subscriptions: 10 });
     expect(ctx.logs.some((l) => l.event === 'chargebee_items_unpriced')).toBe(false);
+    expect(snap.warnings).toBeUndefined(); // computing from items is logged, not shown
   });
 
   it('trusts mrr = 0 over the item prices (a 100% discount) and logs items it can’t price', async () => {
@@ -414,6 +416,26 @@ describe('chargebee fetchSnapshot', () => {
     expect(snap.mrr).toEqual({});
     expect(snap.activeSubscriptions).toBe(0);
     expect(ctx.logs.find((l) => l.event === 'chargebee_items_unpriced')?.data).toEqual({ items: 2 });
+  });
+
+  it('warns, with a count, about the items it can’t price, and only then', async () => {
+    const healthy = await snapshot({ active: [sub({ mrr: 4900 })], trials: [sub({ status: 'in_trial', mrr: 0 })] });
+    expect(healthy.snap.warnings).toBeUndefined();
+
+    const { snap, ctx } = await snapshot({
+      active: [
+        sub({ mrr: 4900 }),
+        sub({ mrr: null, unit: 'fortnight', items: [item('plan', 5000)] }),
+        sub({ mrr: null, items: [item('plan', null, { unit_price: undefined }), item('addon', 300)] }),
+      ],
+    });
+    expect(snap.mrr).toEqual({ USD: 4900 + 300 });
+    expect(snap.warnings).toEqual([chargebeeUnpricedItemsWarning(2)]);
+    expect(snap.warnings![0]).toBe('2 subscription items have no amount or billing period hoomuch can read, so they count as 0 in MRR.');
+    expect(chargebeeUnpricedItemsWarning(1)).toBe('1 subscription item has no amount or billing period hoomuch can read, so it counts as 0 in MRR.');
+    expect(chargebeeUnpricedItemsWarning(100_000).length).toBeLessThanOrEqual(200);
+    expect(JSON.stringify(snap)).not.toMatch(/John|Doe|example\.com/);
+    expectNoSecretsInLogs(ctx, [KEY, btoa(`${KEY}:`), ...PII]);
   });
 
   it('trusts the object over the filter (lists are eventually consistent)', async () => {

@@ -226,6 +226,60 @@ describe('fetchJson', () => {
   });
 });
 
+describe('fetchJson deadline and signal', () => {
+  it('starts nothing after the deadline: reason "deadline", no budget spent, logged once', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/things', { json: {} })]);
+    const ctx = { ...makeCtx(fetch, { pageBudget: 3, now: NOW }), deadline: NOW };
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(hasBudget(ctx)).toBe(false);
+    expect(calls).toHaveLength(0);
+    expect(ctx.pageBudget).toBe(3);
+    expect(ctx.logs.filter((l) => l.event === 'sync_deadline_reached')).toHaveLength(1);
+  });
+
+  it('a budget that ran out says "budget", not "deadline"', async () => {
+    const { fetch } = fakeFetch([route('/v1/things', { json: {} })]);
+    const ctx = { ...makeCtx(fetch, { pageBudget: 0, now: NOW }), deadline: NOW + 60_000 };
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect((err as BudgetExhaustedError).reason).toBe('budget');
+  });
+
+  it('does not start a retry wait that would end past the deadline', async () => {
+    const sleeps = recordSleeps();
+    const { fetch, calls } = fakeFetch([route('/v1/things', [{ status: 503, headers: { 'retry-after': '5' }, json: {} }, { json: { ok: 1 } }])]);
+    const ctx = { ...makeCtx(fetch, { now: NOW }), deadline: NOW + 4_000 };
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect(err.message).toMatch(/HTTP 503/);
+    expect(sleeps).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('the signal aborts a request in flight without retrying it', async () => {
+    recordSleeps();
+    const { fetch, calls } = fakeFetch([route('/v1/things', { hang: true })]);
+    const controller = new AbortController();
+    const ctx = { ...makeCtx(fetch), signal: controller.signal };
+    const pending = catchErr(fetchJson(ctx, spec()));
+    await Promise.resolve();
+    controller.abort();
+    const err = await pending;
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(calls).toHaveLength(1);
+    expect(ctx.logs.some((l) => l.event === 'http_retry')).toBe(false);
+  });
+
+  it('an already-aborted signal stops the request before it starts', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/things', { json: {} })]);
+    const ctx = { ...makeCtx(fetch), signal: AbortSignal.abort() };
+    expect(hasBudget(ctx)).toBe(false);
+    await expect(fetchJson(ctx, spec())).rejects.toBeInstanceOf(BudgetExhaustedError);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe('sanitizeErrorText private keys and Google tokens', () => {
   it('masks PEM keys, whole or cut short, and ya29 access tokens', () => {
     const pem = '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49\n-----END PRIVATE KEY-----';

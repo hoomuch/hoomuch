@@ -2,19 +2,22 @@
  * Dashboard read model. Owner: Data Plane. Signature is part of the contract (SPEC §9.1).
  *
  * One D1 round trip (a single `db.batch`), no provider calls (SPEC N-02). Every amount is
- * converted into the user's display currency with the newest FX table; currencies without a
- * rate are left out of totals and reported in `fx.missing` (SPEC §6 "Döviz").
+ * converted into the user's display currency: revenue at the rate of its own day, MRR at the
+ * latest; currencies without a rate are left out of totals and reported in `fx.missing`
+ * (SPEC §6 "Döviz").
  */
 
 import type { Bindings, SessionUser } from '../env';
 import type { ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
+import { addDays, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { BACKFILL_DAYS, cleanProductMrr } from '../sync/aggregate';
-import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
+import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
 import { toSummary } from './connections';
+import { localDays, revenueRowsStatement } from './days';
 import type {
   BreakdownRow,
   DashboardData,
@@ -38,6 +41,8 @@ interface SnapRow {
   revenue_period_days?: number | null;
   /** Latest snapshots only: ProductMrr[] JSON, or null. */
   mrr_by_product?: string | null;
+  /** Latest snapshots only: string[] JSON, or null (`MetricsSnapshot.warnings`). */
+  warnings?: string | null;
 }
 
 interface RevRow {
@@ -53,6 +58,8 @@ export interface ProductSumRow {
   /** Null when the transactions had no product name. */
   product: string | null;
   currency: string;
+  /** UTC day the transactions occurred on (each day converts at its own rate). */
+  day: string;
   net: number;
   charges: number;
 }
@@ -70,13 +77,16 @@ const daysBetween = (a: string, b: string) => Math.abs(Date.parse(a) - Date.pars
 export async function getDashboardData(env: Bindings, user: SessionUser, rangeDays: RangeDays): Promise<DashboardData> {
   const now = Date.now();
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
-  const today = dayKey(now);
+  // Days run midnight to midnight in the user's zone (SPEC §6).
+  const tz = user.timeZone || UTC;
+  const today = zonedDayKey(now, tz);
   const start = addDays(today, -(rangeDays - 1));
   const prevStart = addDays(start, -rangeDays);
   const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
-  const [connsR, windowR, latestR, beforeR, revR, fxR, productR] = await db.batch([
+  const productDays = localDays('t.occurred_at', start, today, tz);
+  const [connsR, windowR, latestR, beforeR, revR, fxR, productR, histR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     db
       .prepare(
@@ -86,7 +96,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       .bind(user.id, start),
     db
       .prepare(
-        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product FROM snapshots s
+        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product, s.warnings FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
           WHERE c.user_id = ? AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id)`,
       )
@@ -98,24 +108,21 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
             AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day < ?)`,
       )
       .bind(user.id, start),
-    db
-      .prepare(
-        `SELECT d.connection_id, d.day, d.currency, d.gross, d.refunds FROM daily_revenue d
-           JOIN connections c ON c.id = d.connection_id
-          WHERE c.user_id = ? AND d.day >= ? AND d.day <= ?`,
-      )
-      .bind(user.id, prevStart, today),
+    revenueRowsStatement(db, user.id, tz, prevStart, today),
     db.prepare(LATEST_FX_SQL),
-    // Same window as the revenue rows above (UTC days start..today), per product and currency.
+    // Same window as the revenue rows above (local days start..today), per product, currency and
+    // day: each day converts at its own rate, like the revenue KPI.
     db
       .prepare(
         `SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
+                ${productDays.day.sql} AS day,
                 SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges
            FROM transactions t JOIN connections c ON c.id = t.connection_id
           WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
-          GROUP BY t.connection_id, product, t.currency`,
+          GROUP BY t.connection_id, product, t.currency, day`,
       )
-      .bind(user.id, dayStart(start), dayStart(today) + DAY),
+      .bind(...productDays.day.binds, user.id, productDays.lo, productDays.hi),
+    fxHistoryStatement(db, user.id, currency, prevStart, today),
   ]);
 
   const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
@@ -123,8 +130,10 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   const latestSnaps = (latestR!.results ?? []) as unknown as SnapRow[];
   const beforeSnaps = (beforeR!.results ?? []) as unknown as SnapRow[];
   const revRows = (revR!.results ?? []) as unknown as RevRow[];
-  const fx = rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null);
-  const cv = new FxConverter(currency, fx);
+  type FxRows = { day: string; base: string; rates: string }[] | undefined;
+  const fx = latestFx(fxR!.results as FxRows);
+  // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
+  const cv = new FxConverter(currency, fx, new FxHistory(histR!.results as FxRows));
 
   const days = dayRange(start, today);
   const revenueSeries: RevenueDay[] = days.map((day) => ({ day, total: 0, byConnection: {} }));
@@ -136,7 +145,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   let previousRevenue = 0;
   for (const r of revRows) {
     hasDailyRows.add(r.connection_id);
-    const net = cv.amount(r.gross - r.refunds, r.currency);
+    const net = cv.amountOn(r.gross - r.refunds, r.currency, r.day);
     if (r.day < start) {
       previousRevenue += net;
       continue;
@@ -165,8 +174,16 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     timeline.set(s.connection_id, list);
   }
 
-  /** Notices the structured fields below can't express. None today; see DashboardData.warnings. */
+  /**
+   * What each connection's latest sync couldn't count, named by connection. The Products: Read
+   * warning is left to the By product card, which already names those connections.
+   */
   const warnings: string[] = [];
+  for (const c of conns) {
+    for (const w of parseStoredWarnings(latestBy.get(c.id)?.warnings)) {
+      if (w !== STRIPE_PRODUCTS_WARNING) warnings.push(`${c.name}: ${w}`);
+    }
+  }
   const breakdown: BreakdownRow[] = [];
   let mrr = 0;
   let subs = 0;
@@ -219,7 +236,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       revenueTotal += revenue;
       if (row.revenue_synced_until !== null || hasDailyRows.has(row.id)) {
         revenueContributors++;
-        const historyStart = addDays(dayKey(row.created_at), -(BACKFILL_DAYS - 1));
+        const historyStart = addDays(zonedDayKey(row.created_at, tz), -(BACKFILL_DAYS - 1));
         if (historyStart > prevStart) previousCovered = false;
       }
     }
@@ -285,9 +302,23 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     productMrr,
     revenueSeries,
     mrrSeries,
-    fx: { asOf: cv.used && fx ? fx.day : null, missing },
+    fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
+    days: { timeZone: tz, otherZones: otherDayZones(conns, tz) },
     warnings,
   };
+}
+
+/** Providers among `conns` whose days aren't the user's, grouped by the zone they're in. */
+function otherDayZones(conns: readonly ConnectionRow[], tz: string): Array<{ label: string; providers: string[] }> {
+  const byZone = new Map<string, { label: string; providers: string[] }>();
+  for (const c of conns) {
+    const meta = getProviderMeta(c.provider);
+    if (!meta.dayZone || meta.dayZone.tz === tz) continue;
+    const z = byZone.get(meta.dayZone.tz) ?? { label: meta.dayZone.label, providers: [] };
+    if (!z.providers.includes(meta.name)) z.providers.push(meta.name);
+    byZone.set(meta.dayZone.tz, z);
+  }
+  return [...byZone.values()];
 }
 
 /**
@@ -310,7 +341,7 @@ export function productBreakdown(
     const conn = connById.get(r.connection_id);
     // Only providers whose daily revenue is built from these rows; anything else would count twice.
     if (!conn || getProviderMeta(conn.provider).revenueHistory !== 'transactions') continue;
-    const net = cv.amount(r.net, r.currency);
+    const net = cv.amountOn(r.net, r.currency, r.day);
     if (r.product === null) {
       addUnnamed(conn.id, net);
       continue;
@@ -411,7 +442,9 @@ export function productMrrBreakdown(
     const parts = parseProductMrr(snap.mrr_by_product);
     if (!parts) {
       unnamed += connMrr;
-      if (connMrr > 0 && meta.mrrByProduct) needsPermission.push(conn.name);
+      // Named only when the sync said why (its key can't read products); a split that's missing
+      // for another reason (a budget skip, a report without products) is just unnamed MRR.
+      if (connMrr > 0 && parseStoredWarnings(snap.warnings).includes(STRIPE_PRODUCTS_WARNING)) needsPermission.push(conn.name);
       else if (connMrr > 0) byProvider.set(conn.provider, (byProvider.get(conn.provider) ?? 0) + connMrr);
       continue;
     }

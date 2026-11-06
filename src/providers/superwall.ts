@@ -101,6 +101,17 @@ export const RESTRICTED_PROJECTS_WARNING =
   'This key can only reach some of your Superwall projects, so MRR and subscriptions cover only those. ' +
   'Give it access to all projects so every number covers the same apps.';
 
+// Snapshot warnings (`MetricsSnapshot.warnings`). Fixed text only: never Superwall's own chart names or reasons.
+export const SW_RESTRICTED_PROJECTS_WARNING = RESTRICTED_PROJECTS_WARNING;
+export const SW_MRR_CHART_PARTIAL_WARNING =
+  'Superwall says its MRR chart isn’t fully available for this organization’s apps, so MRR may be incomplete.';
+export const SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING =
+  'Superwall says its Active Subscriptions chart isn’t fully available for this organization’s apps, so the count may be incomplete.';
+export const SW_TRIALS_PERMISSION_WARNING =
+  `Trials aren’t shown, because this key can’t run Superwall’s query API. Add the ${SW_SCOPE_DATA} scope, then replace the key on the connection page.`;
+export const SW_TRIALS_SKIPPED_WARNING =
+  'Trials aren’t shown this time, because Superwall’s query API couldn’t be read; the next sync tries again.';
+
 const AUTH_MESSAGE =
   'Superwall rejected the API key. Use an organization API key from Settings → API Keys and check that it hasn’t been revoked.';
 const ORG_NOT_FOUND_MESSAGE =
@@ -412,6 +423,8 @@ async function getChartValue(
   const points = parseChartPoints(body);
   if (!points) throw unreadable(ctx, `a ${spec.name} chart`, { chart: spec.chart, ...chartShape(body) });
   const { value, fellBack } = currentValue(points, today);
+  // Neither is a snapshot warning: yesterday's point stands in until Superwall computes today's, and an
+  // organization with no subscriptions yet has an empty chart.
   if (fellBack) ctx.log('superwall_chart_used_last_complete_day', { chart: spec.chart });
   if (points.length === 0) ctx.log('superwall_chart_empty', { chart: spec.chart });
   return value;
@@ -671,17 +684,28 @@ export const superwallAdapter: ProviderAdapter = {
     const inp = requireInput(input);
     const today = dayKey(ctx.now());
     const defs = await getDefinitions(ctx, inp);
+    const warnings = new Set<string>();
+    if (defs.allProjects === false) warnings.add(SW_RESTRICTED_PROJECTS_WARNING);
+    const partial = (spec: ChartSpec) => spec.availability !== null && spec.availability.status !== 'available';
+    if (partial(defs.mrr)) warnings.add(SW_MRR_CHART_PARTIAL_WARNING);
+    if (partial(defs.activeSubscriptions)) warnings.add(SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING);
     const mrr = await getChartValue(ctx, inp, defs.mrr, 'currency', today);
     const subscriptions = await getChartValue(ctx, inp, defs.activeSubscriptions, 'number', today);
 
-    // Trials need the query API; skip it for a key verify found without data:read.
+    // Trials need the query API; skip it for a key verify found without data:read. A connection without any
+    // store events (trials unknown, not 0) isn't warned about: nothing in hoomuch changes it.
     let activeTrials: number | null = null;
-    if (input.config['revenueHistory'] !== 'none' && hasBudget(ctx)) {
+    if (input.config['revenueHistory'] === 'none') {
+      warnings.add(SW_TRIALS_PERMISSION_WARNING);
+    } else if (!hasBudget(ctx)) {
+      warnings.add(SW_TRIALS_SKIPPED_WARNING);
+    } else {
       try {
         activeTrials = await queryActiveTrials(ctx, inp);
       } catch (err) {
         if (!(err instanceof ProviderError)) throw err;
         ctx.log('superwall_trials_unavailable', { kind: err.kind, status: err.status ?? null });
+        warnings.add(err.kind === 'permission' ? SW_TRIALS_PERMISSION_WARNING : SW_TRIALS_SKIPPED_WARNING);
       }
     }
 
@@ -692,6 +716,7 @@ export const superwallAdapter: ProviderAdapter = {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
     };
   },
 

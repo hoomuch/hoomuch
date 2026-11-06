@@ -8,6 +8,7 @@ import { currentUser, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { getProviderMeta } from '../providers/registry';
 import { isProviderId, type ProviderMeta } from '../providers/types';
+import { setWebhook } from '../services/webhooks';
 import {
   createConnection,
   deleteConnection,
@@ -19,7 +20,6 @@ import type { ConnectionDetailPageProps, ManualSyncState } from '../views/pages/
 import {
   awaitingFirstSync,
   chrome,
-  execCtx,
   formLimit,
   isUuid,
   parsePoll,
@@ -94,6 +94,7 @@ function renderDetail(
       manual,
       manageOpen: c.req.query('manage') === 'open',
       rotate: opts.rotate,
+      origin: new URL(c.req.url).origin,
     }, opts.status ?? 200);
 }
 
@@ -122,7 +123,7 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     const name = form.text('name', NAME_INPUT_MAX);
     const raw = collectFields(meta, form);
 
-    const result = await createConnection(c.env, execCtx(c), user.id, provider, name || undefined, raw);
+    const result = await createConnection(c.env, user.id, provider, name || undefined, raw);
     if (!result.ok) {
       return renderPage(c, 'newConnection', {
           chrome: chrome(c),
@@ -150,7 +151,7 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
 
   app.post('/connections/demo', requireUser, formLimit, async (c) => {
     const userId = currentUser(c).id;
-    const result = await createConnection(c.env, execCtx(c), userId, 'demo', 'Demo data', {});
+    const result = await createConnection(c.env, userId, 'demo', 'Demo data', {});
     if (!result.ok) return redirectWithFlash(c, '/connections', 'error', result.error);
     // No ?first=1: the celebration is for real numbers. The flash is this event's one message.
     return redirectWithFlash(
@@ -187,7 +188,7 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     if (!isUuid(id)) return c.notFound();
     const back = `/connections/${id}`;
     // Returns at once; the page shows the sync running and then its result (no 20 s wait).
-    const r = await startSync(c.env, execCtx(c), currentUser(c).id, id);
+    const r = await startSync(c.env, currentUser(c).id, id);
     if (!r.ok) return redirectWithFlash(c, back, 'error', r.error);
     return c.redirect(`${back}?sync=${r.requestedAt}`, 303);
   });
@@ -204,7 +205,7 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
 
     const raw = collectFields(meta, await readForm(c));
     const requestedAt = Date.now();
-    const result = await rotateCredentials(c.env, execCtx(c), user.id, id, raw);
+    const result = await rotateCredentials(c.env, user.id, id, raw);
     if (!result.ok) {
       return renderDetail(c, detail, {
         rotate: { error: result.error, fieldErrors: result.fieldErrors, values: nonSecretValues(meta, raw) },
@@ -214,6 +215,25 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     // The page's sync notice says "Key replaced." and follows the sync; a flash only for caveats.
     const to = `${back}?sync=${requestedAt}&why=key`;
     return result.warnings.length > 0 ? redirectWithFlash(c, to, 'info', result.warnings.join(' ')) : c.redirect(to, 303);
+  });
+
+  app.post('/connections/:id/webhook', requireUser, formLimit, async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.notFound();
+    const user = currentUser(c);
+    const action = (await readForm(c)).text('action', 8);
+    if (action !== 'on' && action !== 'rotate' && action !== 'off') return c.notFound();
+    const row = await getConnectionDetail(c.env, user, id);
+    if (!row?.webhook) return c.notFound();
+    if (!(await setWebhook(c.env, user.id, id, action))) return c.notFound();
+    const name = getProviderMeta(row.provider).name;
+    const message =
+      action === 'on'
+        ? `Real-time updates are on. Add the URL below as a webhook in ${name}.`
+        : action === 'rotate'
+          ? `New URL ready. Replace the old one in ${name}: it no longer works.`
+          : `Real-time updates are off. Remove the webhook from ${name} too.`;
+    return redirectWithFlash(c, `/connections/${id}#realtime`, 'success', message);
   });
 
   app.post('/connections/:id/delete', requireUser, formLimit, async (c) => {

@@ -51,8 +51,9 @@ down by connection.
 ### One click
 
 Click **Deploy to Cloudflare** above. Cloudflare copies this repo into your GitHub or GitLab account,
-creates the D1 database and asks for `ENCRYPTION_KEY` (generate one with `openssl rand -base64 32`).
-Every deploy applies pending D1 migrations first, and every push to your copy redeploys it.
+creates the D1 database and the sync queue, and asks for `ENCRYPTION_KEY` (generate one with
+`openssl rand -base64 32`). Every deploy applies pending D1 migrations first, and every push to your
+copy redeploys it.
 
 ### By hand
 
@@ -62,6 +63,12 @@ npx wrangler d1 create hoomuch       # copy the printed database_id into wrangle
 openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 npm run deploy                       # applies D1 migrations, then deploys
 ```
+
+The first deploy also creates the `hoomuch-sync` queue that every sync runs on.
+
+Queues are on the Free plan too, with 10,000 operations a day. Each sync is about three
+operations, so that's roughly 3,300 syncs a day: around 130 connections at the default hourly
+interval.
 
 ### After deploying
 
@@ -84,8 +91,10 @@ npm run deploy                       # applies D1 migrations, then deploys
 | `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below). |
 | `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
+| `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
-The cron schedule itself is `triggers.crons` in `wrangler.jsonc`.
+The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
+are due on the queue.
 
 ### Protecting a public instance
 
@@ -143,6 +152,24 @@ Keys are checked live before they're saved. The first sync backfills 90 days of 
 each connection syncs every `SYNC_INTERVAL_MINUTES` (an hour by default), and **Sync now** runs one
 straight away.
 
+### Real-time updates
+
+Stripe, Paddle, Lemon Squeezy, Polar, Chargebee, Dodo Payments and Gumroad can tell hoomuch when
+something changes, so a new subscription or refund shows up about a minute later instead of at the
+next scheduled sync. On the connection's page, under **Real-time updates**, click **Turn on**, then
+add the URL it shows as a webhook in the provider's dashboard. The page lists where to paste it and
+which events to pick.
+
+- **A call is only a signal.** hoomuch never reads what a webhook sends, which can include your
+  customers' details, and doesn't check the provider's signature. It syncs that connection through
+  its read-only key, as a scheduled sync would. A burst of events becomes one sync, and webhook syncs
+  of one connection start at least 5 minutes apart.
+- **Keep the URL private.** It carries a secret token, and anyone who has it can make hoomuch sync
+  that connection (at that same rate at most). **New URL** replaces it, and the old one stops working.
+- **Not offered** for App Store Connect and Google Play (their reports arrive a day later), Adapty
+  (one webhook URL per environment, which apps already use), and RevenueCat and Superwall (their
+  charts refresh on their own schedule).
+
 ## Updating
 
 Pull the latest changes from this repository into your copy and deploy (with the button, pushing to
@@ -169,6 +196,10 @@ Changes that affect data you've already synced:
   resync. Stripe sends ISK, UGX and MGA in its own units, which are now converted on sync. Rows synced
   before that read 100× off (ISK and UGX too large, MGA too small) until the connection is removed and
   added again.
+- **v1.1: time zones and exchange rates.** Days now follow your time zone, set once from where you
+  sign in (change it in **Settings**). Revenue from transaction-based providers is regrouped
+  automatically. Past revenue now converts at its own day's rate; the first cron after the upgrade
+  fetches about 200 days of rates.
 - **Stripe MRR by product.** The dashboard's **By product** card can now split Stripe MRR by product.
   It needs **Products: Read** on the Stripe key: edit the restricted key in Stripe (⋯ → **Edit key**)
   and the split appears after the next sync. Without it, Stripe syncs as before.
@@ -206,8 +237,14 @@ wasn't. The ones you'd notice:
   sale's day, because Gumroad doesn't date them.
 - **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
   (SPEC §6.9).
-- **Everywhere:** past revenue is converted at today's FX rate, and day boundaries are UTC.
-- Provider webhooks and Queue-based fan-out are planned for v1.1 (SPEC §12.1).
+- **Days** run midnight to midnight in your time zone. It's picked up from where you first sign in,
+  and you can change it in **Settings**. RevenueCat, Dodo Payments, Adapty and Superwall report daily
+  totals in UTC, and App Store Connect in Pacific Time; those totals keep the provider's days (the
+  dashboard says so). MRR snapshots taken before v1.1 stay on UTC days.
+- **Exchange rates:** revenue converts at the exchange rate of its own day and
+  MRR at the latest, both from [Frankfurter](https://frankfurter.dev): the ECB's reference rate where
+  it publishes one, other central banks' otherwise. Rates before an instance's first sync reach back
+  about 200 days; a currency that first shows up later converts its earlier days at its oldest rate.
 
 ## How it's built
 

@@ -37,7 +37,7 @@ async function hydrate(): Promise<void> {
   const Page = (await load()) as ComponentType<Record<string, unknown>>;
   hydrateRoot(
     document,
-    <PageRoot json={json} now={payload.now}>
+    <PageRoot json={json} now={payload.now} timeZone={payload.timeZone ?? 'UTC'}>
       <Page {...(payload.props as Record<string, unknown>)} />
     </PageRoot>,
   );

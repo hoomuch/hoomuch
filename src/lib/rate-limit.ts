@@ -12,7 +12,7 @@ import { createMiddleware } from 'hono/factory';
 import type { AppEnv } from '../env';
 import { clientIp, ipBucket } from './auth';
 
-/** Seconds until a client may retry; both bindings use a 60-second period (wrangler.jsonc). */
+/** Seconds until a client may retry; every binding uses a 60-second period (wrangler.jsonc). */
 export const RATE_LIMIT_PERIOD_SECONDS = 60;
 
 /**
@@ -28,8 +28,14 @@ export async function withinLimit(binding: RateLimit | undefined, key: string): 
   }
 }
 
-/** Every request the Worker serves (static assets never reach it), per network. */
+/**
+ * Every request the Worker serves (static assets never reach it), per network. Provider webhooks
+ * are exempt: one provider sends every tenant's calls from the same few addresses, so a per-network
+ * limit would turn away one tenant's webhooks because of another's. They have their own limit, per
+ * connection (`RL_WEBHOOKS`, routes/webhooks.ts).
+ */
 export const limitRequests = createMiddleware<AppEnv>(async (c, next) => {
+  if (c.req.path.startsWith('/webhooks/')) return next();
   if (!(await withinLimit(c.env.RL_REQUESTS, `req|${ipBucket(clientIp(c))}`))) {
     return c.text('Too many requests. Wait a minute, then try again.', 429, {
       'Retry-After': String(RATE_LIMIT_PERIOD_SECONDS),

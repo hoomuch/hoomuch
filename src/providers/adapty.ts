@@ -83,6 +83,13 @@ export const HISTORY_UNAVAILABLE_WARNING =
   "Adapty didn’t return a daily revenue chart for this app, so hoomuch will show Adapty’s 30-day revenue total instead of a daily history.";
 const HISTORY_UNKNOWN_WARNING = "hoomuch couldn’t check Adapty’s revenue chart just now. It will try again on the first sync.";
 
+// Snapshot warnings (`MetricsSnapshot.warnings`). MRR and subscriptions are required (the snapshot fails
+// without them); trials are optional and show as unknown when their chart can't be read.
+export const ADAPTY_TRIALS_SKIPPED_WARNING =
+  'Trials aren’t shown this time, because the sync ran out of requests; the next sync tries again.';
+export const ADAPTY_TRIALS_UNAVAILABLE_WARNING =
+  'Trials aren’t shown, because Adapty didn’t return its active trials chart for this app.';
+
 const AUTH_MESSAGE =
   "Adapty rejected the API key. Use the Secret API key from App settings → General (it starts with “secret_live_”) and check that it hasn’t been deleted or regenerated.";
 const KEY_HINT = 'Copy it from App settings → General → API keys in the Adapty dashboard.';
@@ -362,14 +369,17 @@ async function optionalRead(
   chart: AdaptyChart,
   from: string,
   to: string,
+  onMissing?: (why: 'budget' | 'unavailable') => void,
 ): Promise<Metric | null> {
   if (!hasBudget(ctx)) {
     ctx.log('adapty_snapshot_skipped', { chart, reason: 'budget' });
+    onMissing?.('budget');
     return null;
   }
   const read = await readChart(ctx, apiKey, chart, from, to);
   if (read.ok) return read.metric;
   ctx.log('adapty_snapshot_chart_unavailable', { chart, reason: read.reason, status: read.error.status ?? null });
+  onMissing?.('unavailable');
   return null;
 }
 
@@ -480,12 +490,17 @@ export const adaptyAdapter: ProviderAdapter = {
     const mrr = await requiredLevel(ctx, apiKey, 'mrr', today);
     const subs = await requiredLevel(ctx, apiKey, 'subscriptions_active', today);
 
-    const trialsMetric = await optionalRead(ctx, apiKey, 'trials_active', today, today);
+    const warnings: string[] = [];
+    const trialsMetric = await optionalRead(ctx, apiKey, 'trials_active', today, today, (why) =>
+      warnings.push(why === 'budget' ? ADAPTY_TRIALS_SKIPPED_WARNING : ADAPTY_TRIALS_UNAVAILABLE_WARNING),
+    );
     const trials = trialsMetric ? levelOn(trialsMetric.body, today) : null;
     if (trialsMetric && trials === null) {
       ctx.log('adapty_snapshot_chart_unavailable', { chart: 'trials_active', reason: 'unreadable', status: null });
+      warnings.push(ADAPTY_TRIALS_UNAVAILABLE_WARNING);
     }
 
+    // The 30-day revenue total is revenue, not one of the snapshot's figures: logged, never warned about.
     const periodMetric = await optionalRead(ctx, apiKey, 'revenue', addDays(today, -(REVENUE_PERIOD_DAYS - 1)), today);
     const periodTotal = periodMetric ? num(periodMetric.body['value']) : null;
     if (periodMetric && periodTotal === null) {
@@ -500,6 +515,7 @@ export const adaptyAdapter: ProviderAdapter = {
         periodMetric && periodTotal !== null ? { [periodMetric.currency]: toMinor(periodTotal, periodMetric.currency) } : null,
       revenuePeriodDays: periodMetric && periodTotal !== null ? REVENUE_PERIOD_DAYS : null,
       newCustomers: null,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   },
 

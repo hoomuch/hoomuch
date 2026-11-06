@@ -30,6 +30,22 @@
     "crons": ["*/30 * * * *"]
   },
 
+  // Every sync runs in this queue's consumer (src/sync/consumer.ts), one connection per invocation,
+  // so each gets its own request budget and time. The cron, new connections and "Sync now" send to
+  // it. `wrangler deploy` creates the queue the first time if it doesn't exist yet.
+  "queues": {
+    "producers": [{ "binding": "SYNC_QUEUE", "queue": "hoomuch-sync" }],
+    "consumers": [
+      {
+        "queue": "hoomuch-sync",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "retry_delay": 60,
+        "max_concurrency": 10
+      }
+    ]
+  },
+
   "vars": {
     "APP_NAME": "hoomuch",
     "ALLOW_SIGNUP": "true",
@@ -50,7 +66,9 @@
     // Every request the Worker serves (static assets never reach it).
     { "name": "RL_REQUESTS", "namespace_id": "730001", "simple": { "limit": 300, "period": 60 } },
     // Log-in and sign-up submissions: each one costs a password hash.
-    { "name": "RL_AUTH", "namespace_id": "730002", "simple": { "limit": 10, "period": 60 } }
+    { "name": "RL_AUTH", "namespace_id": "730002", "simple": { "limit": 10, "period": 60 } },
+    // Provider webhook calls, per connection (exempt from RL_REQUESTS: providers share addresses).
+    { "name": "RL_WEBHOOKS", "namespace_id": "730003", "simple": { "limit": 30, "period": 60 } }
   ],
 
   "observability": {

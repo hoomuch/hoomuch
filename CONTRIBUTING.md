@@ -36,6 +36,9 @@ npx wrangler dev --test-scheduled
 curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
 ```
 
+The cron only queues the connections that are due; `wrangler dev` runs the sync queue locally, so
+the syncs follow a moment later in the same terminal.
+
 Before opening a pull request, run:
 
 ```bash
@@ -49,7 +52,7 @@ version, and checks that the pull request title is a Conventional Commit (see *C
 
 | Script | What it does |
 |--------|--------------|
-| `npm run dev` | `wrangler dev`. Rebuilds the CSS and the browser bundle on every reload |
+| `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
 | `npm run check` | Typecheck, tests and build |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |
@@ -68,10 +71,10 @@ src/
   lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
   providers/         adapter contract, registry, one adapter per provider, Demo
-  sync/              sync engine, aggregation, FX (frankfurter.dev), repository
+  sync/              sync engine, the sync queue and its consumer, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
-  services/          connection use-cases: create, rotate key, sync now, delete
-  routes/            HTTP handlers (Post/Redirect/Get); pages render with views/render.tsx
+  services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks
+  routes/            HTTP handlers (Post/Redirect/Get), and /webhooks for providers; pages render with views/render.tsx
   views/             layout, pages, hoomuch components, charts (React)
   components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
   client/entry.tsx   browser entry: hydrates the page the server rendered
@@ -201,12 +204,21 @@ references.
    - `verify`: a live, read-only check of the key, at most about 3 requests, with a clear error
      message and the form `field` it belongs to.
    - `fetchSnapshot`: MRR (normalised to monthly, trials excluded), active subscriptions and trials.
-   - `fetchRevenue`: charges and refunds since `req.since`. Stop when `ctx.pageBudget` runs out and
-     return a `nextCursor`, so the next sync can resume.
+     When a figure is incomplete or estimated (a missing optional permission, items without a price),
+     say so in `warnings`: one short sentence each, exported as a constant, with no customer data or
+     provider text. They show on the dashboard and the connection page until a sync stops reporting them.
+   - `fetchRevenue`: charges and refunds since `req.since`. Check `hasBudget(ctx)` before each page:
+     it turns false when the request budget runs out or the sync's deadline passes. Then return a
+     `nextCursor`, so the next sync can resume.
+   - `fetchSnapshotHistory` (optional): past days' snapshots, oldest first, if the provider has an MRR
+     series. It runs once, on a connection's first successful sync, so a new dashboard starts with a
+     trend. The demo adapter is the reference.
 4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
    `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.
-   List the exact read permissions the key needs.
+   List the exact read permissions the key needs. If the provider's API shows a change within
+   minutes and its dashboard lets anyone add a webhook URL by hand, add `webhook` (steps, event names)
+   so the connection page offers real-time updates. hoomuch never registers webhooks through an API.
 5. **Tests.** Put real response shapes under `test/fixtures/<id>/` (taken from the provider's API docs,
    with any personal data removed) and write `test/providers/<id>.test.ts`. Cover MRR maths, paging and
    cursors, error mapping (401, 403, 404, 429, 5xx), and use `expectNoSecretsInLogs`.

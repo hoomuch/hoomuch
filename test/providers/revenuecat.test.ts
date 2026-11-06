@@ -3,6 +3,7 @@ import {
   CHARTS_PERMISSION_WARNING,
   CHARTS_UNSUPPORTED_WARNING,
   isoPeriodDays,
+  RC_TRIALS_MISSING_WARNING,
   revenueCatAdapter,
 } from '../../src/providers/revenuecat';
 import { ProviderError, type ConnectionInput, type RevenuePage } from '../../src/providers/types';
@@ -305,9 +306,19 @@ describe('revenuecat fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      warnings: [RC_TRIALS_MISSING_WARNING], // the revenue and new-customer cards aren't snapshot figures: no warning
     });
     const missing = ctx.logs.find((l) => l.event === 'revenuecat_overview_missing_metrics');
     expect(missing?.data).toEqual({ missing: ['active_trials', 'revenue', 'new_customers'] });
+    expect(RC_TRIALS_MISSING_WARNING.length).toBeLessThanOrEqual(200);
+  });
+
+  it('warns only about missing trials, not about a missing revenue or new-customers card', async () => {
+    const body = { ...clone(overviewFixture), metrics: overviewFixture.metrics.filter((m) => m.id !== 'revenue' && m.id !== 'new_customers') };
+    const { fetch } = fakeFetch([route(OVERVIEW, { json: body })]);
+    const snap = await revenueCatAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeTrials).toBe(34);
+    expect(snap.warnings).toBeUndefined();
   });
 
   it('fails the snapshot (instead of writing a false zero) when the overview lacks MRR or subscriptions', async () => {

@@ -5,10 +5,10 @@
 
 import type { Bindings, SessionUser } from '../env';
 import { normalizeCurrency } from '../lib/money';
-import { DAY, dayStart } from '../lib/time';
+import { addDays, UTC, zonedDayKey, zonedDayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
 import type { TransactionPage, TransactionRow } from './types';
 
 export const TRANSACTIONS_PAGE_SIZE = 50;
@@ -31,10 +31,11 @@ interface Row {
 export async function listTransactions(
   env: Bindings,
   user: SessionUser,
-  /** `day`: one UTC day ('YYYY-MM-DD', already validated), or null for every day. */
+  /** `day`: one of the user's local days ('YYYY-MM-DD', already validated), or null for every day. */
   opts: { provider: ProviderId | null; page: number; pageSize?: number; day?: string | null },
 ): Promise<TransactionPage> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
+  const tz = user.timeZone || UTC;
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(opts.pageSize ?? TRANSACTIONS_PAGE_SIZE)));
   const page = Math.min(MAX_PAGE, Math.max(1, Math.floor(Number.isFinite(opts.page) ? opts.page : 1)));
   const offset = (page - 1) * pageSize;
@@ -48,11 +49,12 @@ export async function listTransactions(
     binds.push(opts.provider);
   }
   if (day) {
+    // The user's local day (SPEC §6).
     conds.push('t.occurred_at >= ? AND t.occurred_at < ?');
-    binds.push(dayStart(day), dayStart(day) + DAY);
+    binds.push(zonedDayStart(day, tz), zonedDayStart(addDays(day, 1), tz));
   }
   const where = conds.join(' AND ');
-  const [pageR, fxR] = await db.batch([
+  const [pageR, fxR, histR] = await db.batch([
     db
       .prepare(
         `SELECT t.connection_id, c.name AS connection_name, c.provider, t.external_id, t.occurred_at,
@@ -64,10 +66,13 @@ export async function listTransactions(
       )
       .bind(...binds, pageSize + 1, offset),
     db.prepare(LATEST_FX_SQL),
+    // A page can reach back to any day: the user's whole (slimmed) rate history, or just its day.
+    fxHistoryStatement(db, user.id, currency, day, day ?? zonedDayKey(Date.now(), tz)),
   ]);
 
   const rows = (pageR!.results ?? []) as unknown as Row[];
-  const cv = new FxConverter(currency, rowToFx((fxR!.results?.[0] ?? null) as { day: string; base: string; rates: string } | null));
+  type FxRows = { day: string; base: string; rates: string }[] | undefined;
+  const cv = new FxConverter(currency, latestFx(fxR!.results as FxRows), new FxHistory(histR!.results as FxRows));
   const items: TransactionRow[] = rows.slice(0, pageSize).map((r) => {
     const meta = getProviderMeta(r.provider);
     const original = normalizeCurrency(r.currency);
@@ -82,7 +87,8 @@ export async function listTransactions(
       type: r.type,
       amount: r.amount,
       originalCurrency: original,
-      displayAmount: cv.tryAmount(r.amount, original),
+      // At the rate of the day the money moved (SPEC §6).
+      displayAmount: cv.tryAmountOn(r.amount, original, zonedDayKey(r.occurred_at, tz)),
       description: r.description,
     };
   });

@@ -6,6 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fxV2 } from '../fixtures/fx';
 import { encryptJson } from '../../src/lib/crypto';
 import { DAY, HOUR, MINUTE, dayKey } from '../../src/lib/time';
 import { lemonSqueezyAdapter } from '../../src/providers/lemonsqueezy';
@@ -14,6 +15,7 @@ import { runScheduledSync, syncConnection } from '../../src/sync/engine';
 import { FX_MAX_AGE_MS, getLatestFx, parseFrankfurter, refreshFx, refreshFxIfStale } from '../../src/sync/fx';
 import { TEST_ENCRYPTION_KEY, createTestD1, seedConnection, seedUser } from '../fixtures/d1';
 import { fakeFetch, makeCtx, route, type FakeResponse } from '../fixtures/harness';
+import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, conn, runs, setCursorState, setup, teardown, txRows } from './helpers';
 
 afterEach(() => {
@@ -22,14 +24,6 @@ afterEach(() => {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const emptyStripeList = { object: 'list', data: [], has_more: false };
-
-function execCtx(pending: Promise<unknown>[]): ExecutionContext {
-  return {
-    waitUntil: (p: Promise<unknown>) => void pending.push(p),
-    passThroughOnException: () => undefined,
-    props: {},
-  } as unknown as ExecutionContext;
-}
 
 // ---------------------------------------------------------------------------------------------
 // FINDING 1 (high): cron starvation. selectDueConnections orders by COALESCE(last_synced_at, 0), and a
@@ -68,6 +62,7 @@ describe('probe: cron fairness', () => {
       const at = NOW + tick * 30 * MINUTE;
       vi.setSystemTime(at + 2_000);
       await runScheduledSync(c.env, at);
+      await drainQueue(c.env);
     }
 
     // Every dead connection is still retried (then backed off to 3 intervals, so far fewer than the
@@ -125,7 +120,7 @@ describe('probe: snapshot budget', () => {
       return { json: { object: 'list', data, has_more: end < TOTAL } };
     };
     const { fetch } = fakeFetch([
-      route('/v1/latest', { json: FX_BODY }),
+      route('/v2/rates', { json: fxV2(FX_BODY) }),
       route('/v1/subscriptions', activePage, { query: { status: 'active' } }),
       route('/v1/subscriptions', { json: emptyStripeList }),
       route('/v1/balance_transactions', { json: emptyStripeList }),
@@ -233,7 +228,7 @@ describe('probe: key rotation across modes', () => {
       return { json: { object: 'list', data: liveOld.created >= gte ? [liveOld] : [], has_more: false } };
     };
     const { fetch } = fakeFetch([
-      route('/v1/latest', { json: FX_BODY }),
+      route('/v2/rates', { json: fxV2(FX_BODY) }),
       route('/v1/subscriptions', { json: emptyStripeList }),
       route('/v1/prices', { json: emptyStripeList }),
       route('/v1/balance_transactions', balance),
@@ -259,10 +254,9 @@ describe('probe: key rotation across modes', () => {
       NOW - 3 * DAY,
     );
 
-    const pending: Promise<unknown>[] = [];
-    const r = await rotateCredentials(c.env, execCtx(pending), c.userId, 'rot', { apiKey: 'rk_live_abc' });
+    const r = await rotateCredentials(c.env, c.userId, 'rot', { apiKey: 'rk_live_abc' });
     expect(r.ok).toBe(true);
-    await Promise.all(pending);
+    await drainQueue(c.env);
 
     const ids = txRows(c.t, 'rot').map((x) => x.externalId);
     expect(ids).toContain('txn_live_old'); // live history within the 90-day window is fetched
@@ -281,7 +275,7 @@ describe('probe: RevenueCat garbage overview', () => {
     const c = setup();
     const PROJECT = 'proj1ab2c3d4';
     const { fetch } = fakeFetch([
-      route('/v1/latest', { json: FX_BODY }),
+      route('/v2/rates', { json: fxV2(FX_BODY) }),
       route(`/v2/projects/${PROJECT}/metrics/overview`, { json: { object: 'overview_metrics', metrics: [], currency: 'USD' } }),
       route(new RegExp(`^/v2/projects/${PROJECT}/charts/`), { status: 403, json: { message: 'forbidden' } }),
     ]);
@@ -324,9 +318,9 @@ describe('probe: RevenueCat garbage overview', () => {
 describe('probe: FX table pinning', () => {
   it('a bogus future-dated payload is rejected and a correct refresh becomes the latest table', async () => {
     const t = createTestD1();
-    const bad = fakeFetch([route('/v1/latest', { json: { amount: 1, base: 'USD', date: '2099-12-31', rates: { EUR: 92 } } })]);
+    const bad = fakeFetch([route('/v2/rates', { json: fxV2({ date: '2099-12-31', rates: { EUR: 92 } }) })]);
     await expect(refreshFx(t.db, bad.fetch, NOW)).rejects.toThrow(/future-dated/);
-    const good = fakeFetch([route('/v1/latest', { json: FX_BODY })]);
+    const good = fakeFetch([route('/v2/rates', { json: fxV2(FX_BODY) })]);
     await refreshFx(t.db, good.fetch, NOW + DAY);
 
     const latest = await getLatestFx(t.db);
@@ -336,37 +330,54 @@ describe('probe: FX table pinning', () => {
 });
 
 describe('FX payload validation and refresh cadence', () => {
-  const body = (over: Record<string, unknown> = {}) => ({ amount: 1, base: 'USD', date: '2026-11-04', rates: { EUR: 0.92 }, ...over });
+  const quote = (over: Record<string, unknown> = {}) => ({ date: '2026-11-04', base: 'USD', quote: 'EUR', rate: 0.92, ...over });
 
-  it('accepts a table dated tomorrow (UTC) at the latest, never the day after', () => {
-    expect(parseFrankfurter(body({ date: '2026-11-06' }), NOW).day).toBe('2026-11-06');
-    expect(() => parseFrankfurter(body({ date: '2026-11-07' }), NOW)).toThrow(/future-dated/);
+  it('accepts quotes dated tomorrow (UTC) at the latest, never the day after', () => {
+    expect(parseFrankfurter([quote({ date: '2026-11-06' })], NOW).map((t) => t.day)).toEqual(['2026-11-06']);
+    expect(() => parseFrankfurter([quote({ date: '2026-11-07' })], NOW)).toThrow(/future-dated/);
   });
 
   it('rejects a payload in another base, without a date, or without a single usable rate', () => {
-    expect(() => parseFrankfurter(body({ base: 'EUR' }), NOW)).toThrow(/unexpected payload/);
-    expect(() => parseFrankfurter(body({ date: '4 Nov 2026' }), NOW)).toThrow(/unexpected payload/);
-    expect(() => parseFrankfurter(body({ rates: {} }), NOW)).toThrow(/unexpected payload/);
-    expect(() => parseFrankfurter(body({ rates: { EUR: 0, GBP: -1, JPY: '150' } }), NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter([quote({ base: 'EUR' })], NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter([quote({ date: '4 Nov 2026' })], NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter([], NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter([quote({ rate: 0 }), quote({ quote: 'GBP', rate: -1 }), quote({ quote: 'JPY', rate: '150' })], NOW)).toThrow(
+      /unexpected payload/,
+    );
     expect(() => parseFrankfurter(null, NOW)).toThrow(/unexpected payload/);
+    expect(() => parseFrankfurter({ base: 'USD', date: '2026-11-04', rates: { EUR: 0.92 } }, NOW)).toThrow(/unexpected payload/); // v1's shape
   });
 
-  it('keeps only plausible, ISO-coded rates (a zero or negative rate would divide money by nothing)', () => {
-    const fx = parseFrankfurter(body({ base: 'usd', rates: { eur: 0.92, GBP: 0, TRY: -34, JPY: Number.NaN, XAU: 'x', DOLLARS: 1 } }), NOW);
-    expect(fx).toEqual({ base: 'USD', day: '2026-11-04', rates: { EUR: 0.92 } });
+  it('keeps only plausible, ISO-coded rates, grouped by the date of each quote', () => {
+    const tables = parseFrankfurter(
+      [
+        quote({ quote: 'eur', base: 'usd' }),
+        quote({ quote: 'GBP', rate: 0 }),
+        quote({ quote: 'TRY', rate: -34 }),
+        quote({ quote: 'JPY', rate: Number.NaN }),
+        quote({ quote: 'DOLLARS', rate: 1 }),
+        quote({ date: '2026-11-03', quote: 'ARS', rate: 1536 }),
+      ],
+      NOW,
+    );
+    expect(tables).toEqual([
+      { base: 'USD', day: '2026-11-03', rates: { ARS: 1536 } },
+      { base: 'USD', day: '2026-11-04', rates: { EUR: 0.92 } },
+    ]);
   });
 
   it('refreshes only once the newest row is FX_MAX_AGE_MS old, and never throws on an outage', async () => {
     const t = createTestD1();
-    const { fetch, calls } = fakeFetch([route('/v1/latest', [{ json: FX_BODY }, { status: 503, json: {} }])]);
+    // Each refresh asks twice: the blended rates, then the ECB's.
+    const { fetch, calls } = fakeFetch([route('/v2/rates', [{ json: fxV2(FX_BODY) }, { json: fxV2(FX_BODY) }, { status: 503, json: {} }])]);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     expect(await refreshFxIfStale(t.db, fetch, NOW)).toBe('refreshed'); // empty table
     expect(await refreshFxIfStale(t.db, fetch, NOW + FX_MAX_AGE_MS - 1)).toBe('fresh');
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     // Due exactly at the max age; the 503 is swallowed and the old table stays.
     expect(await refreshFxIfStale(t.db, fetch, NOW + FX_MAX_AGE_MS)).toBe('failed');
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(t.rows('SELECT day, fetched_at FROM fx_rates')).toEqual([{ day: FX_BODY.date, fetched_at: NOW }]);
     expect(errors).toHaveBeenCalledTimes(1);
   });

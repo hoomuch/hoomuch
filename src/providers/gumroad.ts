@@ -136,8 +136,24 @@ export const REFUND_LOOKBACK_MS = 30 * DAY;
 export const FIRST_BACKFILL_MIN_MS = 45 * DAY;
 /** How far back the snapshot reads each membership product's sales: covers every monthly renewal. */
 export const RECENT_CHARGES_MS = 35 * DAY;
+
 const MAX_DESCRIPTION = 120;
 const CURRENCY_USD = 'USD';
+
+// Snapshot warnings (`MetricsSnapshot.warnings`). MRR is always an estimate here (README); these name the
+// subscribers it had to guess or leave out.
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const have = (n: number) => (n === 1 ? 'has' : 'have');
+const are = (n: number) => (n === 1 ? 'is' : 'are');
+
+export const gumroadUnpricedWarning = (subscribers: number) =>
+  `${plural(subscribers, 'subscriber', 'subscribers')} ${have(subscribers)} no price hoomuch can find, so they’re left out of MRR and active subscriptions.`;
+export const gumroadGuessedPriceWarning = (subscribers: number) =>
+  `MRR may be low: ${plural(subscribers, 'subscriber', 'subscribers')} ${are(subscribers)} priced at the cheapest tier or the pay-what-you-want minimum, because their latest charge couldn’t be used.`;
+export const gumroadListPriceWarning = (subscribers: number) =>
+  `${plural(subscribers, 'subscriber', 'subscribers')} ${are(subscribers)} priced at list price, before discounts, because there were too many to look up in one sync.`;
+export const gumroadUnknownStatusWarning = (subscribers: number) =>
+  `${plural(subscribers, 'subscriber', 'subscribers')} ${have(subscribers)} a status hoomuch doesn’t know yet, so they aren’t counted.`;
 
 /** Gumroad recurrences (BasePrice::Recurrence) as billing periods. */
 const RECURRENCES: Readonly<Record<string, { interval: BillingInterval; count: number }>> = {
@@ -724,6 +740,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   const mrr: MoneyMap = {};
   let active = 0;
   const priced = { charge: 0, list: 0, list_estimated: 0, unpriced: 0, zero: 0 };
+  let listForBudget = 0; // list-priced (exactly) only because the budget ran out before their lookup
   for (const m of members) {
     const p = priceMember(m);
     const rec = recurrenceOf(m.sub.recurrence);
@@ -736,6 +753,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       continue;
     }
     priced[p.source] += 1;
+    if (p.source === 'list' && !m.looked) listForBudget += 1;
     active += 1;
     addToMoney(mrr, p.currency, normalizeToMonthly(p.amount, rec.interval, rec.count));
   }
@@ -745,6 +763,11 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   if (priced.list_estimated > 0 || stats.stoppedForBudget) {
     ctx.log('gumroad_mrr_estimated', { estimated: priced.list_estimated, budget: stats.stoppedForBudget });
   }
+  const warnings: string[] = [];
+  if (priced.unpriced > 0) warnings.push(gumroadUnpricedWarning(priced.unpriced));
+  if (priced.list_estimated > 0) warnings.push(gumroadGuessedPriceWarning(priced.list_estimated));
+  if (listForBudget > 0) warnings.push(gumroadListPriceWarning(listForBudget));
+  if (unknownStatus > 0) warnings.push(gumroadUnknownStatusWarning(unknownStatus));
   ctx.log('gumroad_snapshot', {
     memberships: products.length,
     vanished,
@@ -763,6 +786,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 

@@ -8,7 +8,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
 import type { AppEnv, Bindings, SessionUser } from '../env';
 import { hashPassword, randomId, randomToken, sha256Hex, verifyPassword } from './crypto';
-import { DAY, MINUTE } from './time';
+import { DAY, MINUTE, UTC, normalizeTimeZone } from './time';
 import { cookieSpec } from './cookies';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
 import { isDisposableEmail } from './disposable-email';
@@ -23,6 +23,7 @@ import {
   insertSession,
   insertUser,
   purgeAbandonedAccounts,
+  setInferredTimezone,
   updateUserPassword,
 } from '../db/queries';
 
@@ -355,7 +356,14 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
     const now = Date.now();
     const row = await getSessionWithUser(c.env.DB, sessionId, now, now - SESSION_ABSOLUTE_MAX_MS);
     if (row) {
-      c.set('user', { id: row.user_id, email: row.email, baseCurrency: row.base_currency });
+      let timeZone = normalizeTimeZone(row.timezone) ?? UTC;
+      // Until the user picks one in Settings, start with the zone Cloudflare saw the request
+      // come from (once). Days on every page run midnight to midnight there.
+      if (row.timezone_source === 'default') {
+        const seen = normalizeTimeZone((c.req.raw as { cf?: { timezone?: unknown } }).cf?.timezone);
+        if (seen && seen !== timeZone && (await setInferredTimezone(c.env.DB, row.user_id, seen))) timeZone = seen;
+      }
+      c.set('user', { id: row.user_id, email: row.email, baseCurrency: row.base_currency, timeZone });
       c.set('emailUnverified', row.email_verified_at === null);
       if (row.expires_at - now < SESSION_REFRESH_BELOW_MS) {
         await extendSession(c.env.DB, sessionId, now + SESSION_TTL_MS);

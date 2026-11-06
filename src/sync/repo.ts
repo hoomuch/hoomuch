@@ -48,15 +48,20 @@ export function jsonChunks(rows: readonly unknown[], maxRows = BULK_MAX_ROWS, ma
  * Takes the per-connection sync lock and returns the locked row, or null when the connection is
  * missing or another sync holds a fresh lock. A lock older than `staleBefore` is taken over.
  */
-export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<ConnectionRow | null> {
+export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<LockedConnectionRow | null> {
   return db
     .prepare(
-      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2
+      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2, queued_at = NULL
         WHERE id = ?1 AND NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?3)
-       RETURNING *`,
+       RETURNING *, (SELECT timezone FROM users WHERE users.id = connections.user_id) AS owner_timezone`,
     )
     .bind(id, now, staleBefore)
-    .first<ConnectionRow>();
+    .first<LockedConnectionRow>();
+}
+
+/** The locked row, plus its owner's zone: snapshot days and the first backfill follow it. */
+export interface LockedConnectionRow extends ConnectionRow {
+  owner_timezone: string | null;
 }
 
 export async function connectionExists(db: D1Database, id: string): Promise<boolean> {
@@ -144,6 +149,7 @@ function snapshotColumns(s: MetricsSnapshot) {
     periodDays: s.revenuePeriodDays,
     newCustomers: s.newCustomers,
     byProduct: s.mrrByProduct ? JSON.stringify(s.mrrByProduct) : null,
+    warnings: s.warnings && s.warnings.length > 0 ? JSON.stringify(s.warnings) : null,
   };
 }
 
@@ -159,18 +165,18 @@ export function upsertSnapshot(
   return db
     .prepare(
       `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, revenue_period,
-                              revenue_period_days, new_customers, mrr_by_product, captured_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              revenue_period_days, new_customers, mrr_by_product, warnings, captured_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(connection_id, day) DO UPDATE SET
          mrr = excluded.mrr, active_subscriptions = excluded.active_subscriptions,
          active_trials = excluded.active_trials, revenue_period = excluded.revenue_period,
          revenue_period_days = excluded.revenue_period_days, new_customers = excluded.new_customers,
-         mrr_by_product = excluded.mrr_by_product, captured_at = excluded.captured_at`,
+         mrr_by_product = excluded.mrr_by_product, warnings = excluded.warnings, captured_at = excluded.captured_at`,
     )
-    .bind(connectionId, day, c.mrr, c.subs, c.trials, c.period, c.periodDays, c.newCustomers, c.byProduct, capturedAt);
+    .bind(connectionId, day, c.mrr, c.subs, c.trials, c.period, c.periodDays, c.newCustomers, c.byProduct, c.warnings, capturedAt);
 }
 
-/** Historical snapshots (demo trend). Never overwrites a day that already has a row. */
+/** Past snapshots (`fetchSnapshotHistory`). Never overwrites a day that already has a row; no warnings. */
 export function insertSnapshotHistory(
   db: D1Database,
   connectionId: string,
@@ -316,6 +322,8 @@ export interface DueQuery {
   retryWaitMs: number;
   /** A 'syncing' row started after this holds a fresh lock and is skipped. */
   staleBefore: number;
+  /** A row queued after this already has a sync on its way and is skipped. */
+  queuedBefore: number;
   limit: number;
 }
 
@@ -340,6 +348,7 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
                 END AS due_at
            FROM connections
           WHERE NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?5)
+            AND COALESCE(queued_at, 0) <= ?7
        ),
        ranked AS (
          SELECT id, created_at, due_at,
@@ -349,7 +358,21 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
        )
        SELECT id FROM ranked ORDER BY turn, due_at, created_at, id LIMIT ?6`,
     )
-    .bind(q.now, q.okWaitMs, q.errorWaitMs, q.retryWaitMs, q.staleBefore, q.limit)
+    .bind(q.now, q.okWaitMs, q.errorWaitMs, q.retryWaitMs, q.staleBefore, q.limit, q.queuedBefore)
     .all<{ id: string }>();
   return (results ?? []).map((r) => r.id);
+}
+
+/** Marks connections as having a sync on the queue (`connections.queued_at`). */
+export function markQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
+  return db
+    .prepare('UPDATE connections SET queued_at = ?1 WHERE id IN (SELECT value FROM json_each(?2))')
+    .bind(at, JSON.stringify(ids));
+}
+
+/** Undoes `markQueued` when the send failed, unless something queued them again since. */
+export function clearQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
+  return db
+    .prepare('UPDATE connections SET queued_at = NULL WHERE id IN (SELECT value FROM json_each(?2)) AND queued_at = ?1')
+    .bind(at, JSON.stringify(ids));
 }

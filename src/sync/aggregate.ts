@@ -9,11 +9,12 @@
  */
 
 import { normalizeCurrency, type MoneyMap } from '../lib/money';
-import { DAY, addDays, dayKey, dayStart } from '../lib/time';
+import { DAY, UTC, addDays, dayKey, dayStart, zonedDayKey, zonedDayStart } from '../lib/time';
+import { sanitizeErrorText } from '../providers/http';
 import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent } from '../providers/types';
 
 /**
- * The first sync covers this many UTC days INCLUDING today (SPEC F-07): exactly the dashboard's
+ * The first sync covers this many days INCLUDING today, in the owner's zone (SPEC F-07): exactly the dashboard's
  * longest range (`lastNDays(90)`), so that range's "previous period" is empty rather than one
  * stray day that would show a meaningless revenue delta.
  */
@@ -28,6 +29,9 @@ export const MAX_EXTERNAL_ID_LENGTH = 255;
 export const MAX_DESCRIPTION_LENGTH = 200;
 /** Products kept per snapshot split; MRR beyond them shows as "No product name". */
 export const MAX_SNAPSHOT_PRODUCTS = 500;
+/** Warnings kept per snapshot, and the length of each (`MetricsSnapshot.warnings`). */
+export const MAX_SNAPSHOT_WARNINGS = 5;
+export const MAX_WARNING_LENGTH = 200;
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -212,6 +216,32 @@ export function cleanProductMrr(input: unknown): { products: ProductMrr[]; dropp
 }
 
 /**
+ * A snapshot's warnings as stored: strings only, one line each, key-like text masked, capped in
+ * length and number, duplicates dropped. Null when nothing is left.
+ */
+export function cleanWarnings(input: unknown): string[] | null {
+  if (!Array.isArray(input)) return null;
+  const out: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== 'string') continue;
+    const w = sanitizeErrorText(raw, MAX_WARNING_LENGTH);
+    if (w && !out.includes(w)) out.push(w);
+    if (out.length === MAX_SNAPSHOT_WARNINGS) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** A stored `snapshots.warnings` value (JSON list, or NULL) back as a list; [] when unreadable. */
+export function parseStoredWarnings(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    return cleanWarnings(JSON.parse(raw) as unknown) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Normalises a snapshot for storage. Throws when it can't be stored at all (no MRR map,
  * no subscription count): writing a zero there would put a false dip in the MRR trend.
  */
@@ -224,6 +254,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
   const period = input['revenuePeriod'] == null ? null : cleanMoneyMap(input['revenuePeriod']);
   const days = nonNegativeInt(input['revenuePeriodDays']);
   const byProduct = cleanProductMrr(input['mrrByProduct']);
+  const warnings = cleanWarnings(input['warnings']);
   return {
     snapshot: {
       mrr: mrr.map,
@@ -233,9 +264,39 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
       revenuePeriodDays: period && days ? days : null,
       newCustomers: nonNegativeInt(input['newCustomers']),
       mrrByProduct: byProduct ? byProduct.products : null,
+      ...(warnings ? { warnings } : {}),
     },
     dropped: mrr.dropped + (period?.dropped ?? 0) + (byProduct?.dropped ?? 0),
   };
+}
+
+/**
+ * Validates what `fetchSnapshotHistory` returned: real days before `today`, each a storable
+ * snapshot, one row per day (the first wins), at most `maxDays` of them (the newest).
+ */
+export function cleanSnapshotHistory(
+  input: unknown,
+  today: string,
+  maxDays: number,
+): { rows: Array<{ day: string; snapshot: MetricsSnapshot }>; skipped: number } {
+  if (!Array.isArray(input)) return { rows: [], skipped: input == null ? 0 : 1 };
+  const byDay = new Map<string, MetricsSnapshot>();
+  let skipped = 0;
+  for (const raw of input) {
+    const day = isRecord(raw) ? raw['day'] : null;
+    if (!isRecord(raw) || !isDayKey(day) || day >= today || byDay.has(day)) {
+      skipped++;
+      continue;
+    }
+    try {
+      byDay.set(day, cleanSnapshot(raw['snapshot']).snapshot);
+    } catch {
+      skipped++;
+    }
+  }
+  const rows = [...byDay].map(([day, snapshot]) => ({ day, snapshot })).sort((a, b) => (a.day < b.day ? -1 : 1));
+  skipped += Math.max(0, rows.length - maxDays);
+  return { rows: rows.slice(Math.max(0, rows.length - maxDays)), skipped };
 }
 
 // ---------- day ranges & the reference aggregation ----------
@@ -343,17 +404,19 @@ export interface RevenuePlan {
 }
 
 /**
- * Fresh pass: `since` = high-water − 2 days, or (first sync) midnight UTC at the start of the
+ * Fresh pass: `since` = high-water − 2 days, or (first sync) local midnight (the owner's zone) at the start of the
  * 90-day window, so its oldest day is complete. Resumed pass: the stored envelope's values.
  */
 export function planRevenue(
   state: { revenue_cursor: string | null; revenue_synced_until: number | null },
   now: number,
+  /** The owner's zone: a first backfill starts at its local midnight, so its oldest day is whole. */
+  tz: string = UTC,
 ): RevenuePlan {
   const freshSince =
     state.revenue_synced_until !== null && Number.isFinite(state.revenue_synced_until)
       ? Math.min(state.revenue_synced_until - REVENUE_OVERLAP_MS, now)
-      : dayStart(addDays(dayKey(now), -(BACKFILL_DAYS - 1)));
+      : zonedDayStart(addDays(zonedDayKey(now, tz), -(BACKFILL_DAYS - 1)), tz);
   const raw = state.revenue_cursor;
   if (!raw) return { since: freshSince, cursor: null, startedAt: now };
   const env = decodeBackfill(raw);

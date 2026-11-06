@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { adaptyAdapter, HISTORY_UNAVAILABLE_WARNING } from '../../src/providers/adapty';
+import {
+  ADAPTY_TRIALS_SKIPPED_WARNING,
+  ADAPTY_TRIALS_UNAVAILABLE_WARNING,
+  adaptyAdapter,
+  HISTORY_UNAVAILABLE_WARNING,
+} from '../../src/providers/adapty';
 import { ProviderError, type ConnectionInput, type RevenuePage } from '../../src/providers/types';
 import {
   expectNoSecretsInLogs,
@@ -283,6 +288,29 @@ describe('adapty fetchSnapshot', () => {
       reason: 'rejected',
       status: 400,
     });
+    expect(snap.warnings).toEqual([ADAPTY_TRIALS_UNAVAILABLE_WARNING]);
+    expectClean(ctx);
+  });
+
+  it('has no warnings when every chart answers, nor when only the 30-day revenue total is refused', async () => {
+    const ok = fakeFetch([snapshotRoutes()]);
+    expect((await adaptyAdapter.fetchSnapshot(input(), makeCtx(ok.fetch))).warnings).toBeUndefined();
+
+    const noRevenue = fakeFetch([snapshotRoutes({ revenue: { status: 400, json: err400 } })]);
+    const snap = await adaptyAdapter.fetchSnapshot(input(), makeCtx(noRevenue.fetch));
+    expect(snap.revenuePeriod).toBeNull();
+    expect(snap.warnings).toBeUndefined(); // revenue, not a snapshot figure
+  });
+
+  it('says trials aren’t shown when the trials chart answers in a shape it can’t read', async () => {
+    const { fetch } = fakeFetch([snapshotRoutes({ trials_active: { json: { data: { trials_active: { value: null, data: 'nope' } } } } })]);
+    const snap = await adaptyAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeTrials).toBeNull();
+    expect(snap.warnings).toEqual([ADAPTY_TRIALS_UNAVAILABLE_WARNING]);
+    for (const w of [ADAPTY_TRIALS_SKIPPED_WARNING, ADAPTY_TRIALS_UNAVAILABLE_WARNING]) {
+      expect(w.length).toBeLessThanOrEqual(200);
+      expect(w).toMatch(/\.$/);
+    }
   });
 
   it('skips the optional charts when the budget runs out', async () => {
@@ -296,6 +324,7 @@ describe('adapty fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      warnings: [ADAPTY_TRIALS_SKIPPED_WARNING],
     });
     expect(calls).toHaveLength(2);
     expect(logEvents(ctx).filter((e) => e === 'adapty_snapshot_skipped')).toHaveLength(2);
