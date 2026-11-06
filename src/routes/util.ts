@@ -77,7 +77,11 @@ export function parsePage(v: string | undefined): number {
 // ---------- first-sync polling (zero JS, bounded) ----------
 
 export const POLL_SECONDS = 5;
-export const MAX_POLLS = 20;
+/**
+ * Refreshes before the page stops polling: 5 minutes, past the longest a sync can run
+ * (sync/engine.ts: SYNC_DEADLINE_MS + HARD_STOP_GRACE_MS) and the moment the queue takes to start it.
+ */
+export const MAX_POLLS = 60;
 /** `?poll=` value meaning "the user turned automatic refresh off" (WCAG 2.2.1 Timing Adjustable). */
 export const POLL_STOPPED = MAX_POLLS + 1;
 

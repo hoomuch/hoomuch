@@ -510,13 +510,20 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
 
 // ---------- fetchSnapshot ----------
 
-async function listProducts(ctx: ProviderContext, token: string): Promise<Json[]> {
-  const out: Json[] = [];
+/**
+ * Every membership product, kept as `MembershipProduct` page by page: a raw product carries its description,
+ * covers and the like, so a seller with thousands of products would otherwise sit in memory whole.
+ */
+async function listMemberships(ctx: ProviderContext, token: string): Promise<MembershipProduct[]> {
+  const out: MembershipProduct[] = [];
   let key: string | null = null;
   for (;;) {
     const body = await gumroadGet(ctx, token, '/products', { page_key: key });
     const page = parsePage(ctx, '/products', body, 'products', key);
-    out.push(...page.items);
+    for (const item of page.items) {
+      const membership = toMembership(item);
+      if (membership) out.push(membership);
+    }
     if (!page.next) return out;
     key = page.next;
   }
@@ -705,7 +712,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   const now = ctx.now();
 
   // Required reads: without every product and subscriber the counts would be wrong (BudgetExhaustedError).
-  const products = (await listProducts(ctx, token)).map(toMembership).filter((p): p is MembershipProduct => p !== null);
+  const products = await listMemberships(ctx, token);
   const members: Member[] = [];
   const seen = new Set<string>();
   let trials = 0;

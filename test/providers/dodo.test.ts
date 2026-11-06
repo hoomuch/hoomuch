@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BudgetExhaustedError } from '../../src/providers/http';
 import {
   DODO_LIVE_BASE,
+  DODO_SNAPSHOT_PAGE_BUDGET,
   DODO_TEST_BASE,
   LEGACY_KEY_WARNING,
   classifySubscription,
@@ -9,6 +10,7 @@ import {
   dodoAdapter,
 } from '../../src/providers/dodo';
 import { ProviderError } from '../../src/providers/types';
+import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { DAY } from '../../src/lib/time';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall } from '../fixtures/harness';
 // Shapes from the OpenAPI schemas on https://docs.dodopayments.com/api-reference (SubscriptionListResponseItem,
@@ -395,6 +397,17 @@ describe('dodo fetchSnapshot', () => {
     const active = Array.from({ length: 250 }, () => sub());
     const { fetch } = fakeFetch(subscriptionRoutes(active));
     await expect(dodoAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 2 }))).rejects.toBeInstanceOf(BudgetExhaustedError);
+  });
+
+  it(`stops after ${DODO_SNAPSHOT_PAGE_BUDGET} requests whatever the sync allows, so one sync stays under 240 a minute`, async () => {
+    const full = list(Array.from({ length: 100 }, () => sub())); // every page full: the listing never ends
+    const { fetch, calls } = fakeFetch([route('/subscriptions', { json: full }, { query: { status: 'active' } })]);
+    const err = await catchErr(dodoAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: SNAPSHOT_PAGE_BUDGET })));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('budget');
+    expect(calls).toHaveLength(DODO_SNAPSHOT_PAGE_BUDGET);
+    // With the revenue phase right after it, at most 3/4 of the limit every key of the business shares.
+    expect(DODO_SNAPSHOT_PAGE_BUDGET + REVENUE_PAGE_BUDGET).toBeLessThanOrEqual(0.75 * 240);
   });
 
   it('refuses a malformed key without a network call', async () => {

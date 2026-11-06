@@ -130,6 +130,16 @@ export function hasBudget(ctx: ProviderContext, n = 1): boolean {
   return ctx.pageBudget >= n && !outOfTime(ctx);
 }
 
+/**
+ * Lowers `ctx.pageBudget` to at most `max` for the rest of the call, for a provider whose per-minute rate
+ * limit is below the sync's own budget. Requests run back to back, so a sync that may only make `max` of
+ * them can't go over a limit it stays under in total; running out then reads as an empty budget
+ * (`BudgetExhaustedError`), not as a 429 that the next sync would hit again.
+ */
+export function capBudget(ctx: ProviderContext, max: number): void {
+  if (ctx.pageBudget > max) ctx.pageBudget = max;
+}
+
 /** A retry wait that would end past the deadline isn't worth starting: the retry could never run. */
 function canWait(ctx: ProviderContext, ms: number): boolean {
   return ctx.deadline === undefined || ctx.now() + ms < ctx.deadline;

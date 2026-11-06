@@ -187,7 +187,7 @@ describe('replacing a key', () => {
     ]);
     vi.stubGlobal('fetch', fetch);
     const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' });
-    expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a minute.' });
+    expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a few minutes.' });
     // Nothing was swapped or purged under the running sync.
     expect(c.t.rows<{ n: number }>('SELECT COUNT(*) AS n FROM transactions WHERE connection_id = ?', 'k')[0]!.n).toBe(1);
     expect(c.t.rows<{ test_mode: number }>('SELECT test_mode FROM connections WHERE id = ?', 'k')[0]!.test_mode).toBe(1);

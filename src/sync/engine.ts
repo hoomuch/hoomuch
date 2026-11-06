@@ -3,7 +3,7 @@
  *
  * One sync of one connection:
  *   1. lock      conditional UPDATE … RETURNING (fresh 'syncing' rows are skipped; a lock older than
- *                5 min is taken over) + open a `sync_runs` row.
+ *                10 min is taken over) + open a `sync_runs` row.
  *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history while it has none)
  *                in its own batch, so it survives a later revenue failure.
  *                Both provider calls run against a wall-clock deadline (`ProviderContext.deadline`):
@@ -92,16 +92,24 @@ export interface SyncResult {
 
 /**
  * Upstream requests per sync for the snapshot. Not resumable, so it must cover a whole account:
- * 80 Stripe pages ≈ 7,500 subscriptions plus coupon/price lookups. Cron worst case with retries:
- * 10 connections × (80 + 20) × 3 attempts = 3,000 subrequests (Workers Paid allows 10,000).
+ * 400 Stripe pages of 100 are 35,000 to 40,000 subscriptions, depending on how many coupon, price
+ * and product lookups share the budget, if Stripe answers fast enough to fit them in the snapshot's
+ * deadline (about 2 pages a second). Providers whose per-minute rate limit is lower cap it in their
+ * adapter (`capBudget` in providers/http.ts: Lemon Squeezy, Paddle, Dodo Payments, Chargebee).
+ * Every sync runs in its own queue invocation, so one sync costs at most (400 + 20) logical requests
+ * × 3 attempts (http.ts retries) ≈ 1,300 subrequests plus FX and D1, against Workers Paid's 10,000.
  */
-export const SNAPSHOT_PAGE_BUDGET = 80;
+export const SNAPSHOT_PAGE_BUDGET = 400;
 /** Days of past snapshots asked of `fetchSnapshotHistory` on a first sync (the longest dashboard range). */
 export const SNAPSHOT_HISTORY_DAYS = 90;
 /** Upstream requests per sync for revenue paging (SPEC §4.1: 20 per connection). */
 export const REVENUE_PAGE_BUDGET = 20;
-/** A 'syncing' lock older than this is considered abandoned (matches services/connections.ts). */
-export const SYNC_LOCK_STALE_MS = 5 * MINUTE;
+/**
+ * A 'syncing' lock older than this is considered abandoned (matches services/connections.ts). Well
+ * past the longest a live sync can hold it (`SYNC_DEADLINE_MS` + `HARD_STOP_GRACE_MS` + its D1
+ * writes), so a sync that is still running is never taken over.
+ */
+export const SYNC_LOCK_STALE_MS = 10 * MINUTE;
 /**
  * Connections the cron queues per tick (SPEC §4.1): one `sendBatch`. Due times only move forward
  * and the order is per-tenant round robin, so anything left over goes first on the next tick.
@@ -115,9 +123,12 @@ export const ERROR_BACKOFF_INTERVALS = 3;
  * wall time), so this bounds how long a slow provider keeps one connection's sync open, not a
  * platform limit; a backfill that needs longer continues on the next sync from its cursor.
  */
-export const SYNC_DEADLINE_MS = 60_000;
-/** Share of the deadline the snapshot may use; revenue (resumable) gets the remainder. */
-export const SNAPSHOT_DEADLINE_SHARE = 0.6;
+export const SYNC_DEADLINE_MS = 4 * MINUTE;
+/**
+ * Share of the deadline the snapshot may use (3 minutes, time for its whole page budget at about
+ * 2 requests a second); revenue (resumable) gets the remainder, at least a minute.
+ */
+export const SNAPSHOT_DEADLINE_SHARE = 0.75;
 /**
  * Due-time slack for the cron. Syncs start a few seconds after each tick, so a strict
  * "older than the interval" check would always miss the tick exactly one interval later and
@@ -249,7 +260,7 @@ async function release(
     stmts.push(pruneSyncRuns(db, row.id));
     await db.batch(stmts);
   } catch (err) {
-    // The lock goes stale after 5 minutes and the next sync takes over.
+    // The lock goes stale after SYNC_LOCK_STALE_MS and the next sync takes over.
     emit('error', 'sync_error', { phase: 'release', connectionId: row.id, ...errorLogFields(err) });
   }
 }

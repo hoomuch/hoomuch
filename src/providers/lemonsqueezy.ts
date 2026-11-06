@@ -16,7 +16,8 @@
  *    (test vs live), and every order / invoice / subscription / discount carries `test_mode`.
  *  - Rate limit: 300 calls per minute, 429 when exceeded, no Retry-After (only X-Ratelimit-* headers on
  *    successful responses). A quick retry lands in the same minute, so every request uses
- *    `rateLimit: 'yield'`: revenue returns its cursor, a snapshot fails (a partial one would be wrong).
+ *    `rateLimit: 'yield'`: revenue returns its cursor, a snapshot fails (a partial one would be wrong). A
+ *    snapshot makes at most LS_SNAPSHOT_PAGE_BUDGET requests, so one sync can't run into that limit itself.
  *  - Prices (`GET /v1/prices/{id}`): `scheme` standard|package|graduated|volume, `unit_price` (int cents; "not
  *    used for volume and graduated pricing (tier data is used instead)", null for usage-based),
  *    `unit_price_decimal`, `package_size`, `tiers[{last_unit|"inf", unit_price, unit_price_decimal, fixed_fee}]`,
@@ -70,7 +71,7 @@
  */
 
 import { addToMoney, normalizeToMonthly, type BillingInterval, type MoneyMap } from '../lib/money';
-import { BudgetExhaustedError, RateLimitedError, buildUrl, fetchJson, hasBudget, type QueryValue, type RequestSpec } from './http';
+import { BudgetExhaustedError, RateLimitedError, buildUrl, capBudget, fetchJson, hasBudget, type QueryValue, type RequestSpec } from './http';
 import {
   ProviderError,
   type ConnectionConfig,
@@ -107,6 +108,12 @@ export const CHECKOUT_ORDER_MARGIN_MS = 60 * 60_000;
 export const MAX_CARRIED_ORDERS = 3000;
 /** Subscription statuses listed for the snapshot (each is a separate filtered listing). */
 const SNAPSHOT_STATUSES = ['active', 'past_due', 'cancelled', 'on_trial'] as const;
+/**
+ * Most requests one snapshot makes (`capBudget`), below the sync's own budget. With the revenue phase's 20
+ * right after it, a sync stays within 3/4 of the 300-a-minute limit however fast Lemon Squeezy answers, so
+ * a bigger store fails with "more subscriptions than one sync can read" rather than with a 429 every sync.
+ */
+export const LS_SNAPSHOT_PAGE_BUDGET = 200;
 const CHARGEABLE_STATUSES = new Set(['paid', 'refunded', 'partial_refund']);
 const INTERVALS = new Set<BillingInterval>(['day', 'week', 'month', 'year']);
 /** `orders` value for a checkout order Lemon Squeezy no longer returns (treated as paid at checkout). */
@@ -768,6 +775,7 @@ interface PricedSubscription {
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
+  capBudget(ctx, LS_SNAPSHOT_PAGE_BUDGET);
   const apiKey = apiKeyOf(input);
   const scope = storeScope(input.config);
   const keyTestMode = await resolveKeyTestMode(input, apiKey, ctx);

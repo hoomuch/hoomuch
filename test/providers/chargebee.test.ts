@@ -3,6 +3,7 @@ import { currencyExponent } from '../../src/lib/money';
 import { BudgetExhaustedError } from '../../src/providers/http';
 import {
   CHARGEBEE_PERMISSION,
+  CHARGEBEE_SNAPSHOT_PAGE_BUDGET,
   LATE_SETTLEMENT_WINDOW_MS,
   chargebeeAdapter,
   chargebeeUnpricedItemsWarning,
@@ -10,6 +11,7 @@ import {
   toMinorUnits,
 } from '../../src/providers/chargebee';
 import { ProviderError } from '../../src/providers/types';
+import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { isStaleCursorError } from '../../src/sync/errors';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, recordSleeps, route, type RecordedCall, type Route } from '../fixtures/harness';
 // Sample objects from https://apidocs.chargebee.com/docs/api (API v2, Product Catalog 2.0), verbatim except that
@@ -480,6 +482,19 @@ describe('chargebee fetchSnapshot', () => {
     const err = await catchErr(chargebeeAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 1 })));
     expect(err).toBeInstanceOf(BudgetExhaustedError);
     expect(calls).toHaveLength(1);
+  });
+
+  it(`stops after ${CHARGEBEE_SNAPSHOT_PAGE_BUDGET} requests whatever the sync allows, so one sync stays under 150 a minute`, async () => {
+    let page = 0;
+    const { fetch, calls } = fakeFetch([
+      route('/api/v2/subscriptions', () => ({ json: subList([sub()], JSON.stringify([String(++page), '1'])) }), { query: ACTIVE }),
+    ]);
+    const err = await catchErr(chargebeeAdapter.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: SNAPSHOT_PAGE_BUDGET })));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('budget');
+    expect(calls).toHaveLength(CHARGEBEE_SNAPSHOT_PAGE_BUDGET);
+    // With the revenue phase right after it, at most 3/4 of the Starter and test-site limit the merchant shares.
+    expect(CHARGEBEE_SNAPSHOT_PAGE_BUDGET + REVENUE_PAGE_BUDGET).toBeLessThanOrEqual(0.75 * 150);
   });
 
   it('refuses a next_offset that doesn’t move', async () => {

@@ -28,7 +28,11 @@ export interface SyncMessage {
   at: number;
 }
 
-/** A queued sync that hasn't started after this long is presumed lost, and may be queued again. */
+/**
+ * A queued sync that hasn't started after this long is presumed lost, and may be queued again. A message
+ * merely waiting its turn can outlive it too, behind a backlog of long syncs (up to SYNC_DEADLINE_MS each,
+ * `max_concurrency` at a time); its copy is then superseded by the first one's sync, or retries a failed one.
+ */
 export const QUEUED_STALE_MS = 15 * MINUTE;
 /** Messages per `sendBatch` call (the Queues limit). */
 export const SEND_BATCH_MAX = 100;

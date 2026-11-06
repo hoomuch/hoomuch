@@ -139,7 +139,7 @@ bağlantıya yazılır); yalnızca senkronizasyon dışındaki bir çökme ya da
 (`max_retries: 3`; işaret kalır). Teslimat en az bir kezdir: `at`'inden sonra başlamış başarılı bir senkronizasyon varsa mesaj
 iş yapmadan ack'lenir. Meşgul bağlantıyı bulan ilk deneme ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra
 yeniden dener. Yeniden teslim edilen mesaj (`attempts > 1`) meşgul bulursa kilidi kendi ölü denemesi tutuyor olabilir: kilit
-bayatlayınca (5 dk) yeniden dener; böylece webhook mesajı da `max_retries` içinde (60 + 300 sn) bayat kilidi devralır.
+bayatlayınca (10 dk) yeniden dener; böylece webhook mesajı da `max_retries` içinde (60 + 600 sn) bayat kilidi devralır.
 `wrangler deploy` kuyruk yoksa oluşturur.
 
 **Senkronizasyon (bir bağlantı):**
@@ -157,9 +157,12 @@ bayatlayınca (5 dk) yeniden dener; böylece webhook mesajı da `max_retries` i�
 
 **Cron:** Her 30 dakikada bir: önce FX (günde bir; kur geçmişi kurulumdan/yükseltmeden sonra bir kez doldurulur),
 sonra vadesi gelen **en fazla 100 bağlantı** (kiracı başına sıralı, `queued_at`'i taze olanlar hariç) tek `sendBatch`
-ile kuyruğa konur. Her senkronizasyonda sayfa bütçesi gelir için 20, snapshot için 80 istek; son tarih 60 sn
-(`ProviderContext.deadline`: snapshot payı %60, kalan gelire), son tarihten 5 sn sonra `ProviderContext.signal` uçuştaki
-istekleri keser.
+ile kuyruğa konur. Her senkronizasyonda sayfa bütçesi gelir için 20, snapshot için 400 istek; dakikalık limiti düşük
+sağlayıcıların adaptörü snapshot'ınkini düşürür (`capBudget`: Lemon Squeezy 200, Paddle ve Dodo Payments 160, Chargebee 90;
+§6), böylece gelirin 20'siyle bir senkronizasyon limitin 3/4'ünü geçmez. Son tarih 4 dk (`ProviderContext.deadline`:
+snapshot payı %75, yani 3 dk, kalan gelire), son tarihten 5 sn sonra `ProviderContext.signal` uçuştaki istekleri keser.
+Snapshot devam ettirilemez: bütçe ya da süre yetmezse o senkronizasyonda MRR yazılmaz. Kilit 10 dk sonra bayat sayılır;
+canlı bir senkronizasyon (en çok 4 dk + 5 sn + D1 yazımları) bu süreye yaklaşmaz, yani başkası devralmaz.
 
 **Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir; yolda bir senkronizasyon varsa ikincisi eklenmez. Kuyruğa
 konur; istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir.
@@ -284,7 +287,7 @@ dilimi de aynı denetimden geçer; geçmezse varsayılan (UTC) korunur. Saklanm�
   ise ilk kademenin `flat_amount`'u). Bu API sürümünde indirim yalnızca kupon ID'si taşır; kupon `GET /v1/coupons/{id}` ile çekilip (çalışma başına önbellek)
   `percent_off`/`amount_off` uygulanır. Vergi hariçtir: item'ın `tax_rates`'i (yoksa aboneliğin `default_tax_rates`'i) içindeki `inclusive` oranlar, indirimlerden sonra
   `tutar / (1 + Σ oran)` ile çıkarılır. Stripe Tax (`automatic_tax`) açıksa oran bilinmez; vergi dahil fiyat olduğu gibi kalır ve loglanır. Müşteri düzeyindeki
-  indirimler uygulanmaz (Customers izni müşteri kişisel verisini açar). Para birimi: `subscription.currency`. Sayfa bütçesiyle ~7.000 aktif aboneliğe kadar okunur.
+  indirimler uygulanmaz (Customers izni müşteri kişisel verisini açar). Para birimi: `subscription.currency`. Sayfa bütçesi (400 istek) ~35.000 aktif aboneliğe yeter; Stripe yavaş yanıt verirse önce 3 dk'lık snapshot süresi dolar.
 - **Ürüne göre MRR (`mrrByProduct`):** her aboneliğin MRR'ı, indirim ve vergiden sonra, item'larının ürününe (`price.product`) bölünür;
   tam minor unit'e en büyük kalan yöntemiyle yuvarlanır, toplamı aboneliğin MRR'ına eşittir. Bir abonelik ödediği her ürünün altında bir kez sayılır;
   %100 indirimli item'ın ürünü sayılmaz. Adlar abonelikler okunduktan sonra `GET /v1/products?ids[]=…&limit=100` ile (100 ürün başına bir istek,
@@ -344,6 +347,7 @@ dilimi de aynı denetimden geçer; geçmezse varsayılan (UTC) korunur. Saklanm�
 - **Tutar birimi:** Belgeler yalnızca "in cents" der ve iki ondalıklı olmayan para birimleri için ne anlama geldiğini
   söylemez. Tutarlar ISO minor unit kabul edilir (JPY/KRW tam, HUF/IDR yüzde birlik); ISK, UGX ve MGA doğrulanmadı.
 - **Limit:** 300 istek/dk, `Retry-After` yok. 429'da yeniden denenmez: gelir okuduğunu ve imleci döndürür, snapshot başarısız olur.
+  Snapshot en çok 200 istek yapar (gelirin 20 isteğiyle birlikte limitin en çok 3/4'ü); daha büyük bir mağaza 429 yerine "tek senkronizasyonda okunamayacak kadar abonelik" hatası alır.
 - ✅ **Doğrulandı:** `prices` alanları `scheme`, `unit_price` (volume/graduated'da kullanılmaz), `unit_price_decimal`,
   `package_size`, `tiers`, `renewal_interval_*`, `trial_interval_*` ([price object](https://docs.lemonsqueezy.com/api/prices/the-price-object));
   denemede `trial_ends_at` / `first_subscription_item` davranışı ([subscription object](https://docs.lemonsqueezy.com/api/subscriptions/the-subscription-object));
@@ -385,6 +389,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 - **Deneme:** `status=trialing` → `estimated_total`.
 - **Gelir:** Faz 1: `GET /transactions?status=completed&updated_at[GTE]=<since>&order_by=id[DESC]&per_page=30` (`Skip-Count: true`, `include` yok) → charge: `details.totals.grand_total − grand_total_tax` (kredi uygulanmışsa vergi de orantılı düşer), `fee` = `details.totals.fee`, para birimi `details.totals.currency_code`, tarih = son `captured` ödemenin `captured_at`'i (yoksa `billed_at`). `billed_at` yerine `updated_at` ile süzülür: dunning'de geç tahsil edilen yenileme eski `billed_at`'ini korur ama tamamlanınca `updated_at` güncellenir. `since`'ten önce tahsil edilmiş ya da tutarı ≤ 0 olanlar atlanır. Açıklama: ilk katalog (`standard`) ürünün adı; `custom` ürün adları satışa özel olduğu için kullanılmaz. Faz 2: `GET /adjustments?action=refund,chargeback,chargeback_reverse&status=approved,reversed&per_page=50` (tarih filtresi yok, en yeniden) → `refund`/`chargeback` negatif, `chargeback_reverse` pozitif; tutar `totals.total − totals.tax` (yalnızca vergi iadesi atlanır). İade tarihi `updated_at` (onay anı), chargeback tarihi `created_at` (geri alınınca `updated_at` değişir; `reversed` chargeback ile ayrı gelen geri alma birbirini netler). `credit` sayılmaz (müşteri bakiyesine gider, sonraki işlemin `grand_total`'ını düşürür). `created_at < since − 30 gün` olan kayda ulaşınca durulur. Cursor `{since, phase, after}`; 429'da o ana kadar okunan olaylar ve cursor döner.
 - **Limit:** IP başına 240 istek/dk; aşılınca IP 60 sn bloklanır → `rateLimit: 'yield'` (bekleme/yeniden deneme yok). Cloudflare Workers çıkış IP'leri paylaşımlıdır.
+  Snapshot en çok 160 istek yapar (gelirin 20 isteğiyle birlikte limitin en çok 3/4'ü); metrik yolu 3 istekle biter, tahmin yolu ~30.000 aboneliğe kadar okur.
 - ✅ **Doğrulandı (2026-11-05):** anahtar biçimi ve taban URL'ler ([authentication](https://developer.paddle.com/api-reference/about/authentication)), `GET /` alanları ([api root](https://developer.paddle.com/api-reference/api-root/get-api-root)), izin adları ([permissions](https://developer.paddle.com/api-reference/about/permissions)), hata kodları ([invalid_token](https://developer.paddle.com/errors/shared/invalid_token)), rate limit ([rate limiting](https://developer.paddle.com/api-reference/about/rate-limiting)), sayfalama / `Skip-Count` / `estimated_total` ([pagination](https://developer.paddle.com/api-reference/about/pagination)), MRR uç noktası ([metrics](https://developer.paddle.com/api-reference/metrics/get-metrics-monthly-recurring-revenue)), transaction / adjustment / discount / subscription alanları. **Doğrulanmadı:** metrik MRR'ın past_due ve vergi muamelesi; gelecekteki `to` tarihinin kabulü (400 dönerse tahmine düşülür); `GET /discounts?id=` varsayılanının custom indirimleri döndürüp döndürmediği; chargeback kayıtlarının `status` değeri ve `chargeback_reverse` tutar işareti (mutlak değer alınır).
 
 ### 6.6 Polar
@@ -439,7 +444,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   `expired` hariç. `cancel_at_next_billing_date=true` olan aktif abonelik dönem sonuna kadar sayılır. Tutarı 0 olanlar
   (salt kullanım bazlı, %100 indirim) ve `on_demand` abonelikler MRR'a ve aktif sayıya girmez. `tax_inclusive=true` tutarlar
   vergi dahildir ve olduğu gibi sayılır (API oran vermez; log'lanır). Para birimi: `subscription.currency`.
-  Sayfa bütçesiyle ~8.000 aboneliğe kadar okunur.
+  Snapshot en çok 160 istek yapar (bkz. Limit), yani ~16.000 aboneliğe kadar okunur.
 - **Deneme:** `trialing` durumu yoktur. `trial_period_days > 0` ve `next_billing_date ≤ created_at + trial_period_days (+1 saat)`
   → deneme (ücretli deneme dahil; belgelerin önerdiği kontrol). `next_billing_date` ileri alınarak uzatılan deneme ücretli sayılır.
 - **Gelir:** `revenueHistory = 'daily'`. Ödeme listesinde vergi yoktur (yalnızca `GET /payments/{id}`), bu yüzden kaynak bakiye
@@ -450,7 +455,8 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   (`gross − refunds` değişmez). Açık/kaybedilen itirazlar iade sayılır, kazanılanın reversal'ı bunu geri alır. Komisyonlar,
   payout, Dodo kredileri, düzeltmeler, kur farkı ve rezervler hariç. Hareketsiz okunan günler 0 USD yazılır. Transactions
   sayfasında satır yoktur.
-- **Limit:** İşletme başına (tüm anahtarlar ortak) 40 istek/sn, 240 istek/dk; 429'da `Retry-After` yok.
+- **Limit:** İşletme başına (tüm anahtarlar ortak) 40 istek/sn, 240 istek/dk; 429'da `Retry-After` yok. Snapshot en çok 160 istek
+  yapar (gelirin 20 isteğiyle birlikte limitin en çok 3/4'ü), satıcının kendi entegrasyonuna pay kalır.
 - ✅ **Doğrulandı:** hostlar, önekler, izin hataları ([API reference](https://docs.dodopayments.com/api-reference/introduction),
   [error codes](https://docs.dodopayments.com/api-reference/error-codes)); abonelik alanları ve durumları
   ([list subscriptions](https://docs.dodopayments.com/api-reference/subscriptions/get-subscriptions-1),
@@ -488,7 +494,8 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 - **Para birimi:** Tutarlar "in cents" (ana birimin 1/100'ü); sıfır ondalıklı para birimleri (CLP, ISK, JPY, KRW, MGA, PYG, VND, XAF, XOF,
   XPF) ana birimdedir. Hepsi hoomuch'un ISO 4217 minor unit'ine (`currencyExponent`) çevrilir: HUF, IDR gibi iki ondalıklılar olduğu gibi kalır; MGA (ISO 2) ×100.
 - **Limit:** Test siteleri ve Starter 150 istek/dk (Performance 1000, Enterprise 3500), satıcının kendi entegrasyonuyla paylaşılır.
-  Snapshot 429'da kısa Retry-After'ı bekler; gelir hemen bırakır ve sonraki senkronda devam eder.
+  Snapshot 429'da kısa Retry-After'ı bekler; gelir hemen bırakır ve sonraki senkronda devam eder. Plan API'den okunamadığı için
+  snapshot her sitede en çok 90 istek yapar (gelirin 20 isteğiyle birlikte 150'nin en çok 3/4'ü), yani ~9.000 abonelik ve deneme.
 - ✅ **Doğrulandı:** filtreler, operatörler ve sayfalama ([list subscriptions](https://apidocs.chargebee.com/docs/api/subscriptions/list-subscriptions),
   [list transactions](https://apidocs.chargebee.com/docs/api/transactions/list-transactions), [list operations](https://apidocs.chargebee.com/docs/api/list-ops));
   `mrr` ve statüler ([subscription object](https://apidocs.chargebee.com/docs/api/subscriptions/subscription-object)); hata kodları ve
@@ -848,7 +855,7 @@ Kurallar:
 | Risk | Etki | Azaltma |
 |------|------|---------|
 | RevenueCat `charts:read` izni verilmemiş olabilir | RC için günlük gelir grafiği yok | Snapshot geliri + uyarı ile zarif düşüş |
-| Bir senkronizasyon tek çağrıya sığmaz | Backfill birkaç senkronizasyona yayılır | v1.1: her senkronizasyon kendi kuyruk çağrısında (60 sn son tarih + cursor) |
+| Bir senkronizasyon tek çağrıya sığmaz | Backfill birkaç senkronizasyona yayılır | v1.1: her senkronizasyon kendi kuyruk çağrısında (4 dk son tarih + cursor) |
 | Free plan Queues kotası (günde 10.000 işlem) | Çok bağlantılı ya da yoğun webhook'lu kurulumda kota dolar | Webhook senkronizasyonları bağlantı başına 5 dk arayla; README Free plan sınırını söyler |
 | frankfurter.dev harmanlanmış kurları sonradan küçük oynayabilir | Geçmiş gün geliri birkaç kuruş farklı olabilir | Kur kendi gününe yazılır; günlük çekim her para biriminin yalnızca en yeni kurunu getirdiği için bir günün kuru, o para biriminin en yeni kuru olduğu sürece sonraki çekimlerle değişebilir (`json_patch`, yeni gelen kazanır), sonra sabit kalır; geçmiş bir kez çekilir; ECB yayımladığı yerde ECB kuru |
 | Günlük toplam veren sağlayıcılar kullanıcının diliminde gruplanamaz | O sağlayıcıların günü kullanıcının gününden kayabilir | `ProviderMeta.dayZone` ile dashboard'da açıkça belirtilir |

@@ -227,8 +227,8 @@ describe('runScheduledSync — selection', () => {
     const c = ctx();
     stripeOk();
     await seed(c, 'new', { status: 'pending', lastSyncedAt: null, lastSyncStartedAt: null });
-    // The initial sync's worker was killed 6 minutes ago: the lock is stale, retry now, not in an hour.
-    await seed(c, 'killed-initial', { status: 'syncing', lastSyncedAt: null, lastSyncStartedAt: NOW - 6 * MINUTE });
+    // The initial sync's worker was killed 11 minutes ago: the lock is stale, retry now, not in an hour.
+    await seed(c, 'killed-initial', { status: 'syncing', lastSyncedAt: null, lastSyncStartedAt: NOW - 11 * MINUTE });
     await seed(c, 'initial-running', { status: 'syncing', lastSyncedAt: null, lastSyncStartedAt: NOW - 2 * MINUTE });
     // Key just rotated (status back to pending) after a recent attempt: give its own sync a chance first.
     await seed(c, 'just-rotated', { status: 'pending', lastSyncedAt: null, lastSyncStartedAt: NOW - 3 * MINUTE });

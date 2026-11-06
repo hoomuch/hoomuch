@@ -57,7 +57,8 @@
  * Request plan:
  *   verify        2 requests: subscriptions and balances/ledger (page_size=1 each). An unprefixed key whose live
  *                 probe gets 401 is retried on the test host: 3. 403s name the missing permission.
- *   fetchSnapshot status=active, then status=past_due (page_size=100, page_number 0, 1, … until a short page).
+ *   fetchSnapshot status=active, then status=past_due (page_size=100, page_number 0, 1, … until a short page),
+ *                 at most DODO_SNAPSHOT_PAGE_BUDGET requests (~16,000 subscriptions).
  *                 Running out of budget throws BudgetExhaustedError: a partial MRR would be wrong.
  *   fetchRevenue  balance ledger over [midnight UTC of `since`, now], in 7-day slices newest → oldest, one request
  *                 per 100 entries. A slice's days are emitted once the whole slice is read; the cursor carries the
@@ -66,7 +67,7 @@
 
 import { addToMoney, normalizeCurrency, normalizeToMonthly, type BillingInterval, type MoneyMap } from '../lib/money';
 import { DAY, HOUR, addDays, dayKey, dayStart } from '../lib/time';
-import { RateLimitedError, buildUrl, fetchJson, hasBudget, type QueryValue } from './http';
+import { RateLimitedError, buildUrl, capBudget, fetchJson, hasBudget, type QueryValue } from './http';
 import {
   ProviderError,
   type ConnectionConfig,
@@ -86,6 +87,13 @@ export const DODO_TEST_BASE = 'https://test.dodopayments.com';
 const PROVIDER = 'Dodo Payments';
 /** Documented maximum for every list endpoint. */
 const PAGE_SIZE = 100;
+/**
+ * Most requests one snapshot makes (`capBudget`), below the sync's own budget. With the revenue phase's 20
+ * right after it, a sync stays within 3/4 of the 240-a-minute limit that every key of the business shares,
+ * leaving the merchant's own integration room, so a bigger account fails with "more subscriptions than one
+ * sync can read" rather than with 429s for both.
+ */
+export const DODO_SNAPSHOT_PAGE_BUDGET = 160;
 /** Ledger days read per slice; a slice's days are emitted together once it has been read in full. */
 export const SLICE_DAYS = 7;
 /** next_billing_date may sit a little after created_at + trial_period_days. */
@@ -270,6 +278,7 @@ export function classifySubscription(sub: Json, now: number): SubscriptionClass 
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
+  capBudget(ctx, DODO_SNAPSHOT_PAGE_BUDGET);
   const auth = requireAuth(input);
   const now = ctx.now();
   const mrr: MoneyMap = {};

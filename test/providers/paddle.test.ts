@@ -7,6 +7,7 @@ import {
   PADDLE_DISCOUNTS_WARNING,
   PADDLE_METRICS_PERMISSION_WARNING,
   PADDLE_METRICS_UNAVAILABLE_WARNING,
+  PADDLE_SNAPSHOT_PAGE_BUDGET,
   REFUND_LOOKBACK_MS,
   REJECTED_KEY_MESSAGE,
   paddleAdapter,
@@ -14,6 +15,7 @@ import {
   paddleUnpricedItemsWarning,
 } from '../../src/providers/paddle';
 import { ProviderError } from '../../src/providers/types';
+import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type Route } from '../fixtures/harness';
 // Verbatim example responses from https://developer.paddle.com/api-reference (Paddle-Version 1), read 2026-11-05.
 import apiRootFx from '../fixtures/paddle/api-root.json';
@@ -682,6 +684,18 @@ describe('paddle fetchSnapshot (estimate from subscriptions)', () => {
     const err = await catchErr(paddleAdapter.fetchSnapshot(input(SANDBOX_KEY), makeCtx(fetch, { pageBudget: 1 })));
     expect(err).toBeInstanceOf(BudgetExhaustedError);
     expect(calls).toHaveLength(1);
+  });
+
+  it(`stops after ${PADDLE_SNAPSHOT_PAGE_BUDGET} requests whatever the sync allows, so one sync stays under 240 a minute`, async () => {
+    const { fetch, calls } = fakeFetch([
+      route('/subscriptions', () => ({ json: list([simple(1000)], { hasMore: true, perPage: 200 }) }), { query: { status: 'active,past_due' } }),
+    ]);
+    const err = await catchErr(paddleAdapter.fetchSnapshot(input(SANDBOX_KEY), makeCtx(fetch, { pageBudget: SNAPSHOT_PAGE_BUDGET })));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('budget');
+    expect(calls).toHaveLength(PADDLE_SNAPSHOT_PAGE_BUDGET);
+    // With the revenue phase right after it, at most 3/4 of the per-IP limit other Workers share.
+    expect(PADDLE_SNAPSHOT_PAGE_BUDGET + REVENUE_PAGE_BUDGET).toBeLessThanOrEqual(0.75 * 240);
   });
 
   it('refuses a malformed key without a network call', async () => {

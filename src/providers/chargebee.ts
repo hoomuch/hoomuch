@@ -49,6 +49,7 @@
  *                 403 → apiKey (missing transactional-data access), 404 site_not_found → site.
  *   fetchSnapshot GET /subscriptions?status[in]=["active","non_renewing"]&limit=100, then
  *                 status[is]=in_trial (count only), paged with offset. 429 retries (Retry-After ≤ 10 s).
+ *                 At most CHARGEBEE_SNAPSHOT_PAGE_BUDGET requests (~9,000 subscriptions and trials).
  *                 Running out of budget throws BudgetExhaustedError: a partial MRR would be wrong.
  *   fetchRevenue  GET /transactions?type[in]=["payment","refund","payment_reversal"]
  *                 &updated_at[between]=[from,to]&date[after]=from−30d&sort_by[asc]=updated_at&limit=100,
@@ -59,7 +60,7 @@
 
 import { addToMoney, currencyExponent, normalizeCurrency, normalizeToMonthly, type BillingInterval, type MoneyMap } from '../lib/money';
 import { DAY } from '../lib/time';
-import { buildUrl, fetchJson, hasBudget, RateLimitedError, type QueryValue } from './http';
+import { buildUrl, capBudget, fetchJson, hasBudget, RateLimitedError, type QueryValue } from './http';
 import {
   ProviderError,
   type ConnectionInput,
@@ -74,6 +75,13 @@ import {
 
 const PROVIDER = 'Chargebee';
 const PAGE_SIZE = 100;
+/**
+ * Most requests one snapshot makes (`capBudget`), below the sync's own budget. With the revenue phase's 20
+ * right after it, a sync stays within 3/4 of the 150-a-minute limit of test sites and the Starter plan, which
+ * the merchant's own integration shares. The plan can't be read through the API, so Performance and
+ * Enterprise sites (1,000 and 3,500 a minute) get the same cap.
+ */
+export const CHARGEBEE_SNAPSHOT_PAGE_BUDGET = 90;
 
 /** What a restricted read-only key must include. Chargebee grants it per group, not per resource. */
 export const CHARGEBEE_PERMISSION = 'Allow read-only access to transactional data';
@@ -357,6 +365,7 @@ function computedMrr(sub: CbSubscription, currency: string, now: number, stats: 
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
+  capBudget(ctx, CHARGEBEE_SNAPSHOT_PAGE_BUDGET);
   const conn = requireConnection(input);
   const now = ctx.now();
   const stats: Stats = { computed: 0, unpriced: 0 };

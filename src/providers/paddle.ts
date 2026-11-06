@@ -48,7 +48,8 @@
  *                 sandbox, or no usable metric: every active+past_due subscription (per_page=200), the
  *                          discounts they use (≤ 50 IDs per request, plus one mode=custom request for IDs not
  *                          found) and the trialing count.
- *                 Running out of budget, or a 429, throws: a partial MRR would be wrong.
+ *                 At most PADDLE_SNAPSHOT_PAGE_BUDGET requests. Running out of budget, or a 429, throws: a
+ *                 partial MRR would be wrong.
  *   fetchRevenue  phase 1: completed transactions updated since `since` (30 a page).
  *                 phase 2: approved refunds and chargebacks, newest first, until one was created more than
  *                          REFUND_LOOKBACK before `since` (adjustments have no date filter).
@@ -58,7 +59,7 @@
 
 import { addToMoney, normalizeCurrency, normalizeToMonthly, type BillingInterval, type MoneyMap } from '../lib/money';
 import { DAY, addDays, dayKey } from '../lib/time';
-import { RateLimitedError, buildUrl, fetchJson, hasBudget, type QueryValue } from './http';
+import { RateLimitedError, buildUrl, capBudget, fetchJson, hasBudget, type QueryValue } from './http';
 import {
   ProviderError,
   type ConnectionInput,
@@ -83,6 +84,13 @@ const ADJUSTMENT_PAGE_SIZE = 50;
 const DISCOUNT_BATCH = 50;
 /** Days of MRR points requested; the newest refreshed one wins. */
 const METRICS_LOOKBACK_DAYS = 7;
+/**
+ * Most requests one snapshot makes (`capBudget`), below the sync's own budget. With the revenue phase's 20
+ * right after it, a sync stays within 3/4 of the 240-a-minute limit per IP, which other Workers on Cloudflare's
+ * shared egress count against too, so the estimate for a bigger account fails with "more subscriptions than
+ * one sync can read" rather than getting the IP blocked for a minute. The metric path needs 3 requests.
+ */
+export const PADDLE_SNAPSHOT_PAGE_BUDGET = 160;
 /**
  * Adjustments have no date filter, so phase 2 reads newest first and stops at the first one created this long
  * before `since`. 30 days + the engine's 2-day overlap covers refunds Paddle approves late.
@@ -776,6 +784,7 @@ async function estimateFromSubscriptions(
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
+  capBudget(ctx, PADDLE_SNAPSHOT_PAGE_BUDGET);
   const key = requireKey(input);
   const warnings = new Set<string>();
 

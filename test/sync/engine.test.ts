@@ -15,10 +15,12 @@ import { DAY, HOUR, MINUTE, addDays, dayKey, dayStart } from '../../src/lib/time
 import { dailyFromEvents, decodeBackfill } from '../../src/sync/aggregate';
 import {
   BACKFILL_CONTINUES_MESSAGE,
+  HARD_STOP_GRACE_MS,
   REVENUE_PAGE_BUDGET,
   SNAPSHOT_PAGE_BUDGET,
   SYNC_BUSY_MESSAGE,
   SYNC_DEADLINE_MS,
+  SYNC_LOCK_STALE_MS,
   syncConnection,
   syncDeadlines,
 } from '../../src/sync/engine';
@@ -747,10 +749,10 @@ describe('syncConnection — failures', () => {
     const brokenPrepare = { ...c.env, DB: { prepare: () => { throw new Error('D1_ERROR: down'); } } as unknown as D1Database };
     await expect(syncConnection(brokenPrepare, 'st-1', 'manual')).resolves.toMatchObject({ ok: false });
 
-    vi.setSystemTime(NOW + 6 * MINUTE);
+    vi.setSystemTime(NOW + 11 * MINUTE);
     const ok = await syncConnection(c.env, 'st-1', 'manual');
     expect(ok).toMatchObject({ ok: true, events: 1 });
-    expect(conn(c.t, 'st-1')).toMatchObject({ status: 'ok', last_synced_at: NOW + 6 * MINUTE });
+    expect(conn(c.t, 'st-1')).toMatchObject({ status: 'ok', last_synced_at: NOW + 11 * MINUTE });
   });
 
   it('a failed final write leaves no partial data and does not move the cursor', async () => {
@@ -783,9 +785,13 @@ describe('syncConnection — lock', () => {
     expect(conn(c.t, 'st-1')).toMatchObject({ status: 'syncing', last_sync_started_at: NOW - MINUTE });
   });
 
-  it('takes over a lock older than 5 minutes', async () => {
+  it('takes over a lock older than 10 minutes, and leaves a 9-minute-old one alone', async () => {
     const c = ctx();
-    await seedStripe(c, 'st-1', { status: 'syncing', lastSyncStartedAt: NOW - 6 * MINUTE });
+    expect(SYNC_LOCK_STALE_MS).toBe(10 * MINUTE);
+    await seedStripe(c, 'st-2', { status: 'syncing', lastSyncStartedAt: NOW - 9 * MINUTE });
+    expect(await syncConnection(c.env, 'st-2', 'cron')).toMatchObject({ ok: false, error: SYNC_BUSY_MESSAGE });
+
+    await seedStripe(c, 'st-1', { status: 'syncing', lastSyncStartedAt: NOW - 11 * MINUTE });
     stripeSnapshotOk();
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
     const r = await syncConnection(c.env, 'st-1', 'cron');
@@ -815,12 +821,12 @@ describe('syncConnection — lock', () => {
     stripeSnapshotOk();
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockImplementation(async () => {
       // Simulates a second sync taking over a stale lock while this one is still paging.
-      c.t.exec("UPDATE connections SET status = 'syncing', last_sync_started_at = ? WHERE id = 'st-1'", NOW + 7 * MINUTE);
+      c.t.exec("UPDATE connections SET status = 'syncing', last_sync_started_at = ? WHERE id = 'st-1'", NOW + 11 * MINUTE);
       return page([charge('ch_1', daysAgo(1), 1000)], { nextCursor: 'mine', done: false });
     });
     const r = await syncConnection(c.env, 'st-1', 'cron');
     expect(r.ok).toBe(true);
-    expect(conn(c.t, 'st-1')).toMatchObject({ status: 'syncing', last_sync_started_at: NOW + 7 * MINUTE, revenue_cursor: null });
+    expect(conn(c.t, 'st-1')).toMatchObject({ status: 'syncing', last_sync_started_at: NOW + 11 * MINUTE, revenue_cursor: null });
     expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1 }); // our own run row is still closed
     expect(c.out.some((l) => l.includes('sync_lock_lost'))).toBe(true);
     expectDailyMatchesTransactions(c, 'st-1'); // idempotent data writes are harmless
@@ -883,9 +889,19 @@ describe('context deadlines / syncDeadlines', () => {
     expect(dctx.pageBudget).toBe(10);
   });
 
-  it('every sync gets ~60 s in its queue invocation: the snapshot first, revenue the rest', () => {
-    expect(SYNC_DEADLINE_MS).toBe(60_000);
-    expect(syncDeadlines(NOW)).toEqual({ snapshot: NOW + 36_000, revenue: NOW + 60_000 });
+  it('every sync gets 4 minutes in its queue invocation: 3 for the snapshot, revenue the rest', () => {
+    expect(SYNC_DEADLINE_MS).toBe(4 * MINUTE);
+    expect(syncDeadlines(NOW)).toEqual({ snapshot: NOW + 3 * MINUTE, revenue: NOW + 4 * MINUTE });
+  });
+
+  it('a live sync is done well before its lock looks stale', () => {
+    const { snapshot, revenue } = syncDeadlines(0);
+    // Counted as if revenue's deadline only started after the snapshot's hard stop (it is absolute, so the
+    // real worst case is shorter), plus the snapshot's and the final D1 batches, FX and the run bookkeeping.
+    const D1_AND_FX_MS = MINUTE;
+    const longestLiveSync = snapshot + HARD_STOP_GRACE_MS + revenue + HARD_STOP_GRACE_MS + D1_AND_FX_MS;
+    // Another sync takes the lock over once it's SYNC_LOCK_STALE_MS old: keep a minute more for slow D1.
+    expect(longestLiveSync + MINUTE).toBeLessThanOrEqual(SYNC_LOCK_STALE_MS);
   });
 });
 
@@ -894,31 +910,32 @@ describe('syncConnection — deadlines and budgets', () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
     stripeSnapshotOk();
-    slowApi(10_000);
+    slowApi(20_000);
+    expect(SYNC_DEADLINE_MS / 20_000).toBeLessThan(REVENUE_PAGE_BUDGET); // the deadline, not the budget, stops it
     const rev = vi.spyOn(stripeAdapter, 'fetchRevenue').mockImplementation((_input, req, pctx) => pagedRevenue(req, pctx));
 
     const r = await syncConnection(c.env, 'st-1', 'initial');
 
-    // Pages at t = 0, 10, …, 50 s; at 60 s hasBudget reads false, the adapter returns a cursor, the batch commits.
-    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 6, error: null });
-    expect(Date.now() - NOW).toBe(60_000);
-    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '6', since: FIRST_SINCE });
-    expect(txRows(c.t, 'st-1')).toHaveLength(6);
-    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 6, message: BACKFILL_CONTINUES_MESSAGE });
+    // Pages at t = 0, 20, …, 220 s; at 240 s hasBudget reads false, the adapter returns a cursor, the batch commits.
+    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 12, error: null });
+    expect(Date.now() - NOW).toBe(4 * MINUTE);
+    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '12', since: FIRST_SINCE });
+    expect(txRows(c.t, 'st-1')).toHaveLength(12);
+    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 12, message: BACKFILL_CONTINUES_MESSAGE });
     expect(c.out.some((l) => l.includes('sync_deadline_reached'))).toBe(true);
 
     // The next (cron) run resumes from the checkpoint.
     vi.setSystemTime(NOW + HOUR);
     const r2 = await syncConnection(c.env, 'st-1', 'cron');
-    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '6' });
-    expect(r2).toMatchObject({ ok: true, events: 6 }); // the same 60 s again, from the checkpoint
+    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '12' });
+    expect(r2).toMatchObject({ ok: true, events: 12 }); // the same 4 minutes again, from the checkpoint
     expectDailyMatchesTransactions(c, 'st-1');
   });
 
   it('a snapshot that runs out of time fails honestly; revenue still gets the rest of the deadline', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
-    slowApi(5_000); // 10 pages need 50 s; the snapshot's share is 36 s
+    slowApi(20_000); // 10 pages need 200 s; the snapshot's share is 180 s
     vi.spyOn(stripeAdapter, 'fetchSnapshot').mockImplementation(async (_input, pctx) => {
       // Like Stripe: a partial MRR would be wrong, so it lists everything or throws.
       for (let after = 0; after < 10; ) after = (await slowGet(pctx, after)).n;
@@ -937,7 +954,7 @@ describe('syncConnection — deadlines and budgets', () => {
   it('a snapshot larger than its page budget says so instead of promising a continuation', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
-    expect(SNAPSHOT_PAGE_BUDGET).toBe(80);
+    expect(SNAPSHOT_PAGE_BUDGET).toBe(400);
     vi.spyOn(stripeAdapter, 'fetchSnapshot').mockRejectedValue(new BudgetExhaustedError('Stripe'));
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([charge('ch_1', daysAgo(1), 1000)]));
 
@@ -956,11 +973,11 @@ describe('syncConnection — deadlines and budgets', () => {
 describe('syncConnection — run history', () => {
   it('taking over a stale lock closes the interrupted run; other connections are untouched', async () => {
     const c = ctx();
-    await seedStripe(c, 'st-1', { status: 'syncing', lastSyncStartedAt: NOW - 10 * MINUTE });
+    await seedStripe(c, 'st-1', { status: 'syncing', lastSyncStartedAt: NOW - 15 * MINUTE });
     await seedStripe(c, 'st-2', { status: 'syncing', lastSyncStartedAt: NOW - MINUTE });
     const insertRun = "INSERT INTO sync_runs (connection_id, kind, started_at, finished_at, ok, events) VALUES (?, ?, ?, ?, ?, 0)";
     c.t.exec(insertRun, 'st-1', 'cron', NOW - 2 * HOUR, NOW - 2 * HOUR + 1_000, 1);
-    c.t.exec(insertRun, 'st-1', 'initial', NOW - 10 * MINUTE, null, null); // its worker was killed
+    c.t.exec(insertRun, 'st-1', 'initial', NOW - 15 * MINUTE, null, null); // its worker was killed
     c.t.exec(insertRun, 'st-2', 'manual', NOW - MINUTE, null, null); // genuinely still running
     stripeSnapshotOk();
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));

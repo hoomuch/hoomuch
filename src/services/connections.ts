@@ -165,7 +165,8 @@ const SOURCE_KEYS = ['storeId', 'projectId', 'site', 'organizationId'] as const;
 /** Rows per DELETE statement when purging synced data (keeps each statement well under D1 limits). */
 const PURGE_CHUNK = 5_000;
 const PURGE_MAX_ROUNDS = 400;
-const BUSY_ERROR = 'A sync is running for this connection. Try again in a minute.';
+/** A big account's sync can run for a few minutes (SYNC_DEADLINE_MS), so "in a minute" would undersell it. */
+const BUSY_ERROR = 'A sync is running for this connection. Try again in a few minutes.';
 
 function isSyncing(row: ConnectionRow, now: number): boolean {
   return row.status === 'syncing' && now - (row.last_sync_started_at ?? 0) < SYNC_LOCK_STALE_MS;

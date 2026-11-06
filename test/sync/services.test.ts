@@ -118,7 +118,7 @@ describe('rotateCredentials', () => {
     stubStripe();
     await seedStripeWithHistory(c, 'k', { testMode: true, status: 'syncing', startedAt: NOW - 1000 });
     const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' });
-    expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a minute.' });
+    expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a few minutes.' });
     expect(c.t.rows('SELECT revenue_cursor FROM connections WHERE id = ?', 'k')[0]).toEqual({ revenue_cursor: 'old-cursor' });
   });
 
@@ -223,7 +223,7 @@ describe('triggerSync', () => {
   it('runs once the cooldown has passed, and a stale "syncing" lock does not block it', async () => {
     const c = setup();
     stubStripe();
-    await seedStripeWithHistory(c, 'k', { testMode: true, status: 'syncing', startedAt: NOW - 6 * 60_000 });
+    await seedStripeWithHistory(c, 'k', { testMode: true, status: 'syncing', startedAt: NOW - 11 * 60_000 });
     const r = await triggerSync(c.env, c.userId, 'k', NOW);
     expect(r).toMatchObject({ ok: true, result: { ok: true, snapshot: true } });
     expect(c.t.rows('SELECT status, last_sync_started_at FROM connections WHERE id = ?', 'k')[0]).toEqual({

@@ -56,6 +56,7 @@ import { SettingsPage } from '../../src/views/pages/settings';
 import { TransactionsPage } from '../../src/views/pages/transactions';
 import { ConnectionDetailPage } from '../../src/views/pages/connection-detail';
 import { MAX_POLLS, parsePoll, POLL_SECONDS, POLL_STOPPED, syncState } from '../../src/routes/util';
+import { HARD_STOP_GRACE_MS, SYNC_DEADLINE_MS } from '../../src/sync/engine';
 import {
   fixtureConnectionDetail,
   fixtureDashboard,
@@ -553,6 +554,10 @@ describe('accessibility', () => {
     const spent = await render('sync-spent', h(SyncNotice, { sync: { refresh: null } }));
     expect(spent).toContain('longer than usual');
     expect(spent).not.toContain('Stop refreshing');
+  });
+
+  it('keeps polling for as long as a sync can run, plus the queue picking it up', () => {
+    expect(MAX_POLLS * POLL_SECONDS * 1000).toBeGreaterThanOrEqual(SYNC_DEADLINE_MS + HARD_STOP_GRACE_MS + 30_000);
   });
 
   it('keeps live-region roles for action results only', async () => {

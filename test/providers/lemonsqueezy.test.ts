@@ -5,6 +5,7 @@ import {
   decodeCursor,
   LS_DISCOUNTS_BUDGET_WARNING,
   LS_DISCOUNTS_UNAVAILABLE_WARNING,
+  LS_SNAPSHOT_PAGE_BUDGET,
   lemonSqueezyAdapter as ls,
   lsUnpricedWarning,
   pageShift,
@@ -12,6 +13,7 @@ import {
   priceAmountMinor,
 } from '../../src/providers/lemonsqueezy';
 import { BudgetExhaustedError, RateLimitedError } from '../../src/providers/http';
+import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { ProviderError, type ConnectionConfig, type RevenueEvent, type RevenuePage } from '../../src/providers/types';
 import {
   expectNoSecretsInLogs,
@@ -561,6 +563,18 @@ describe('lemonsqueezy fetchSnapshot', () => {
   it('lets BudgetExhaustedError propagate', async () => {
     const { fetch } = lsServer();
     await expect(ls.fetchSnapshot(input(), makeCtx(fetch, { pageBudget: 3 }))).rejects.toBeInstanceOf(BudgetExhaustedError);
+  });
+
+  it(`stops after ${LS_SNAPSHOT_PAGE_BUDGET} requests whatever the sync allows, so one sync stays under 300 a minute`, async () => {
+    const active = SUBS.find((s) => s.attributes['status'] === 'active')!;
+    const many = Array.from({ length: 300 }, (_, n) => ({ ...clone(active), id: String(8000 + n) }));
+    const server = lsServer({ subscriptions: many, pageSize: 1 });
+    const err = await catchErr(ls.fetchSnapshot(input(), makeCtx(server.fetch, { pageBudget: SNAPSHOT_PAGE_BUDGET })));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('budget');
+    expect(server.calls).toHaveLength(LS_SNAPSHOT_PAGE_BUDGET);
+    // With the revenue phase right after it, at most 3/4 of Lemon Squeezy's limit.
+    expect(LS_SNAPSHOT_PAGE_BUDGET + REVENUE_PAGE_BUDGET).toBeLessThanOrEqual(0.75 * 300);
   });
 
   it('a 429 fails the snapshot at once: no retry in the same minute, no partial snapshot', async () => {

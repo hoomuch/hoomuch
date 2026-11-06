@@ -6,7 +6,7 @@ import type { Bindings } from '../../src/env';
 import { MINUTE } from '../../src/lib/time';
 import { stripeAdapter } from '../../src/providers/stripe';
 import { receiveWebhook, setWebhook, webhookToken } from '../../src/services/webhooks';
-import { enqueueSync } from '../../src/sync/queue';
+import { QUEUED_STALE_MS, enqueueSync } from '../../src/sync/queue';
 import { deliver, drainQueue, oneMessageBatch, queueOf } from '../fixtures/queue';
 import { NOW, SECRET, SNAP, conn, page, runs, seedStripe, setup, teardown, type Ctx } from './helpers';
 
@@ -133,13 +133,15 @@ describe('handleSyncBatch', () => {
       at += d.retryDelaySeconds! * 1000;
     }
 
-    // Seconds after NOW: busy, busy, then the lock is 6 minutes old and is taken over.
+    // Seconds after NOW: busy, busy, then the lock is 11 minutes old and is taken over.
     expect(seen).toEqual([
       [0, 'retry', 60],
-      [60, 'retry', 300],
-      [360, 'ack', undefined],
+      [60, 'retry', 600],
+      [660, 'ack', undefined],
     ]);
-    expect(runs(c.t).map((r) => [r.kind, r.ok, r.started_at])).toEqual([['webhook', 1, NOW + 360_000]]);
+    expect(runs(c.t).map((r) => [r.kind, r.ok, r.started_at])).toEqual([['webhook', 1, NOW + 660_000]]);
+    // …while its queued mark still stands, so no other producer queued a second message meanwhile.
+    expect(at - NOW).toBeLessThan(QUEUED_STALE_MS);
   });
 
   it('a redelivered message that finds the lock held waits for it to go stale, then syncs', async () => {
@@ -149,12 +151,12 @@ describe('handleSyncBatch', () => {
     await seedStripe(c, 'k', { status: 'syncing', lastSyncStartedAt: NOW - MINUTE });
     const body = { v: 1, connectionId: 'k', kind: 'initial', at: NOW - 2 * MINUTE };
 
-    expect(await deliver(c.env, body, 2)).toMatchObject({ outcome: 'retry', retryDelaySeconds: 300 });
+    expect(await deliver(c.env, body, 2)).toMatchObject({ outcome: 'retry', retryDelaySeconds: 600 });
     expect(runs(c.t)).toEqual([]);
 
-    vi.setSystemTime(NOW + 300_000);
+    vi.setSystemTime(NOW + 600_000);
     expect(await deliver(c.env, body, 3)).toMatchObject({ outcome: 'ack' });
-    expect(runs(c.t).map((r) => [r.kind, r.ok, r.started_at])).toEqual([['initial', 1, NOW + 300_000]]);
+    expect(runs(c.t).map((r) => [r.kind, r.ok, r.started_at])).toEqual([['initial', 1, NOW + 600_000]]);
   });
 
   it('a D1 error while taking the lock retries the message, and its mark still leads to a sync', async () => {
