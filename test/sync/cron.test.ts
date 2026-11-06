@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stripeAdapter } from '../../src/providers/stripe';
 import { HOUR, MINUTE } from '../../src/lib/time';
+import { startSync } from '../../src/services/connections';
 import { CRON_QUEUE_LIMIT, runScheduledSync } from '../../src/sync/engine';
-import { QUEUED_STALE_MS } from '../../src/sync/queue';
+import { QUEUED_STALE_MS, SEND_BATCH_MAX, enqueueSyncs } from '../../src/sync/queue';
 import { FX_BODY, NOW, SECRET, SNAP, conn, encryptedCreds, page, runs, setup, teardown, type Ctx } from './helpers';
 import { seedConnection, seedUser } from '../fixtures/d1';
 import { drainQueue, queueOf } from '../fixtures/queue';
@@ -109,6 +110,87 @@ describe('runScheduledSync — selection', () => {
     expect(queueOf(c.env).take()).toHaveLength(1);
   });
 
+  it(`a mark exactly ${QUEUED_STALE_MS / MINUTE} minutes old is stale; one a millisecond younger is not`, async () => {
+    const c = ctx();
+    await seed(c, 'k', { lastSyncedAt: NOW - 3 * HOUR });
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - QUEUED_STALE_MS + 1, 'k');
+    await runScheduledSync(c.env, NOW);
+    expect(queueOf(c.env).take()).toEqual([]);
+
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - QUEUED_STALE_MS, 'k');
+    await runScheduledSync(c.env, NOW);
+    expect(queueOf(c.env).take().map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'cron', at: NOW }]);
+  });
+
+  it('a Sync now that lands between the due query and the queueing is not queued twice', async () => {
+    const c = ctx();
+    await seed(c, 'k', { lastSyncedAt: NOW - 3 * HOUR });
+    await seed(c, 'other', { lastSyncedAt: NOW - 2 * HOUR });
+    // The cron has read 'k' as due; before it marks anything, the user clicks Sync now.
+    const db = new Proxy(c.env.DB, {
+      get(target, prop, receiver) {
+        if (prop !== 'prepare') return Reflect.get(target, prop, receiver);
+        return (sql: string) => {
+          const stmt = target.prepare(sql);
+          if (!sql.includes('WITH candidates AS')) return stmt;
+          return {
+            bind: (...args: unknown[]) => ({
+              all: async () => {
+                const due = await stmt.bind(...args).all();
+                expect(await startSync(c.env, c.userId, 'k', NOW)).toEqual({ ok: true, requestedAt: NOW });
+                return due;
+              },
+            }),
+          };
+        };
+      },
+    });
+
+    await runScheduledSync({ ...c.env, DB: db }, NOW);
+
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([
+      { v: 1, connectionId: 'k', kind: 'manual', at: NOW },
+      { v: 1, connectionId: 'other', kind: 'cron', at: NOW },
+    ]);
+    expect(summary(c)).toMatchObject({ due: 2, queued: 1 });
+  });
+
+  it('marks a connection before its message is sent, with the message’s own time', async () => {
+    const c = ctx();
+    await seed(c, 'k', { lastSyncedAt: NOW - 3 * HOUR });
+    const q = queueOf(c.env);
+    const send = q.sendBatch.bind(q);
+    const markedAtSend: unknown[] = [];
+    q.sendBatch = async (messages, options) => {
+      markedAtSend.push(c.t.rows<{ queued_at: number | null }>('SELECT queued_at FROM connections WHERE id = ?', 'k')[0]!.queued_at);
+      return send(messages, options);
+    };
+    // The cron runs a few seconds after its scheduled time; the tick's time is what counts.
+    vi.setSystemTime(NOW + 4_000);
+
+    await runScheduledSync(c.env, NOW);
+
+    expect(markedAtSend).toEqual([NOW]);
+    expect(q.sent.map((m) => (m.body as { at: number }).at)).toEqual([NOW]);
+    expect(c.t.rows('SELECT queued_at FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: NOW }]);
+  });
+
+  it(`sends more than ${SEND_BATCH_MAX} syncs in batches of at most ${SEND_BATCH_MAX}, and nothing at all for none`, async () => {
+    const c = ctx();
+    const ids: string[] = [];
+    for (let i = 0; i < SEND_BATCH_MAX + 50; i++) {
+      ids.push(`c${String(i).padStart(3, '0')}`);
+      await seed(c, ids[i]!, { lastSyncedAt: NOW - 3 * HOUR });
+    }
+    await enqueueSyncs(c.env, ids, 'manual', NOW);
+    expect(queueOf(c.env).take().map((m) => (m.body as { connectionId: string }).connectionId)).toEqual(ids);
+
+    const trips = c.t.roundTrips();
+    await enqueueSyncs(c.env, [], 'manual', NOW);
+    expect(c.t.roundTrips()).toBe(trips);
+    expect(queueOf(c.env).take()).toEqual([]);
+  });
+
   it('a queue that refuses the batch clears the marks, so the next tick tries again', async () => {
     const c = ctx();
     await seed(c, 'a', { lastSyncedAt: NOW - 3 * HOUR });
@@ -178,8 +260,13 @@ describe('runScheduledSync — selection', () => {
     await tick(c);
 
     // Turn 1: each tenant's most overdue; turn 2: each tenant's second; then the big tenant's rest.
-    expect(syncedIds(c).slice(0, 8)).toEqual(['big-00', 'small-1', 'big-01', 'small-2', 'big-02', 'big-03', 'big-04', 'big-05']);
-    expect(syncedIds(c)).toHaveLength(27);
+    expect(syncedIds(c)).toEqual([
+      'big-00', 'small-1',
+      'big-01', 'small-2',
+      'big-02', 'big-03', 'big-04', 'big-05', 'big-06', 'big-07', 'big-08', 'big-09', 'big-10', 'big-11', 'big-12',
+      'big-13', 'big-14', 'big-15', 'big-16', 'big-17', 'big-18', 'big-19', 'big-20', 'big-21', 'big-22', 'big-23',
+      'big-24',
+    ]);
   });
 
   it('falls back to a 60-minute interval when SYNC_INTERVAL_MINUTES is not a number', async () => {

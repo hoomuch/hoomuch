@@ -11,6 +11,9 @@ export interface SentMessage<T = unknown> {
   delaySeconds: number | undefined;
 }
 
+/** Messages per `sendBatch` call that Cloudflare Queues accepts. */
+export const QUEUES_BATCH_LIMIT = 100;
+
 export class FakeQueue<T = unknown> implements Queue<T> {
   sent: SentMessage<T>[] = [];
   /** Throws on the next send / sendBatch, once. */
@@ -35,7 +38,11 @@ export class FakeQueue<T = unknown> implements Queue<T> {
 
   async sendBatch(messages: Iterable<MessageSendRequest<T>>, options?: QueueSendBatchOptions): Promise<QueueSendBatchResponse> {
     this.check();
-    for (const m of messages) this.sent.push({ body: structuredClone(m.body), delaySeconds: m.delaySeconds ?? options?.delaySeconds });
+    const batch = [...messages];
+    // Like the real binding: a batch holds 1 to 100 messages.
+    if (batch.length === 0) throw new Error('Queue sendBatch: the batch is empty');
+    if (batch.length > QUEUES_BATCH_LIMIT) throw new Error(`Queue sendBatch: ${batch.length} messages, the limit is ${QUEUES_BATCH_LIMIT}`);
+    for (const m of batch) this.sent.push({ body: structuredClone(m.body), delaySeconds: m.delaySeconds ?? options?.delaySeconds });
     return { metadata: { metrics: { backlogCount: this.sent.length, backlogBytes: 0 } } };
   }
 
@@ -53,8 +60,8 @@ export interface Delivery {
   retryDelaySeconds?: number;
 }
 
-/** Delivers one message to the consumer and reports what it did with it. */
-export async function deliver(env: Bindings, body: unknown, attempts = 1): Promise<Delivery> {
+/** A one-message batch as Queues hands it to the Worker, and a record of what was done with it. */
+export function oneMessageBatch(body: unknown, attempts = 1): { batch: MessageBatch<unknown>; delivery: Delivery } {
   const d: Delivery = { body, outcome: 'none' };
   const msg: Message<unknown> = {
     id: crypto.randomUUID(),
@@ -76,8 +83,14 @@ export async function deliver(env: Bindings, body: unknown, attempts = 1): Promi
     retryAll: () => msg.retry(),
     ackAll: () => msg.ack(),
   };
+  return { batch, delivery: d };
+}
+
+/** Delivers one message to the consumer and reports what it did with it. */
+export async function deliver(env: Bindings, body: unknown, attempts = 1): Promise<Delivery> {
+  const { batch, delivery } = oneMessageBatch(body, attempts);
   await handleSyncBatch(batch, env);
-  return d;
+  return delivery;
 }
 
 /**

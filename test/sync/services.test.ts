@@ -11,11 +11,13 @@ import {
   startSync,
   triggerSync,
 } from '../../src/services/connections';
-import { DAY, HOUR, addDays, dayKey, dayStart } from '../../src/lib/time';
+import { DAY, HOUR, MINUTE, addDays, dayKey, dayStart } from '../../src/lib/time';
+import { runScheduledSync } from '../../src/sync/engine';
+import { QUEUED_STALE_MS } from '../../src/sync/queue';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
 import { drainQueue, queueOf } from '../fixtures/queue';
-import { FX_BODY, NOW, encryptedCreds, setup, teardown, type Ctx } from './helpers';
+import { FX_BODY, NOW, SNAP, encryptedCreds, setup, teardown, type Ctx } from './helpers';
 
 afterEach(() => teardown());
 
@@ -120,6 +122,27 @@ describe('rotateCredentials', () => {
     expect(c.t.rows('SELECT revenue_cursor FROM connections WHERE id = ?', 'k')[0]).toEqual({ revenue_cursor: 'old-cursor' });
   });
 
+  it('a sync the cron already queued is not queued again, and runs with the new key', async () => {
+    const c = setup();
+    stubStripe();
+    await seedStripeWithHistory(c, 'k', { testMode: true });
+    await runScheduledSync(c.env, NOW);
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'cron', at: NOW }]);
+
+    vi.setSystemTime(NOW + 2 * MINUTE);
+    const snapshot = vi.spyOn(stripeAdapter, 'fetchSnapshot');
+    expect(await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' })).toMatchObject({ ok: true });
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'cron', at: NOW }]);
+    expect(c.t.rows('SELECT queued_at FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: NOW }]);
+
+    // The consumer reads the key when the message runs, so the cron's message syncs with the new one.
+    expect(await drainQueue(c.env)).toMatchObject([{ outcome: 'ack' }]);
+    expect(snapshot.mock.calls.map(([input]) => input.credentials['apiKey'])).toEqual(['rk_test_new']);
+    expect(c.t.rows('SELECT kind, ok, started_at FROM sync_runs WHERE connection_id = ?', 'k')).toEqual([
+      { kind: 'cron', ok: 1, started_at: NOW + 2 * MINUTE },
+    ]);
+  });
+
   it("doesn't touch someone else's connection", async () => {
     const c = setup();
     stubStripe();
@@ -127,6 +150,45 @@ describe('rotateCredentials', () => {
     seedConnection(c.t, { id: 'theirs', userId: 'other', provider: 'stripe' });
     const r = await rotateCredentials(c.env, c.userId, 'theirs', { apiKey: 'rk_test_new' });
     expect(r).toMatchObject({ ok: false, error: 'Connection not found.' });
+  });
+});
+
+describe('rotateCredentials and the snapshot history', () => {
+  type Hook = NonNullable<typeof stripeAdapter.fetchSnapshotHistory>;
+  const withHistory = () => {
+    const hook = vi.fn<Hook>(async () => [{ day: '2026-11-03', snapshot: SNAP }]);
+    (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory = hook;
+    return hook;
+  };
+  afterEach(() => {
+    delete (stripeAdapter as { fetchSnapshotHistory?: Hook }).fetchSnapshotHistory;
+  });
+  const days = (c: Ctx) => c.t.rows<{ day: string }>('SELECT day FROM snapshots WHERE connection_id = ? ORDER BY day', 'k').map((r) => r.day);
+
+  it('a key for another account refills the MRR trend from the provider’s history', async () => {
+    const c = setup();
+    stubStripe();
+    const hook = withHistory();
+    await seedStripeWithHistory(c, 'k', { testMode: true }); // synced before, one snapshot on 2026-11-01
+
+    expect(await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' })).toMatchObject({ ok: true });
+    await drainQueue(c.env);
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(days(c)).toEqual(['2026-11-03', '2026-11-05']);
+  });
+
+  it('a key for the same account keeps the trend and doesn’t ask for history', async () => {
+    const c = setup();
+    stubStripe();
+    const hook = withHistory();
+    await seedStripeWithHistory(c, 'k', { testMode: true });
+
+    expect(await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' })).toMatchObject({ ok: true });
+    await drainQueue(c.env);
+
+    expect(hook).not.toHaveBeenCalled();
+    expect(days(c)).toEqual(['2026-11-01', '2026-11-05']);
   });
 });
 
@@ -185,6 +247,32 @@ describe('startSync', () => {
     await drainQueue(c.env);
     expect(c.t.rows('SELECT queued_at, status FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: null, status: 'ok' }]);
     expect(c.t.rows('SELECT kind, ok FROM sync_runs WHERE connection_id = ?', 'k')).toEqual([{ kind: 'manual', ok: 1 }]);
+  });
+
+  it('two clicks at the same moment queue one sync', async () => {
+    const c = setup();
+    await seedStripeWithHistory(c, 'k', { testMode: true, startedAt: NOW - 2 * HOUR });
+
+    const both = await Promise.all([startSync(c.env, c.userId, 'k', NOW), startSync(c.env, c.userId, 'k', NOW)]);
+
+    expect(both).toEqual([
+      { ok: true, requestedAt: NOW },
+      { ok: false, error: SYNC_QUEUED_MESSAGE },
+    ]);
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'manual', at: NOW }]);
+  });
+
+  it(`a mark exactly ${QUEUED_STALE_MS / MINUTE} minutes old is stale; one a millisecond younger is not`, async () => {
+    const c = setup();
+    await seedStripeWithHistory(c, 'k', { testMode: true, startedAt: NOW - 2 * HOUR });
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - QUEUED_STALE_MS + 1, 'k');
+    expect(await startSync(c.env, c.userId, 'k', NOW)).toEqual({ ok: false, error: SYNC_QUEUED_MESSAGE });
+    expect(queueOf(c.env).sent).toEqual([]);
+
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - QUEUED_STALE_MS, 'k');
+    expect(await startSync(c.env, c.userId, 'k', NOW)).toEqual({ ok: true, requestedAt: NOW });
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'manual', at: NOW }]);
+    expect(c.t.rows('SELECT queued_at FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: NOW }]);
   });
 
   it('says so when the queue refuses, and leaves nothing marked', async () => {

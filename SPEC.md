@@ -131,10 +131,16 @@ tarih) → kimlik bilgisi şifrelenir → D1 → ilk senkronizasyon kuyruğa (`i
 **Kuyruk (v1.1):** Her senkronizasyon `hoomuch-sync` kuyruğunun tüketicisinde, çağrı başına tek bağlantı olarak çalışır;
 böylece her biri kendi alt istek bütçesini ve 15 dk duvar saatini alır (eskiden cron'un ya da `waitUntil`'in 30 sn'si).
 Mesaj `{v: 1, connectionId, kind, at}`. Kuyrukta tekilleştirme olmadığı için `connections.queued_at` (migration 0007) bir
-bağlantının yolda bir senkronizasyonu olduğunu işaretler: cron ve "Sync now" ikinciyi eklemez; kilit alınınca temizlenir;
-15 dk içinde başlamazsa kaybolmuş sayılır. Biten senkronizasyon sonucu ne olursa olsun ack'lenir (hata bağlantıya
-yazılır); yalnızca senkronizasyon dışındaki bir çökme yeniden denenir (`max_retries: 3`). Meşgul bağlantıyı bulan mesaj
-ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra yeniden dener. `wrangler deploy` kuyruk yoksa oluşturur.
+bağlantının yolda bir senkronizasyonu olduğunu işaretler: cron, "Sync now" ve anahtar yenileme ikinciyi eklemez. İşaret tek
+bir koşullu `UPDATE … RETURNING` ile alınır (işaret yoksa ya da 15 dk ve daha eskiyse) ve mesaj yalnızca işareti alınan
+bağlantılar için gönderilir; aynı anda gelen iki üreticiden yalnızca biri gönderir. Senkronizasyon kilidi alınınca işaret
+temizlenir; 15 dk içinde başlamazsa kaybolmuş sayılır. Biten senkronizasyon sonucu ne olursa olsun ack'lenir (hata
+bağlantıya yazılır); yalnızca senkronizasyon dışındaki bir çökme ya da kilit alınırken D1 hatası yeniden denenir
+(`max_retries: 3`; işaret kalır). Teslimat en az bir kezdir: `at`'inden sonra başlamış başarılı bir senkronizasyon varsa mesaj
+iş yapmadan ack'lenir. Meşgul bağlantıyı bulan ilk deneme ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra
+yeniden dener. Yeniden teslim edilen mesaj (`attempts > 1`) meşgul bulursa kilidi kendi ölü denemesi tutuyor olabilir: kilit
+bayatlayınca (5 dk) yeniden dener; böylece webhook mesajı da `max_retries` içinde (60 + 300 sn) bayat kilidi devralır.
+`wrangler deploy` kuyruk yoksa oluşturur.
 
 **Senkronizasyon (bir bağlantı):**
 1. `status='syncing'`, `sync_runs` kaydı aç.
@@ -142,8 +148,9 @@ ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra yeniden dener. `
 3. `fetchRevenue` → `revenue_cursor` varsa oradan, yoksa `revenue_synced_until − 2 gün` (ilk sefer: şimdi − 90 gün).
    Dönen `events` → `transactions` upsert; etkilenen günler için `daily_revenue` yeniden hesaplanır.
    Dönen `daily` (RevenueCat gibi) → doğrudan `daily_revenue` upsert (`source='provider'`).
-   İlk başarılı senkronizasyonda adaptörün `fetchSnapshotHistory`'si varsa (demo, Adapty, Superwall) geçmiş günlerin
-   snapshot'ları eklenir; var olan gün ezilmez.
+   Adaptörün `fetchSnapshotHistory`'si varsa (demo, Adapty, Superwall) ve bağlantının henüz hiç snapshot'ı yoksa (ilk
+   senkronizasyon ya da başka bir hesabı okuyan anahtara geçişte veriler silindikten sonra) geçmiş günlerin snapshot'ları
+   eklenir; var olan gün ezilmez. Bugünün satırı yazılınca bir daha sorulmaz; geçmiş çağrısı ya da gelir adımı hata verse de.
 4. Sayfa bütçesi dolduysa `revenue_cursor` saklanır (sonraki çalışmada devam); bittiyse cursor temizlenir,
    `revenue_synced_until` ilerletilir.
 5. `status='ok'|'error'`, `last_error`, `last_synced_at`, `sync_runs` kapanır.
@@ -156,7 +163,8 @@ istekleri keser.
 
 **Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir; yolda bir senkronizasyon varsa ikincisi eklenmez. Kuyruğa
 konur; istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir.
-Anahtar yenileme de aynı yolu kullanır.
+Anahtar yenileme de aynı yolu kullanır; yolda bir mesaj varsa ikincisini eklemez (tüketici anahtarı çalışırken okur, o
+mesaj yeni anahtarla çalışır).
 
 **Webhook (F-17, v1.1):** Bağlantı sayfasında "Real-time updates" → **Turn on**: `webhook_nonce` (rastgele) yazılır ve
 URL `/webhooks/<id>/<token>` gösterilir; `token = base64url(HMAC-SHA256(HKDF(ENCRYPTION_KEY, "hoomuch webhook v1"),
@@ -522,7 +530,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   MRR veya aktif abonelik okunamazsa snapshot **yazılmaz**; deneme ve 30 günlük gelir okunamazsa `null`. Adapty'nin tanımları aynen
   kullanılır: MRR denemeleri ve tek seferlik satın almaları içermez; aktif abonelik denemeleri **ve yenilemesi kapatılmış** abonelikleri
   hariç tutar (§6'dan farklı).
-- **Snapshot geçmişi (v1.1):** bağlantının ilk başarılı senkronizasyonunda `fetchSnapshotHistory`, `mrr`, `subscriptions_active`
+- **Snapshot geçmişi (v1.1):** bağlantının henüz snapshot'ı yokken (§4.1) `fetchSnapshotHistory`, `mrr`, `subscriptions_active`
   ve `trials_active` grafiklerini dünden geriye en çok 90 gün için birer istekle okur (3 istek); MRR trendi tek noktayla değil
   geçmişle başlar. Bu grafikler `last` ile toplanır: günlük seri ancak son günü belgelenmiş `value_to` ile tutarsa ve hiçbir gün
   iki kez geçmiyorsa kullanılır (gün gün yedek sorgu yok). MRR'ı ya da aktif abonelik sayısı olmayan gün (`null` nokta,
@@ -558,7 +566,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   hariç). **Aktif deneme** Superwall metriği değildir: `data:read` ile SQL'den türetilir (son olayı TRIAL dönemi,
   `expiration` değil, bitişi gelecekte olan abonelik; iptal edilmiş deneme bitene kadar sayılır). Entegrasyon olayı
   hiç yoksa `null`. Para birimi USD.
-- **Snapshot geçmişi (v1.1):** ilk başarılı senkronizasyonda aynı iki grafik belgelenmiş `last_90_days` hazır aralığıyla okunur
+- **Snapshot geçmişi (v1.1):** bağlantının henüz snapshot'ı yokken (§4.1) aynı iki grafik belgelenmiş `last_90_days` hazır aralığıyla okunur
   (definitions + 2 istek). Aralık bugünle bittiği için dünden geriye en çok 89 gün gelir; bugünün snapshot'ıyla dashboard'un
   90 günlük penceresi dolar. Değeri olmayan ya da hâlâ `incomplete` işaretli geçmiş noktalar ve iki grafikten yalnızca birinde
   olan günler atlanır, sıfırla doldurulmaz. Geçmiş günlerin denemesi `null`: Superwall'da deneme serisi yok, SQL yalnızca

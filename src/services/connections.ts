@@ -223,10 +223,12 @@ export async function rotateCredentials(
   // Verification takes a few seconds. Take the sync lock for the swap itself: a sync that started
   // meanwhile (cron, Sync now in another tab) would otherwise commit the old key's data after the
   // purge below, or plan its backfill from the old high-water mark. Ownership was checked above.
+  // The lock keeps the queued mark: a sync already on its way reads the key when it runs, so it
+  // uses the new one, and startInBackground below doesn't queue a second.
   const fresh = await getConnection(env.DB, userId, id);
   if (!fresh) return { ok: false, error: 'Connection not found.', fieldErrors: {} };
   const lockAt = Date.now();
-  const locked = await acquireSyncLock(env.DB, id, lockAt, lockAt - SYNC_LOCK_STALE_MS);
+  const locked = await acquireSyncLock(env.DB, id, lockAt, lockAt - SYNC_LOCK_STALE_MS, { keepQueued: true });
   if (!locked) return { ok: false, error: BUSY_ERROR, fieldErrors: {} };
 
   let released = false;
@@ -319,11 +321,14 @@ export async function startSync(
 ): Promise<{ ok: true; requestedAt: number } | { ok: false; error: string }> {
   const blocked = await manualSyncBlocker(env, userId, id, now);
   if (blocked) return { ok: false, error: blocked };
+  let queued: boolean;
   try {
-    await enqueueSync(env, id, 'manual', now);
+    queued = await enqueueSync(env, id, 'manual', now);
   } catch (err) {
     console.error(JSON.stringify({ event: 'sync_enqueue_failed', connectionId: id, kind: 'manual', message: sanitizeErrorText(String(err)) }));
     return { ok: false, error: 'Couldn’t start a sync right now. Try again in a minute.' };
   }
+  // The check above read the mark; the claim is what decides when two clicks (or the cron) race.
+  if (!queued) return { ok: false, error: SYNC_QUEUED_MESSAGE };
   return { ok: true, requestedAt: now };
 }

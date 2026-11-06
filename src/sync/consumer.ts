@@ -1,15 +1,21 @@
 /** Queue consumer for `SYNC_QUEUE` (see sync/queue.ts). Owner: Data Plane. */
 
 import type { Bindings } from '../env';
-import { SYNC_BUSY_MESSAGE, syncConnection, type SyncKind } from './engine';
+import { SYNC_BUSY_MESSAGE, SYNC_LOCK_STALE_MS, SYNC_NOT_STARTED_MESSAGE, syncConnection, type SyncKind } from './engine';
 import { errorLogFields } from './errors';
 import { SYNC_KINDS, message, type SyncMessage } from './queue';
-import { clearQueued } from './repo';
+import { clearQueued, lastSyncedAt } from './repo';
 
-/** Wait before a message whose handling crashed is tried again. */
+/** Wait before a message whose handling crashed, or whose sync couldn't start, is tried again. */
 export const CRASH_RETRY_DELAY_SECONDS = 60;
-/** Wait before a webhook nudge that found the connection busy tries again. */
+/** Wait before a webhook nudge that found the connection busy tries again (a live sync is done by then). */
 export const BUSY_RETRY_DELAY_SECONDS = 60;
+/**
+ * Wait before a redelivered message that found the connection busy tries again. Its earlier attempt
+ * may have died holding the lock; by then that lock is stale and the retry takes it over. Within
+ * `max_retries: 3` (wrangler.jsonc) a webhook nudge waits 60 + 300 s, past any stale lock.
+ */
+export const STALE_LOCK_RETRY_DELAY_SECONDS = SYNC_LOCK_STALE_MS / 1000;
 
 function emit(level: 'log' | 'warn' | 'error', event: string, data: Record<string, unknown>): void {
   try {
@@ -28,7 +34,8 @@ function parseMessage(body: unknown): SyncMessage | null {
 
 /**
  * Queue consumer. `syncConnection` records its own failures on the connection, so a finished sync
- * is acked whatever its outcome; only a crash outside it is retried (Queues' `max_retries`).
+ * is acked whatever its outcome; a sync that couldn't start and a crash outside it are retried
+ * (Queues' `max_retries`).
  */
 export async function handleSyncBatch(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
   for (const msg of batch.messages) {
@@ -39,13 +46,28 @@ export async function handleSyncBatch(batch: MessageBatch<unknown>, env: Binding
       continue;
     }
     try {
+      // Delivery is at least once. A successful sync that started after this message was queued
+      // already did what it asks for, so a second copy (or a late one) is a no-op.
+      const synced = m.at > 0 ? await lastSyncedAt(env.DB, m.connectionId) : null;
+      if (synced !== null && synced > m.at) {
+        emit('log', 'queue_sync_superseded', { connectionId: m.connectionId, kind: m.kind });
+        msg.ack();
+        continue;
+      }
       const r = await syncConnection(env, m.connectionId, m.kind);
+      if (!r.ok && r.error === SYNC_NOT_STARTED_MESSAGE) {
+        // Nothing ran and the mark is still set: this message is the sync it promises.
+        emit('warn', 'queue_sync_not_started', { connectionId: m.connectionId, kind: m.kind });
+        msg.retry({ delaySeconds: CRASH_RETRY_DELAY_SECONDS });
+        continue;
+      }
       if (!r.ok && r.error === SYNC_BUSY_MESSAGE) {
-        emit('log', 'queue_sync_busy', { connectionId: m.connectionId, kind: m.kind });
-        if (m.kind === 'webhook') {
-          // The sync running now may have read the provider before the change the webhook is
-          // about: come back once it's done. The mark stays, so further calls don't stack.
-          msg.retry({ delaySeconds: BUSY_RETRY_DELAY_SECONDS });
+        emit('log', 'queue_sync_busy', { connectionId: m.connectionId, kind: m.kind, attempts: msg.attempts });
+        if (msg.attempts > 1 || m.kind === 'webhook') {
+          // A redelivered message may be finding its own earlier attempt's lock: come back once it's
+          // stale. A webhook's sync running now may have read the provider before the change: come
+          // back once it's done. Either way the mark stays, so further calls don't stack.
+          msg.retry({ delaySeconds: msg.attempts > 1 ? STALE_LOCK_RETRY_DELAY_SECONDS : BUSY_RETRY_DELAY_SECONDS });
           continue;
         }
         // Another sync holds the lock and is doing the work. Drop our mark so the connection

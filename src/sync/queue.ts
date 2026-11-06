@@ -9,15 +9,16 @@
  *   - creating a connection, replacing its key and "Sync now" (services/connections.ts),
  *   - provider webhooks, delayed a minute so a burst is one sync (services/webhooks.ts).
  *
- * `connections.queued_at` marks a connection with a message on its way, so the cron and
- * "Sync now" don't stack a second one; taking the sync lock clears it. Queues have no
- * de-duplication of their own.
+ * `connections.queued_at` marks a connection with a message on its way, so the cron, "Sync now"
+ * and a key swap don't stack a second one; a sync taking the lock clears it. Producers claim the
+ * mark with one conditional UPDATE and send only for the rows it claimed, so two of them racing
+ * for one connection send one message. Queues have no de-duplication of their own.
  */
 
 import type { Bindings } from '../env';
 import { MINUTE } from '../lib/time';
 import type { SyncKind } from './engine';
-import { clearQueued, markQueued } from './repo';
+import { claimQueued, clearQueued } from './repo';
 
 export interface SyncMessage {
   v: 1;
@@ -38,30 +39,38 @@ export function message(connectionId: string, kind: SyncKind, at: number): SyncM
 }
 
 /**
- * Puts syncs for `ids` on the queue and marks them queued. Throws when the queue refused them, after
- * clearing the marks, so the caller can say so and the cron picks them up again.
+ * Puts syncs for `ids` on the queue, except those that already have one on its way, and returns the
+ * ids it queued, in the order given. Throws when the queue refused them, after clearing the marks of
+ * the ones not sent, so the caller can say so and the cron picks them up again.
  */
 export async function enqueueSyncs(
   env: Bindings,
   ids: readonly string[],
   kind: SyncKind,
   now: number = Date.now(),
-): Promise<void> {
-  if (ids.length === 0) return;
-  await markQueued(env.DB, ids, now).run();
+): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const { results } = await claimQueued(env.DB, ids, now, now - QUEUED_STALE_MS).all<{ id: string }>();
+  const claimed = new Set((results ?? []).map((r) => r.id));
+  const queued = ids.filter((id) => claimed.delete(id)); // `delete` drops repeated ids too
+  let sent = 0;
   try {
-    for (let i = 0; i < ids.length; i += SEND_BATCH_MAX) {
-      await env.SYNC_QUEUE.sendBatch(ids.slice(i, i + SEND_BATCH_MAX).map((id) => ({ body: message(id, kind, now) })));
+    for (; sent < queued.length; sent += SEND_BATCH_MAX) {
+      await env.SYNC_QUEUE.sendBatch(queued.slice(sent, sent + SEND_BATCH_MAX).map((id) => ({ body: message(id, kind, now) })));
     }
   } catch (err) {
-    await clearQueued(env.DB, ids, now)
+    await clearQueued(env.DB, queued.slice(sent), now)
       .run()
       .catch(() => {});
     throw err;
   }
+  return queued;
 }
 
-/** One connection's sync, e.g. after "Sync now". Throws like `enqueueSyncs`. */
-export async function enqueueSync(env: Bindings, id: string, kind: SyncKind, now: number = Date.now()): Promise<void> {
-  await enqueueSyncs(env, [id], kind, now);
+/**
+ * One connection's sync, e.g. after "Sync now": false when one was already on its way.
+ * Throws like `enqueueSyncs`.
+ */
+export async function enqueueSync(env: Bindings, id: string, kind: SyncKind, now: number = Date.now()): Promise<boolean> {
+  return (await enqueueSyncs(env, [id], kind, now)).length > 0;
 }

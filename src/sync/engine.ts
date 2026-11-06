@@ -4,7 +4,7 @@
  * One sync of one connection:
  *   1. lock      conditional UPDATE … RETURNING (fresh 'syncing' rows are skipped; a lock older than
  *                5 min is taken over) + open a `sync_runs` row.
- *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history on a first sync)
+ *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history while it has none)
  *                in its own batch, so it survives a later revenue failure.
  *                Both provider calls run against a wall-clock deadline (`ProviderContext.deadline`):
  *                once it passes no new request starts, so adapters checkpoint with a cursor, and a
@@ -127,6 +127,8 @@ export const MAX_SCHEDULE_GRACE_MS = 5 * MINUTE;
 
 export const SYNC_BUSY_MESSAGE = 'A sync is already running for this connection.';
 export const SYNC_NOT_FOUND_MESSAGE = 'Connection not found.';
+/** D1 failed while taking the lock: nothing ran or changed, so the queue consumer retries. */
+export const SYNC_NOT_STARTED_MESSAGE = 'Couldn’t start the sync. Try again in a minute.';
 export const BACKFILL_CONTINUES_MESSAGE = 'Revenue backfill in progress; the next sync continues.';
 
 // ---------- logging (never throws, never logs secrets) ----------
@@ -190,7 +192,7 @@ export async function syncConnection(env: Bindings, connectionId: string, kind: 
     row = await acquireSyncLock(env.DB, connectionId, startedAt, startedAt - SYNC_LOCK_STALE_MS);
   } catch (err) {
     emit('error', 'sync_error', { phase: 'lock', connectionId, kind, ...errorLogFields(err) });
-    return failed(genericSyncError());
+    return failed(SYNC_NOT_STARTED_MESSAGE);
   }
   if (!row) {
     let exists = true;
@@ -400,9 +402,11 @@ async function syncSnapshot(
   // The owner's local day: the dashboard's "today" (SPEC §6).
   const today = zonedDayKey(now, ownerZone(row));
   const stmts = [upsertSnapshot(db, row.id, today, snapshot, now)];
-  if (adapter.fetchSnapshotHistory && row.last_synced_at === null) {
-    // A connection's first successful sync can start its MRR trend with the provider's history.
-    // Optional data: a failure is logged, and today's snapshot is still written.
+  if (adapter.fetchSnapshotHistory && !row.has_snapshots) {
+    // A connection without snapshots (new, or its key now reads another account) can start its MRR
+    // trend with the provider's history. Asked once: today's row, written below, closes the gate
+    // whatever the revenue phase does next. Optional data: a failure is logged, and today's
+    // snapshot is still written.
     try {
       const history = await adapter.fetchSnapshotHistory(input, { days: SNAPSHOT_HISTORY_DAYS }, ctx);
       const { rows, skipped } = cleanSnapshotHistory(history, today, SNAPSHOT_HISTORY_DAYS);
@@ -496,8 +500,8 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
       limit: CRON_QUEUE_LIMIT,
     });
     summary['due'] = ids.length;
-    await enqueueSyncs(env, ids, 'cron', now);
-    summary['queued'] = ids.length;
+    // Fewer than due when a Sync now or a webhook queued one of them since the query.
+    summary['queued'] = (await enqueueSyncs(env, ids, 'cron', now)).length;
   } catch (err) {
     summary['error'] = errorLogFields(err);
   }

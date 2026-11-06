@@ -47,25 +47,43 @@ export function jsonChunks(rows: readonly unknown[], maxRows = BULK_MAX_ROWS, ma
 /**
  * Takes the per-connection sync lock and returns the locked row, or null when the connection is
  * missing or another sync holds a fresh lock. A lock older than `staleBefore` is taken over.
+ * A sync clears the queued mark: its message has arrived. `keepQueued` (a key swap, which is not a
+ * sync) leaves it, so a message already on its way still counts and runs with the new key.
  */
-export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<LockedConnectionRow | null> {
+export function acquireSyncLock(
+  db: D1Database,
+  id: string,
+  now: number,
+  staleBefore: number,
+  opts: { keepQueued?: boolean } = {},
+): Promise<LockedConnectionRow | null> {
   return db
     .prepare(
-      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2, queued_at = NULL
+      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2,
+                              queued_at = CASE WHEN ?4 THEN queued_at ELSE NULL END
         WHERE id = ?1 AND NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?3)
-       RETURNING *, (SELECT timezone FROM users WHERE users.id = connections.user_id) AS owner_timezone`,
+       RETURNING *, (SELECT timezone FROM users WHERE users.id = connections.user_id) AS owner_timezone,
+                 EXISTS (SELECT 1 FROM snapshots WHERE snapshots.connection_id = connections.id) AS has_snapshots`,
     )
-    .bind(id, now, staleBefore)
+    .bind(id, now, staleBefore, opts.keepQueued ? 1 : 0)
     .first<LockedConnectionRow>();
 }
 
-/** The locked row, plus its owner's zone: snapshot days and the first backfill follow it. */
+/** The locked row, plus its owner's zone (snapshot days and the first backfill follow it). */
 export interface LockedConnectionRow extends ConnectionRow {
   owner_timezone: string | null;
+  /** 1 once the connection has any snapshot row: past days are only asked for while it has none. */
+  has_snapshots: number;
 }
 
 export async function connectionExists(db: D1Database, id: string): Promise<boolean> {
   return (await db.prepare('SELECT 1 AS x FROM connections WHERE id = ?').bind(id).first<{ x: number }>()) !== null;
+}
+
+/** Start of the connection's last successful sync; null if it never had one or doesn't exist. */
+export async function lastSyncedAt(db: D1Database, id: string): Promise<number | null> {
+  const row = await db.prepare('SELECT last_synced_at FROM connections WHERE id = ?').bind(id).first<{ last_synced_at: number | null }>();
+  return row?.last_synced_at ?? null;
 }
 
 export const INTERRUPTED_RUN_MESSAGE = 'Interrupted before it finished.';
@@ -363,14 +381,22 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
   return (results ?? []).map((r) => r.id);
 }
 
-/** Marks connections as having a sync on the queue (`connections.queued_at`). */
-export function markQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
+/**
+ * Marks connections as having a sync on the queue (`connections.queued_at`) and returns the ids it
+ * marked: those without a mark, or whose mark is at or before `staleBefore`. One conditional
+ * statement, so of two producers racing for the same connection exactly one gets it.
+ */
+export function claimQueued(db: D1Database, ids: readonly string[], at: number, staleBefore: number): D1PreparedStatement {
   return db
-    .prepare('UPDATE connections SET queued_at = ?1 WHERE id IN (SELECT value FROM json_each(?2))')
-    .bind(at, JSON.stringify(ids));
+    .prepare(
+      `UPDATE connections SET queued_at = ?1
+        WHERE id IN (SELECT value FROM json_each(?2)) AND (queued_at IS NULL OR queued_at <= ?3)
+       RETURNING id`,
+    )
+    .bind(at, JSON.stringify(ids), staleBefore);
 }
 
-/** Undoes `markQueued` when the send failed, unless something queued them again since. */
+/** Undoes `claimQueued` when the send failed, unless something queued them again since. */
 export function clearQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
   return db
     .prepare('UPDATE connections SET queued_at = NULL WHERE id IN (SELECT value FROM json_each(?2)) AND queued_at = ?1')

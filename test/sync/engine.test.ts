@@ -22,7 +22,7 @@ import {
   syncConnection,
   syncDeadlines,
 } from '../../src/sync/engine';
-import { INTERRUPTED_RUN_MESSAGE, SYNC_RUNS_KEPT } from '../../src/sync/repo';
+import { INTERRUPTED_RUN_MESSAGE, SYNC_RUNS_KEPT, insertSnapshotHistory } from '../../src/sync/repo';
 import { DECRYPT_ERROR } from '../../src/sync/errors';
 import { encryptJson } from '../../src/lib/crypto';
 import { TEST_ENCRYPTION_KEY, seedConnection } from '../fixtures/d1';
@@ -174,7 +174,7 @@ describe('syncConnection — demo end to end', () => {
     expect(conn(c.t, 'demo-1').revenue_synced_until).toBe(NOW + 6 * HOUR);
   });
 
-  it('demo history never overwrites a day that already has a snapshot; today’s row is replaced', async () => {
+  it('today’s row is replaced; history never overwrites a day that already has a snapshot', async () => {
     // The demo is deterministic, so the idempotency test above can't tell "insert or ignore" from
     // "upsert". Distinct values can.
     const c = ctx();
@@ -182,7 +182,6 @@ describe('syncConnection — demo end to end', () => {
     const yesterday = addDays(dayKey(NOW), -1);
     const insert = `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, captured_at)
                     VALUES ('demo-1', ?, '{"USD":1}', 1, 0, 0)`;
-    c.t.exec(insert, yesterday);
     c.t.exec(insert, dayKey(NOW));
 
     await syncConnection(c.env, 'demo-1', 'initial');
@@ -192,13 +191,22 @@ describe('syncConnection — demo end to end', () => {
         'SELECT mrr, active_subscriptions, captured_at FROM snapshots WHERE connection_id = ? AND day = ?',
         'demo-1',
         day,
-      )[0]!;
-    expect(row(yesterday)).toEqual({ mrr: '{"USD":1}', active_subscriptions: 1, captured_at: 0 });
+      )[0];
     const expected = await demoAdapter.fetchSnapshot({ credentials: {}, config: DEMO_CONFIG }, makeCtx(fetch, { now: NOW }));
-    const today = row(dayKey(NOW));
+    const today = row(dayKey(NOW))!;
     expect(JSON.parse(today.mrr)).toEqual(expected.mrr);
     expect(today).toMatchObject({ active_subscriptions: expected.activeSubscriptions, captured_at: NOW });
-    expect(c.t.rows('SELECT 1 FROM snapshots WHERE connection_id = ?', 'demo-1')).toHaveLength(91);
+    // It had a snapshot already, so no history was asked for.
+    expect(c.t.rows('SELECT day FROM snapshots WHERE connection_id = ?', 'demo-1')).toEqual([{ day: dayKey(NOW) }]);
+
+    // The history insert itself: a stored day keeps its row, a new day is added.
+    c.t.exec(insert, yesterday);
+    const twoDaysAgo = addDays(dayKey(NOW), -2);
+    await c.env.DB.batch(
+      insertSnapshotHistory(c.env.DB, 'demo-1', [twoDaysAgo, yesterday].map((day) => ({ day, snapshot: SNAP })), NOW),
+    );
+    expect(row(yesterday)).toEqual({ mrr: '{"USD":1}', active_subscriptions: 1, captured_at: 0 });
+    expect(row(twoDaysAgo)).toEqual({ mrr: '{"USD":120000,"EUR":5000}', active_subscriptions: 42, captured_at: NOW });
   });
 });
 
@@ -218,7 +226,7 @@ describe('syncConnection — snapshot history hook', () => {
   it('a first sync stores the adapter’s past days next to today’s, with the snapshot context', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
-    stripeSnapshotOk();
+    const snap = stripeSnapshotOk();
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
     const today = dayKey(NOW);
     const hook = withHistory(async () => [
@@ -233,13 +241,19 @@ describe('syncConnection — snapshot history hook', () => {
     expect(r.ok).toBe(true);
     expect(hook).toHaveBeenCalledTimes(1);
     expect(hook.mock.calls[0]![1]).toEqual({ days: 90 });
+    // The snapshot's own context, so the history shares its budget and deadline.
+    expect(hook.mock.calls[0]![2]).toBe(snap.mock.calls[0]![1]);
     expect(snapshotDays(c)).toEqual([addDays(today, -2), addDays(today, -1), today]);
     expect(c.out.join('\n')).toContain('"event":"sync_history_skipped"');
   });
 
-  it('is not asked again once the connection has synced', async () => {
+  it('is not asked again once the connection has snapshots', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1', { status: 'ok', lastSyncedAt: NOW - 3 * HOUR });
+    c.t.exec(
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, captured_at) VALUES ('st-1', ?, '{"USD":1}', 1, 0)`,
+      addDays(dayKey(NOW), -1),
+    );
     stripeSnapshotOk();
     vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
     const hook = withHistory(async () => []);
@@ -247,7 +261,36 @@ describe('syncConnection — snapshot history hook', () => {
     await syncConnection(c.env, 'st-1', 'cron');
 
     expect(hook).not.toHaveBeenCalled();
-    expect(snapshotDays(c)).toEqual([dayKey(NOW)]);
+    expect(snapshotDays(c)).toEqual([addDays(dayKey(NOW), -1), dayKey(NOW)]);
+  });
+
+  it('runs once, even when the first sync’s revenue fails and the next one has to retry it', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockRejectedValueOnce(new ProviderError('upstream', 'down')).mockResolvedValue(page([]));
+    const hook = withHistory(async () => [{ day: addDays(dayKey(NOW), -1), snapshot: SNAP }]);
+
+    expect(await syncConnection(c.env, 'st-1', 'initial')).toMatchObject({ ok: false, snapshot: true });
+    expect(conn(c.t, 'st-1')).toMatchObject({ status: 'error', last_synced_at: null });
+    vi.setSystemTime(NOW + HOUR);
+    expect(await syncConnection(c.env, 'st-1', 'cron')).toMatchObject({ ok: true });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(snapshotDays(c)).toEqual([addDays(dayKey(NOW), -1), dayKey(NOW)]);
+  });
+
+  it('runs again for a connection whose snapshots were cleared (a key for another account)', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1', { status: 'pending', lastSyncedAt: NOW - 3 * HOUR });
+    stripeSnapshotOk();
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const hook = withHistory(async () => [{ day: addDays(dayKey(NOW), -1), snapshot: SNAP }]);
+
+    await syncConnection(c.env, 'st-1', 'manual');
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(snapshotDays(c)).toEqual([addDays(dayKey(NOW), -1), dayKey(NOW)]);
   });
 
   it('a failing history call is logged and the sync still succeeds with today’s snapshot', async () => {

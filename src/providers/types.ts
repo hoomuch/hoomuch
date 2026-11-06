@@ -261,9 +261,10 @@ export interface ProviderAdapter {
   fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot>;
   /**
    * Optional: snapshots for days before today, so a new connection's MRR trend starts with
-   * history instead of a single point. Called once, on the connection's first successful sync,
-   * right after `fetchSnapshot` and with the same context (and what's left of its budget).
-   * Oldest first. Days that already have a snapshot keep it; a failure here doesn't fail the sync.
+   * history instead of a single point. Called while the connection has no snapshots (its first
+   * sync, or after a key for another account cleared them), right after `fetchSnapshot` and with
+   * the same context (and what's left of its budget). Oldest first. Days that already have a
+   * snapshot keep it; a failure here doesn't fail the sync.
    */
   fetchSnapshotHistory?(
     input: ConnectionInput,
