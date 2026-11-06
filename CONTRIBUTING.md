@@ -194,9 +194,9 @@ they take an injected `fetch` and clock (`ctx.fetch`, `ctx.now`), never touch D1
 references.
 
 1. **Id.** Add the id to `ProviderId` and `PROVIDER_IDS` in `src/providers/types.ts`.
-2. **Migration.** `connections.provider` has a `CHECK` constraint listing every provider id
-   (`migrations/0001_init.sql`). Add a new numbered migration that allows the new id. SQLite can't
-   change a `CHECK` in place, so the table has to be rebuilt. Never edit an applied migration.
+2. **Migration.** None needed for the id: migration `0003` dropped the `CHECK` on
+   `connections.provider`, and `PROVIDER_IDS` is the guard now. If the adapter needs a new column,
+   add a new numbered migration. Never edit an applied migration.
 3. **Adapter.** Write `src/providers/<id>.ts` implementing `ProviderAdapter`:
    - `verify`: a live, read-only check of the key, at most about 3 requests, with a clear error
      message and the form `field` it belongs to.
