@@ -126,7 +126,7 @@ own domain, though, not on `*.workers.dev`. For a public instance, add a custom 
 
 | Provider | Key | Permissions |
 |----------|-----|-------------|
-| Stripe | Restricted key `rk_live_…` | Read: Subscriptions, Prices, Coupons, Balance |
+| Stripe | Restricted key `rk_live_…` | Read: Subscriptions, Prices, Balance; Coupons is optional and takes discounts off MRR; Products is optional and splits MRR by product |
 | Paddle | API key `pdl_live_apikey_…` (expires; one year at most) | Read: Subscriptions, Transactions, Adjustments, Metrics; Discounts optional |
 | Lemon Squeezy | API key (can't be scoped, so it has full access) | — |
 | Polar | Organization access token `polar_oat_…` | `metrics:read`, `subscriptions:read`, `orders:read`, `refunds:read` |
@@ -167,6 +167,9 @@ Changes that affect data you've already synced:
   resync. Stripe sends ISK, UGX and MGA in its own units, which are now converted on sync. Rows synced
   before that read 100× off (ISK and UGX too large, MGA too small) until the connection is removed and
   added again.
+- **Stripe MRR by product.** The dashboard's **By product** card can now split Stripe MRR by product.
+  It needs **Products: Read** on the Stripe key: edit the restricted key in Stripe (⋯ → **Edit key**)
+  and the split appears after the next sync. Without it, Stripe syncs as before.
 
 ## Known limitations
 
@@ -174,7 +177,8 @@ Each provider's section in [SPEC.md](SPEC.md) §6 lists what was checked against
 wasn't. The ones you'd notice:
 
 - **Stripe:** customer-level discounts aren't applied, and with Stripe Tax, tax-inclusive prices stay
-  tax-inclusive in MRR.
+  tax-inclusive in MRR. Payments carry no product name (reaching one needs read access to invoices and
+  charges, which hold customer details), so Stripe is split by product on MRR only, not on revenue.
 - **Lemon Squeezy:** refunds issued more than about 30 days after purchase are missed, and several
   partial refunds on one order show as one refund. Its docs don't say which units it uses for
   currencies without two decimals; hoomuch assumes ISO 4217.
