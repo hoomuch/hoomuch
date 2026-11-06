@@ -9,6 +9,7 @@ import { listConnections } from '../../src/db/queries';
 import { sha256Hex } from '../../src/lib/crypto';
 import { DAY } from '../../src/lib/time';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
+import { queueOf } from '../fixtures/queue';
 import { fakeFetch, route } from '../fixtures/harness';
 import { htmlOf } from '../fixtures/html';
 
@@ -19,6 +20,7 @@ const REAL = '11111111-1111-4111-8111-111111111111';
 const DEMO = '22222222-2222-4222-8222-222222222222';
 let t: TestD1;
 let pending: Promise<unknown>[];
+let env: ReturnType<typeof testEnv>;
 
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -31,6 +33,7 @@ beforeEach(async () => {
   seedConnection(t, { id: REAL, userId: 'u1', provider: 'stripe', name: 'Acme', lastSyncedAt: NOW - 3_600_000 });
   seedConnection(t, { id: DEMO, userId: 'u1', provider: 'demo', name: 'Demo data', lastSyncedAt: NOW - 3_600_000 });
   pending = [];
+  env = testEnv(t.db);
 });
 
 afterEach(async () => {
@@ -51,7 +54,7 @@ function send(method: 'GET' | 'POST', path: string, form?: Record<string, string
     redirect: 'manual',
   });
   const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {} };
-  return worker.fetch!(req as never, testEnv(t.db), ctx as never) as Promise<Response>;
+  return worker.fetch!(req as never, env, ctx as never) as Promise<Response>;
 }
 
 /** The flash cookie as "name=value", ready to send back. */
@@ -77,14 +80,15 @@ describe('Sync now', () => {
     const res = await send('POST', `/connections/${REAL}/sync`, {});
     expect(res.status).toBe(303);
     expect(res.headers.get('location')).toBe(`/connections/${REAL}?sync=${NOW}`);
-    expect(pending).toHaveLength(1); // the sync itself runs after the response
+    // The sync itself runs in the queue consumer, after the response.
+    expect(queueOf(env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: REAL, kind: 'manual', at: NOW }]);
   });
 
   it('still refuses a second sync moments after the last one', async () => {
     t.exec('UPDATE connections SET last_sync_started_at = ? WHERE id = ?', NOW - 10_000, REAL);
     const res = await send('POST', `/connections/${REAL}/sync`, {});
     expect(res.headers.get('location')).toBe(`/connections/${REAL}`);
-    expect(pending).toHaveLength(0);
+    expect(queueOf(env).sent).toEqual([]);
     // The flash says why (any flash would have passed before).
     const page = await htmlOf(await send('GET', `/connections/${REAL}`, undefined, [flash(res)!]));
     expect(page).toContain('Synced moments ago. Try again in a minute.');

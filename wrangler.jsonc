@@ -30,6 +30,22 @@
     "crons": ["*/30 * * * *"]
   },
 
+  // Every sync runs in this queue's consumer (src/sync/consumer.ts), one connection per invocation,
+  // so each gets its own request budget and time. The cron, new connections and "Sync now" send to
+  // it. `wrangler deploy` creates the queue the first time if it doesn't exist yet.
+  "queues": {
+    "producers": [{ "binding": "SYNC_QUEUE", "queue": "hoomuch-sync" }],
+    "consumers": [
+      {
+        "queue": "hoomuch-sync",
+        "max_batch_size": 1,
+        "max_retries": 3,
+        "retry_delay": 60,
+        "max_concurrency": 10
+      }
+    ]
+  },
+
   "vars": {
     "APP_NAME": "hoomuch",
     "ALLOW_SIGNUP": "true",

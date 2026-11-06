@@ -8,6 +8,7 @@ import { getDashboardData } from '../../src/data/dashboard';
 import { runScheduledSync, syncConnection } from '../../src/sync/engine';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
+import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, setup, teardown, type Ctx } from './helpers';
 
 afterEach(() => teardown());
@@ -72,6 +73,7 @@ describe('FX is loaded before the first snapshot is visible', () => {
     const seen = watchSnapshotWrites(c);
 
     await runScheduledSync(c.env, NOW);
+    await drainQueue(c.env); // the cron settles FX before it queues anything
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((n) => n > 0)).toBe(true);
   });

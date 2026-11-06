@@ -20,6 +20,7 @@ import { sanitizeErrorText } from '../providers/http';
 import { getAdapter, getProviderMeta, splitInput } from '../providers/registry';
 import { ProviderError, type ProviderId, type ProviderMeta, type VerifyResult } from '../providers/types';
 import { SYNC_LOCK_STALE_MS, syncConnection, type SyncResult } from '../sync/engine';
+import { QUEUED_STALE_MS, enqueueSync } from '../sync/queue';
 import { acquireSyncLock } from '../sync/repo';
 
 export const MAX_CONNECTIONS_PER_USER = 25;
@@ -91,10 +92,22 @@ async function verifyInput(
   return { ok: true, credentials, config, verified };
 }
 
-/** Verifies the key live, stores it encrypted, and kicks off the initial sync in the background. */
+/**
+ * Starts a sync in the background (the queue consumer) for one the user asked for. A queue that
+ * refuses the message is logged, not shown: the connection stays due, so the next cron tick (at
+ * most 30 minutes away) picks it up.
+ */
+async function startInBackground(env: Bindings, id: string, kind: 'initial' | 'manual'): Promise<void> {
+  try {
+    await enqueueSync(env, id, kind);
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'sync_enqueue_failed', connectionId: id, kind, message: sanitizeErrorText(String(err)) }));
+  }
+}
+
+/** Verifies the key live, stores it encrypted, and queues the initial sync. */
 export async function createConnection(
   env: Bindings,
-  ctx: Pick<ExecutionContext, 'waitUntil'>,
   userId: string,
   provider: ProviderId,
   name: string | undefined,
@@ -137,7 +150,7 @@ export async function createConnection(
       fieldErrors: {},
     };
   }
-  ctx.waitUntil(syncConnection(env, id, 'initial'));
+  await startInBackground(env, id, 'initial');
   return { ok: true, id, warnings: v.verified.warnings };
 }
 
@@ -189,7 +202,6 @@ async function purgeSyncedData(db: D1Database, userId: string, connectionId: str
  */
 export async function rotateCredentials(
   env: Bindings,
-  ctx: Pick<ExecutionContext, 'waitUntil'>,
   userId: string,
   id: string,
   raw: RawInput,
@@ -252,7 +264,7 @@ export async function rotateCredentials(
     }
   }
   if (!released) return { ok: false, error: 'Connection not found.', fieldErrors: {} };
-  ctx.waitUntil(syncConnection(env, id, 'manual'));
+  await startInBackground(env, id, 'manual');
   const warnings = sameSource
     ? v.verified.warnings
     : [...v.verified.warnings, 'The new key reads a different account or mode, so previously synced data was cleared and history is being rebuilt.'];
@@ -267,6 +279,8 @@ export async function deleteConnection(env: Bindings, userId: string, id: string
   return deleteConnectionRow(env.DB, userId, id);
 }
 
+export const SYNC_QUEUED_MESSAGE = 'A sync is already on its way for this connection.';
+
 /** Why a manual sync can't start right now, or null when it can. */
 async function manualSyncBlocker(env: Bindings, userId: string, id: string, now: number): Promise<string | null> {
   const row = await getConnection(env.DB, userId, id);
@@ -276,6 +290,7 @@ async function manualSyncBlocker(env: Bindings, userId: string, id: string, now:
     return 'A sync is already running for this connection.';
   }
   if (now - started < MANUAL_SYNC_COOLDOWN_MS) return 'Synced moments ago. Try again in a minute.';
+  if (row.queued_at !== null && now - row.queued_at < QUEUED_STALE_MS) return SYNC_QUEUED_MESSAGE;
   return null;
 }
 
@@ -292,19 +307,23 @@ export async function triggerSync(
 }
 
 /**
- * "Sync now" without holding the request: starts the sync in the background and returns at
- * once, with the same rate limits as triggerSync. `requestedAt` is what the page compares sync
- * runs against: it refreshes until a run that started at or after it has finished.
+ * "Sync now" without holding the request: queues the sync and returns at once, with the same rate
+ * limits as triggerSync. `requestedAt` is what the page compares sync runs against: it refreshes
+ * until a run that started at or after it has finished.
  */
 export async function startSync(
   env: Bindings,
-  ctx: Pick<ExecutionContext, 'waitUntil'>,
   userId: string,
   id: string,
   now: number = Date.now(),
 ): Promise<{ ok: true; requestedAt: number } | { ok: false; error: string }> {
   const blocked = await manualSyncBlocker(env, userId, id, now);
   if (blocked) return { ok: false, error: blocked };
-  ctx.waitUntil(syncConnection(env, id, 'manual'));
+  try {
+    await enqueueSync(env, id, 'manual', now);
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'sync_enqueue_failed', connectionId: id, kind: 'manual', message: sanitizeErrorText(String(err)) }));
+    return { ok: false, error: 'Couldn’t start a sync right now. Try again in a minute.' };
+  }
   return { ok: true, requestedAt: now };
 }

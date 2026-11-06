@@ -14,11 +14,10 @@ import { DAY, HOUR, MINUTE, addDays, dayKey, dayStart } from '../../src/lib/time
 import { dailyFromEvents, decodeBackfill } from '../../src/sync/aggregate';
 import {
   BACKFILL_CONTINUES_MESSAGE,
-  CRON_SYNC_DEADLINE_MS,
-  INTERACTIVE_SYNC_DEADLINE_MS,
   REVENUE_PAGE_BUDGET,
   SNAPSHOT_PAGE_BUDGET,
   SYNC_BUSY_MESSAGE,
+  SYNC_DEADLINE_MS,
   syncConnection,
   syncDeadlines,
 } from '../../src/sync/engine';
@@ -840,45 +839,42 @@ describe('context deadlines / syncDeadlines', () => {
     expect(dctx.pageBudget).toBe(10);
   });
 
-  it('interactive syncs get ~20 s (snapshot first, revenue the rest), cron syncs ~60 s', () => {
-    expect(INTERACTIVE_SYNC_DEADLINE_MS).toBe(20_000);
-    expect(CRON_SYNC_DEADLINE_MS).toBe(60_000);
-    expect(syncDeadlines('initial', NOW)).toEqual({ snapshot: NOW + 12_000, revenue: NOW + 20_000 });
-    expect(syncDeadlines('manual', NOW)).toEqual({ snapshot: NOW + 12_000, revenue: NOW + 20_000 });
-    expect(syncDeadlines('cron', NOW)).toEqual({ snapshot: NOW + 36_000, revenue: NOW + 60_000 });
+  it('every sync gets ~60 s in its queue invocation: the snapshot first, revenue the rest', () => {
+    expect(SYNC_DEADLINE_MS).toBe(60_000);
+    expect(syncDeadlines(NOW)).toEqual({ snapshot: NOW + 36_000, revenue: NOW + 60_000 });
   });
 });
 
 describe('syncConnection — deadlines and budgets', () => {
-  it('a slow initial sync checkpoints its cursor at the deadline and commits well inside waitUntil’s 30 s', async () => {
+  it('a slow initial sync checkpoints its cursor at the deadline and commits', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
     stripeSnapshotOk();
-    slowApi(3_000);
+    slowApi(10_000);
     const rev = vi.spyOn(stripeAdapter, 'fetchRevenue').mockImplementation((_input, req, pctx) => pagedRevenue(req, pctx));
 
     const r = await syncConnection(c.env, 'st-1', 'initial');
 
-    // Pages at t = 0, 3, …, 18 s; at 21 s the budget reads 0, the adapter returns a cursor, the batch commits.
-    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 7, error: null });
-    expect(Date.now() - NOW).toBe(21_000);
-    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '7', since: FIRST_SINCE });
-    expect(txRows(c.t, 'st-1')).toHaveLength(7);
-    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 7, message: BACKFILL_CONTINUES_MESSAGE });
+    // Pages at t = 0, 10, …, 50 s; at 60 s hasBudget reads false, the adapter returns a cursor, the batch commits.
+    expect(r).toMatchObject({ ok: true, snapshot: true, done: false, events: 6, error: null });
+    expect(Date.now() - NOW).toBe(60_000);
+    expect(decodeBackfill(conn(c.t, 'st-1').revenue_cursor!)).toMatchObject({ cursor: '6', since: FIRST_SINCE });
+    expect(txRows(c.t, 'st-1')).toHaveLength(6);
+    expect(runs(c.t, 'st-1')[0]).toMatchObject({ ok: 1, events: 6, message: BACKFILL_CONTINUES_MESSAGE });
     expect(c.out.some((l) => l.includes('sync_deadline_reached'))).toBe(true);
 
     // The next (cron) run resumes from the checkpoint.
     vi.setSystemTime(NOW + HOUR);
     const r2 = await syncConnection(c.env, 'st-1', 'cron');
-    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '7' });
-    expect(r2).toMatchObject({ ok: true, events: REVENUE_PAGE_BUDGET });
+    expect(rev.mock.calls[1]![1]).toEqual({ since: FIRST_SINCE, cursor: '6' });
+    expect(r2).toMatchObject({ ok: true, events: 6 }); // the same 60 s again, from the checkpoint
     expectDailyMatchesTransactions(c, 'st-1');
   });
 
   it('a snapshot that runs out of time fails honestly; revenue still gets the rest of the deadline', async () => {
     const c = ctx();
     await seedStripe(c, 'st-1');
-    slowApi(3_000);
+    slowApi(5_000); // 10 pages need 50 s; the snapshot's share is 36 s
     vi.spyOn(stripeAdapter, 'fetchSnapshot').mockImplementation(async (_input, pctx) => {
       // Like Stripe: a partial MRR would be wrong, so it lists everything or throws.
       for (let after = 0; after < 10; ) after = (await slowGet(pctx, after)).n;

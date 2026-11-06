@@ -36,6 +36,9 @@ npx wrangler dev --test-scheduled
 curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
 ```
 
+The cron only queues the connections that are due; `wrangler dev` runs the sync queue locally, so
+the syncs follow a moment later in the same terminal.
+
 Before opening a pull request, run:
 
 ```bash
@@ -49,7 +52,7 @@ version, and checks that the pull request title is a Conventional Commit (see *C
 
 | Script | What it does |
 |--------|--------------|
-| `npm run dev` | `wrangler dev`. Rebuilds the CSS and the browser bundle on every reload |
+| `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
 | `npm run check` | Typecheck, tests and build |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |

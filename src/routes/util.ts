@@ -102,10 +102,3 @@ export function syncState(active: boolean, poll: number, urlFor: (nextPoll: numb
   if (poll >= MAX_POLLS) return { refresh: null };
   return { refresh: { seconds: POLL_SECONDS, url: urlFor(poll + 1), stopUrl: urlFor(POLL_STOPPED) } };
 }
-
-// ---------- runtime ----------
-
-/** The request's execution context, for `waitUntil` background work (services take only that). */
-export function execCtx(c: AppContext): Pick<ExecutionContext, 'waitUntil'> {
-  return c.executionCtx;
-}

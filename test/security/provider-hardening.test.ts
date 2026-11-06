@@ -13,6 +13,7 @@ import { acquireSyncLock } from '../../src/sync/repo';
 import { DAY, HOUR } from '../../src/lib/time';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, makeCtx, route } from '../fixtures/harness';
+import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, conn, encryptedCreds, setup, teardown, type Ctx } from '../sync/helpers';
 
 describe('sanitizeErrorText', () => {
@@ -153,10 +154,6 @@ describe('replacing a key', () => {
   let c: Ctx;
   afterEach(() => teardown());
 
-  function execCtx(): ExecutionContext {
-    return { waitUntil: () => undefined, passThroughOnException: () => undefined, props: {} } as unknown as ExecutionContext;
-  }
-
   async function seed(id: string, startedAt = NOW - HOUR): Promise<void> {
     seedConnection(c.t, {
       id,
@@ -188,7 +185,7 @@ describe('replacing a key', () => {
       }),
     ]);
     vi.stubGlobal('fetch', fetch);
-    const r = await rotateCredentials(c.env, execCtx(), c.userId, 'k', { apiKey: 'rk_live_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' });
     expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a minute.' });
     // Nothing was swapped or purged under the running sync.
     expect(c.t.rows<{ n: number }>('SELECT COUNT(*) AS n FROM transactions WHERE connection_id = ?', 'k')[0]!.n).toBe(1);
@@ -224,7 +221,7 @@ describe('replacing a key', () => {
         };
       },
     });
-    const r = await rotateCredentials({ ...c.env, DB: db }, execCtx(), c.userId, 'k', { apiKey: 'rk_live_new' });
+    const r = await rotateCredentials({ ...c.env, DB: db }, c.userId, 'k', { apiKey: 'rk_live_new' });
     expect(r).toMatchObject({ ok: true });
     expect(cronGotLock).toBe(false);
   });
@@ -234,12 +231,9 @@ describe('replacing a key', () => {
     await seed('k');
     const { fetch } = fakeFetch([route('/v1/latest', { json: FX_BODY }), route(/\/v1\//, { json: emptyList })]);
     vi.stubGlobal('fetch', fetch);
-    const pending: Promise<unknown>[] = [];
-    const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException: () => undefined, props: {} };
-    const r = await rotateCredentials(c.env, ctx as unknown as ExecutionContext, c.userId, 'k', { apiKey: 'rk_live_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' });
     expect(r).toMatchObject({ ok: true });
-    expect(pending).toHaveLength(1);
-    await Promise.all(pending);
+    expect(await drainQueue(c.env)).toMatchObject([{ outcome: 'ack' }]);
     expect(conn(c.t, 'k').status).toBe('ok');
     expect(conn(c.t, 'k').last_sync_started_at).toBe(NOW);
   });
@@ -249,7 +243,7 @@ describe('replacing a key', () => {
     await seed('k', NOW - 30_000);
     const { fetch, calls } = fakeFetch([route(/.*/, { json: emptyList })]);
     vi.stubGlobal('fetch', fetch);
-    const r = await rotateCredentials(c.env, execCtx(), c.userId, 'k', { apiKey: 'rk_test_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' });
     expect(r).toMatchObject({ ok: false, error: 'Synced moments ago. Try again in a minute.' });
     expect(calls).toHaveLength(0); // the key wasn't even sent for verification
   });

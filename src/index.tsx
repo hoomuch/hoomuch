@@ -13,6 +13,7 @@ import { loadFlash } from './lib/flash';
 import { limitRequests } from './lib/rate-limit';
 import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
+import { handleSyncBatch } from './sync/consumer';
 import { runScheduledSync } from './sync/engine';
 
 const app = new Hono<AppEnv>();
@@ -89,6 +90,10 @@ registerRoutes(app);
 
 export default {
   fetch: app.fetch,
+  // Every sync runs here, one message per invocation (sync/queue.ts, sync/consumer.ts).
+  async queue(batch, env) {
+    await handleSyncBatch(batch, env);
+  },
   async scheduled(controller, env, ctx) {
     const now = controller.scheduledTime;
     ctx.waitUntil(

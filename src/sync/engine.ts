@@ -9,7 +9,7 @@
  *                Both provider calls run against a wall-clock deadline (`ProviderContext.deadline`):
  *                once it passes no new request starts, so adapters checkpoint with a cursor, and a
  *                hard stop shortly after it aborts anything still in flight, so the final batch
- *                still commits inside waitUntil's 30 s.
+ *                always gets to commit.
  *   3. revenue   fetchRevenue(since, cursor) → validate → ONE final batch that upserts transactions,
  *                rebuilds daily_revenue for the affected days, upserts provider daily points,
  *                moves the cursor / high-water mark, releases the lock and closes the run.
@@ -57,6 +57,7 @@ import {
   isStaleCursorError,
 } from './errors';
 import { ensureFx, refreshFxIfStale } from './fx';
+import { QUEUED_STALE_MS, enqueueSyncs } from './queue';
 import {
   acquireSyncLock,
   closeSyncRun,
@@ -100,20 +101,20 @@ export const SNAPSHOT_HISTORY_DAYS = 90;
 export const REVENUE_PAGE_BUDGET = 20;
 /** A 'syncing' lock older than this is considered abandoned (matches services/connections.ts). */
 export const SYNC_LOCK_STALE_MS = 5 * MINUTE;
-/** Connections per cron tick (SPEC §4.1). */
-export const CRON_BATCH_SIZE = 10;
-/** The cron stops starting new syncs after this much wall time (Workers cron limit is 15 min). */
-export const CRON_WALL_TIME_MS = 10 * MINUTE;
+/**
+ * Connections the cron queues per tick (SPEC §4.1): one `sendBatch`. Due times only move forward
+ * and the order is per-tenant round robin, so anything left over goes first on the next tick.
+ */
+export const CRON_QUEUE_LIMIT = 100;
 export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 /** A connection in 'error' is retried after this many intervals since its last attempt. */
 export const ERROR_BACKOFF_INTERVALS = 3;
 /**
- * Wall-clock budget of one 'initial' / 'manual' sync. Those run in waitUntil (30 s after the
- * response) or while the user waits, so the final batch must commit well before that.
+ * Wall-clock budget of one sync. Every sync runs in its own queue consumer invocation (15 min of
+ * wall time), so this bounds how long a slow provider keeps one connection's sync open, not a
+ * platform limit; a backfill that needs longer continues on the next sync from its cursor.
  */
-export const INTERACTIVE_SYNC_DEADLINE_MS = 20_000;
-/** Wall-clock budget of one connection's sync inside the cron (10 × 60 s ≈ CRON_WALL_TIME_MS). */
-export const CRON_SYNC_DEADLINE_MS = 60_000;
+export const SYNC_DEADLINE_MS = 60_000;
 /** Share of the deadline the snapshot may use; revenue (resumable) gets the remainder. */
 export const SNAPSHOT_DEADLINE_SHARE = 0.6;
 /**
@@ -160,9 +161,8 @@ function phaseContext(tag: string, pageBudget: number, deadline: number): Provid
 }
 
 /** Absolute deadlines for a sync that started at `startedAt`. */
-export function syncDeadlines(kind: SyncKind, startedAt: number): { snapshot: number; revenue: number } {
-  const total = kind === 'cron' ? CRON_SYNC_DEADLINE_MS : INTERACTIVE_SYNC_DEADLINE_MS;
-  return { snapshot: startedAt + Math.floor(total * SNAPSHOT_DEADLINE_SHARE), revenue: startedAt + total };
+export function syncDeadlines(startedAt: number): { snapshot: number; revenue: number } {
+  return { snapshot: startedAt + Math.floor(SYNC_DEADLINE_MS * SNAPSHOT_DEADLINE_SHARE), revenue: startedAt + SYNC_DEADLINE_MS };
 }
 
 // ---------- syncConnection ----------
@@ -278,7 +278,7 @@ async function runLocked(
   /** Engine-owned wording for running out of requests or time (never "the next sync continues" for a snapshot). */
   const exhausted = (phase: 'snapshot' | 'revenue', err: unknown): unknown =>
     err instanceof BudgetExhaustedError ? new SyncError(exhaustedMessage(phase, meta.name, err.reason === 'deadline')) : err;
-  const deadlines = syncDeadlines(kind, now);
+  const deadlines = syncDeadlines(now);
 
   let snapshot = false;
   let revenue: RevenueOutcome | null = null;
@@ -461,13 +461,16 @@ function syncIntervalMs(env: Bindings): number {
   return (Number.isFinite(n) && n > 0 ? n : DEFAULT_SYNC_INTERVAL_MINUTES) * MINUTE;
 }
 
-/** Cron entry point: refresh FX daily, then sync the most overdue connections (SPEC §4.1). */
+/**
+ * Cron entry point (SPEC §4.1): refresh FX daily, then put the most overdue connections on the sync
+ * queue. The syncs themselves run in the queue consumer (sync/consumer.ts), one per invocation.
+ */
 export async function runScheduledSync(env: Bindings, now: number = Date.now()): Promise<void> {
   const wallStart = Date.now();
-  const summary: Record<string, unknown> = { due: 0, started: 0, ok: 0, failed: 0, busy: 0, stoppedEarly: false };
+  const summary: Record<string, unknown> = { due: 0, queued: 0 };
 
-  // Settled before any sync writes a snapshot, so a dashboard never renders a fresh install's
-  // numbers without rates. Usually one D1 read; refreshFxIfStale never throws (catch is belt and braces).
+  // Settled before any sync is queued, so a dashboard never renders a fresh install's numbers
+  // without rates (cron syncs skip ensureFx). refreshFxIfStale never throws (catch is belt and braces).
   const fx = await refreshFxIfStale(env.DB, globalFetch, now).catch(() => 'failed');
 
   try {
@@ -480,21 +483,12 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
       // A never-synced connection whose first sync was killed is retried as soon as its lock is stale.
       retryWaitMs: SYNC_LOCK_STALE_MS,
       staleBefore: now - SYNC_LOCK_STALE_MS,
-      limit: CRON_BATCH_SIZE,
+      queuedBefore: now - QUEUED_STALE_MS,
+      limit: CRON_QUEUE_LIMIT,
     });
     summary['due'] = ids.length;
-    let started = 0;
-    for (const id of ids) {
-      if (Date.now() - wallStart >= CRON_WALL_TIME_MS) {
-        summary['stoppedEarly'] = true;
-        break;
-      }
-      started++;
-      const r = await syncConnection(env, id, 'cron');
-      const bucket = r.ok ? 'ok' : r.error === SYNC_BUSY_MESSAGE ? 'busy' : 'failed';
-      summary[bucket] = (summary[bucket] as number) + 1;
-    }
-    summary['started'] = started;
+    await enqueueSyncs(env, ids, 'cron', now);
+    summary['queued'] = ids.length;
   } catch (err) {
     summary['error'] = errorLogFields(err);
   }

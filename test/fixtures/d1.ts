@@ -16,8 +16,10 @@ import providerIds from '../../migrations/0003_provider_ids.sql?raw';
 import emailVerification from '../../migrations/0004_email_verification.sql?raw';
 import mrrByProduct from '../../migrations/0005_snapshot_mrr_by_product.sql?raw';
 import snapshotWarnings from '../../migrations/0006_snapshot_warnings.sql?raw';
+import syncQueue from '../../migrations/0007_sync_queue.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
+import { FakeQueue } from './queue';
 
 type Bindable = null | number | bigint | string | Uint8Array;
 
@@ -103,6 +105,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(emailVerification);
   sqlite.exec(mrrByProduct);
   sqlite.exec(snapshotWarnings);
+  sqlite.exec(syncQueue);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {
@@ -170,6 +173,7 @@ export function testEnv(db: D1Database, overrides: Partial<Bindings> = {}): Bind
   return {
     DB: db,
     ASSETS: {} as Fetcher,
+    SYNC_QUEUE: new FakeQueue(),
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     APP_NAME: 'hoomuch',
     ALLOW_SIGNUP: 'true',

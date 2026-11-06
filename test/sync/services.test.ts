@@ -1,19 +1,24 @@
 /** Connection services: key rotation semantics and deletion (Data Plane). */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stripeAdapter } from '../../src/providers/stripe';
-import { MAX_CONNECTIONS_PER_USER, createConnection, deleteConnection, rotateCredentials, triggerSync } from '../../src/services/connections';
+import {
+  MAX_CONNECTIONS_PER_USER,
+  SYNC_QUEUED_MESSAGE,
+  createConnection,
+  deleteConnection,
+  rotateCredentials,
+  startSync,
+  triggerSync,
+} from '../../src/services/connections';
 import { DAY, HOUR, addDays, dayKey, dayStart } from '../../src/lib/time';
 import { seedConnection } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
+import { drainQueue, queueOf } from '../fixtures/queue';
 import { FX_BODY, NOW, encryptedCreds, setup, teardown, type Ctx } from './helpers';
 
 afterEach(() => teardown());
 
 const emptyList = { object: 'list', data: [], has_more: false };
-
-function execCtx(pending: Promise<unknown>[]): ExecutionContext {
-  return { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException: () => undefined, props: {} } as unknown as ExecutionContext;
-}
 
 function stubStripe(): void {
   const { fetch } = fakeFetch([
@@ -56,8 +61,7 @@ describe('rotateCredentials', () => {
     stubStripe();
     const revenue = vi.spyOn(stripeAdapter, 'fetchRevenue');
     await seedStripeWithHistory(c, 'k', { testMode: true });
-    const pending: Promise<unknown>[] = [];
-    const r = await rotateCredentials(c.env, execCtx(pending), c.userId, 'k', { apiKey: 'rk_test_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' });
     expect(r).toMatchObject({ ok: true });
     // Before the background sync runs: cursor cleared, high-water and history kept.
     const row = c.t.rows<{ revenue_cursor: string | null; revenue_synced_until: number | null }>(
@@ -70,9 +74,8 @@ describe('rotateCredentials', () => {
 
     // The background sync it started is incremental from the kept high-water mark, not a fresh
     // 90-day backfill, and leaves the old history in place.
-    expect(pending).toHaveLength(1);
-    const [result] = (await Promise.all(pending)) as Array<{ ok: boolean }>;
-    expect(result).toMatchObject({ ok: true });
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: 'k', kind: 'manual', at: NOW }]);
+    expect(await drainQueue(c.env)).toMatchObject([{ outcome: 'ack' }]);
     expect(revenue.mock.calls).toHaveLength(1);
     expect(revenue.mock.calls[0]![1]).toEqual({ since: NOW - HOUR - 2 * DAY, cursor: null });
     expect(c.t.rows('SELECT external_id FROM transactions WHERE connection_id = ?', 'k')).toEqual([{ external_id: 'txn_old' }]);
@@ -88,10 +91,7 @@ describe('rotateCredentials', () => {
     const revenue = vi.spyOn(stripeAdapter, 'fetchRevenue');
     await seedStripeWithHistory(c, 'k', { testMode: true });
     c.t.exec("INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES ('k', '2026-11-02', 'USD', 1000, 0, 1, 'transactions')");
-    // The background sync is awaited below: a dropped waitUntil promise would keep running into the
-    // next test, after teardown has put the real `fetch` back.
-    const pending: Promise<unknown>[] = [];
-    const r = await rotateCredentials(c.env, execCtx(pending), c.userId, 'k', { apiKey: 'rk_live_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_live_new' });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.warnings.join(' ')).toMatch(/previously synced data was cleared/);
     expect(c.t.rows('SELECT * FROM transactions WHERE connection_id = ?', 'k')).toEqual([]);
@@ -104,9 +104,8 @@ describe('rotateCredentials', () => {
     });
 
     // …and the sync it started is a fresh 90-day backfill (from midnight, 89 days before today).
-    expect(pending).toHaveLength(1);
-    const [result] = (await Promise.all(pending)) as Array<{ ok: boolean }>;
-    expect(result).toMatchObject({ ok: true });
+    expect(await drainQueue(c.env)).toMatchObject([{ body: { kind: 'manual' }, outcome: 'ack' }]);
+    expect(c.t.rows('SELECT ok FROM sync_runs WHERE connection_id = ?', 'k')).toEqual([{ ok: 1 }]);
     expect(revenue.mock.calls).toHaveLength(1);
     expect(revenue.mock.calls[0]![1]).toEqual({ since: dayStart(addDays(dayKey(NOW), -89)), cursor: null });
   });
@@ -115,7 +114,7 @@ describe('rotateCredentials', () => {
     const c = setup();
     stubStripe();
     await seedStripeWithHistory(c, 'k', { testMode: true, status: 'syncing', startedAt: NOW - 1000 });
-    const r = await rotateCredentials(c.env, execCtx([]), c.userId, 'k', { apiKey: 'rk_test_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'k', { apiKey: 'rk_test_new' });
     expect(r).toMatchObject({ ok: false, error: 'A sync is running for this connection. Try again in a minute.' });
     expect(c.t.rows('SELECT revenue_cursor FROM connections WHERE id = ?', 'k')[0]).toEqual({ revenue_cursor: 'old-cursor' });
   });
@@ -125,7 +124,7 @@ describe('rotateCredentials', () => {
     stubStripe();
     c.t.exec("INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES ('other', 'o@example.com', 'x', 0, 0)");
     seedConnection(c.t, { id: 'theirs', userId: 'other', provider: 'stripe' });
-    const r = await rotateCredentials(c.env, execCtx([]), c.userId, 'theirs', { apiKey: 'rk_test_new' });
+    const r = await rotateCredentials(c.env, c.userId, 'theirs', { apiKey: 'rk_test_new' });
     expect(r).toMatchObject({ ok: false, error: 'Connection not found.' });
   });
 });
@@ -171,12 +170,55 @@ describe('triggerSync', () => {
   });
 });
 
-describe('createConnection form messages', () => {
-  const ctx = { waitUntil: () => undefined };
+describe('startSync', () => {
+  it('queues a manual sync once; a second click is told one is on its way', async () => {
+    const c = setup();
+    stubStripe();
+    await seedStripeWithHistory(c, 'k', { testMode: true, startedAt: NOW - 2 * HOUR });
 
+    expect(await startSync(c.env, c.userId, 'k', NOW)).toEqual({ ok: true, requestedAt: NOW });
+    expect(await startSync(c.env, c.userId, 'k', NOW + 1_000)).toEqual({ ok: false, error: SYNC_QUEUED_MESSAGE });
+    expect(queueOf(c.env).sent).toHaveLength(1);
+
+    // The consumer takes the lock, which clears the mark; the run is the one the page waits for.
+    await drainQueue(c.env);
+    expect(c.t.rows('SELECT queued_at, status FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: null, status: 'ok' }]);
+    expect(c.t.rows('SELECT kind, ok FROM sync_runs WHERE connection_id = ?', 'k')).toEqual([{ kind: 'manual', ok: 1 }]);
+  });
+
+  it('says so when the queue refuses, and leaves nothing marked', async () => {
+    const c = setup();
+    await seedStripeWithHistory(c, 'k', { testMode: true, startedAt: NOW - 2 * HOUR });
+    queueOf(c.env).failNext = true;
+    expect(await startSync(c.env, c.userId, 'k', NOW)).toEqual({ ok: false, error: 'Couldn’t start a sync right now. Try again in a minute.' });
+    expect(c.t.rows('SELECT queued_at FROM connections WHERE id = ?', 'k')).toEqual([{ queued_at: null }]);
+  });
+});
+
+describe('createConnection queues the first sync', () => {
+  it('a demo connection is saved, queued as initial, and filled by the consumer', async () => {
+    const c = setup();
+    const r = await createConnection(c.env, c.userId, 'demo', undefined, {});
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(queueOf(c.env).sent.map((m) => m.body)).toEqual([{ v: 1, connectionId: r.id, kind: 'initial', at: NOW }]);
+    await drainQueue(c.env);
+    expect(c.t.rows('SELECT kind, ok FROM sync_runs WHERE connection_id = ?', r.id)).toEqual([{ kind: 'initial', ok: 1 }]);
+  });
+
+  it('a queue outage still saves the connection; the cron picks it up', async () => {
+    const c = setup();
+    queueOf(c.env).failNext = true;
+    const r = await createConnection(c.env, c.userId, 'demo', undefined, {});
+    expect(r.ok).toBe(true);
+    expect(c.t.rows('SELECT status, queued_at FROM connections')).toEqual([{ status: 'pending', queued_at: null }]);
+  });
+});
+
+describe('createConnection form messages', () => {
   it('asks for required fields without calling the provider', async () => {
     const c = setup();
-    const r = await createConnection(c.env, ctx, c.userId, 'stripe', undefined, {});
+    const r = await createConnection(c.env, c.userId, 'stripe', undefined, {});
     expect(r).toMatchObject({ ok: false, error: 'Fill in the required fields.' });
     if (!r.ok) expect(Object.keys(r.fieldErrors)).toEqual(['apiKey']);
   });
@@ -184,7 +226,7 @@ describe('createConnection form messages', () => {
   it('puts the specific problem on the field and a short note on the form', async () => {
     const c = setup();
     vi.stubGlobal('fetch', fakeFetch([route('/v1/subscriptions', { status: 401, json: { error: { message: 'Invalid API Key provided' } } })]).fetch);
-    const r = await createConnection(c.env, ctx, c.userId, 'stripe', undefined, { apiKey: 'rk_test_wrong' });
+    const r = await createConnection(c.env, c.userId, 'stripe', undefined, { apiKey: 'rk_test_wrong' });
     expect(r).toMatchObject({ ok: false, error: 'Nothing was saved. See the field below.' });
     if (!r.ok) expect(r.fieldErrors['apiKey']).toMatch(/^Stripe rejected this key\./);
   });
@@ -192,7 +234,7 @@ describe('createConnection form messages', () => {
   it('explains an unreachable provider without a field', async () => {
     const c = setup();
     vi.stubGlobal('fetch', fakeFetch([route('/v1/subscriptions', { status: 503, json: {} })]).fetch);
-    const r = await createConnection(c.env, ctx, c.userId, 'stripe', undefined, { apiKey: 'rk_test_x' });
+    const r = await createConnection(c.env, c.userId, 'stripe', undefined, { apiKey: 'rk_test_x' });
     // toEqual, not toMatchObject: inside toMatchObject `fieldErrors: {}` matches any object.
     expect(r).toEqual({ ok: false, error: 'Couldn’t reach Stripe. Try again in a few minutes.', fieldErrors: {} });
   });
@@ -200,7 +242,7 @@ describe('createConnection form messages', () => {
   it('states the connection limit', async () => {
     const c = setup();
     for (let i = 0; i < MAX_CONNECTIONS_PER_USER; i++) seedConnection(c.t, { id: `c${i}`, userId: c.userId, provider: 'demo' });
-    const r = await createConnection(c.env, ctx, c.userId, 'demo', undefined, {});
+    const r = await createConnection(c.env, c.userId, 'demo', undefined, {});
     expect(r).toMatchObject({
       ok: false,
       error: `You’ve reached the limit of ${MAX_CONNECTIONS_PER_USER} connections. Delete one to add another.`,

@@ -51,8 +51,9 @@ down by connection.
 ### One click
 
 Click **Deploy to Cloudflare** above. Cloudflare copies this repo into your GitHub or GitLab account,
-creates the D1 database and asks for `ENCRYPTION_KEY` (generate one with `openssl rand -base64 32`).
-Every deploy applies pending D1 migrations first, and every push to your copy redeploys it.
+creates the D1 database and the sync queue, and asks for `ENCRYPTION_KEY` (generate one with
+`openssl rand -base64 32`). Every deploy applies pending D1 migrations first, and every push to your
+copy redeploys it.
 
 ### By hand
 
@@ -62,6 +63,12 @@ npx wrangler d1 create hoomuch       # copy the printed database_id into wrangle
 openssl rand -base64 32 | npx wrangler secret put ENCRYPTION_KEY
 npm run deploy                       # applies D1 migrations, then deploys
 ```
+
+The first deploy also creates the `hoomuch-sync` queue that every sync runs on.
+
+Queues are on the Free plan too, with 10,000 operations a day. Each sync is about three
+operations, so that's roughly 3,300 syncs a day: around 130 connections at the default hourly
+interval.
 
 ### After deploying
 
@@ -84,8 +91,10 @@ npm run deploy                       # applies D1 migrations, then deploys
 | `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below). |
 | `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
+| `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
-The cron schedule itself is `triggers.crons` in `wrangler.jsonc`.
+The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
+are due on the queue.
 
 ### Protecting a public instance
 
@@ -207,7 +216,7 @@ wasn't. The ones you'd notice:
 - **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
   (SPEC §6.9).
 - **Everywhere:** past revenue is converted at today's FX rate, and day boundaries are UTC.
-- Provider webhooks and Queue-based fan-out are planned for v1.1 (SPEC §12.1).
+- Provider webhooks are planned for v1.1 (SPEC §12.1).
 
 ## How it's built
 

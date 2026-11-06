@@ -36,6 +36,8 @@ export interface ConnectionRow {
   last_error: string | null;
   revenue_cursor: string | null;
   revenue_synced_until: number | null;
+  /** A sync is on the queue and hasn't started (migration 0007). */
+  queued_at: number | null;
   created_at: number;
   updated_at: number;
 }

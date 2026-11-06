@@ -14,6 +14,7 @@ import { runScheduledSync, syncConnection } from '../../src/sync/engine';
 import { FX_MAX_AGE_MS, getLatestFx, parseFrankfurter, refreshFx, refreshFxIfStale } from '../../src/sync/fx';
 import { TEST_ENCRYPTION_KEY, createTestD1, seedConnection, seedUser } from '../fixtures/d1';
 import { fakeFetch, makeCtx, route, type FakeResponse } from '../fixtures/harness';
+import { drainQueue } from '../fixtures/queue';
 import { FX_BODY, NOW, conn, runs, setCursorState, setup, teardown, txRows } from './helpers';
 
 afterEach(() => {
@@ -22,14 +23,6 @@ afterEach(() => {
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const emptyStripeList = { object: 'list', data: [], has_more: false };
-
-function execCtx(pending: Promise<unknown>[]): ExecutionContext {
-  return {
-    waitUntil: (p: Promise<unknown>) => void pending.push(p),
-    passThroughOnException: () => undefined,
-    props: {},
-  } as unknown as ExecutionContext;
-}
 
 // ---------------------------------------------------------------------------------------------
 // FINDING 1 (high): cron starvation. selectDueConnections orders by COALESCE(last_synced_at, 0), and a
@@ -68,6 +61,7 @@ describe('probe: cron fairness', () => {
       const at = NOW + tick * 30 * MINUTE;
       vi.setSystemTime(at + 2_000);
       await runScheduledSync(c.env, at);
+      await drainQueue(c.env);
     }
 
     // Every dead connection is still retried (then backed off to 3 intervals, so far fewer than the
@@ -259,10 +253,9 @@ describe('probe: key rotation across modes', () => {
       NOW - 3 * DAY,
     );
 
-    const pending: Promise<unknown>[] = [];
-    const r = await rotateCredentials(c.env, execCtx(pending), c.userId, 'rot', { apiKey: 'rk_live_abc' });
+    const r = await rotateCredentials(c.env, c.userId, 'rot', { apiKey: 'rk_live_abc' });
     expect(r.ok).toBe(true);
-    await Promise.all(pending);
+    await drainQueue(c.env);
 
     const ids = txRows(c.t, 'rot').map((x) => x.externalId);
     expect(ids).toContain('txn_live_old'); // live history within the 90-day window is fetched

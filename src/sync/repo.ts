@@ -51,7 +51,7 @@ export function jsonChunks(rows: readonly unknown[], maxRows = BULK_MAX_ROWS, ma
 export function acquireSyncLock(db: D1Database, id: string, now: number, staleBefore: number): Promise<ConnectionRow | null> {
   return db
     .prepare(
-      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2
+      `UPDATE connections SET status = 'syncing', last_sync_started_at = ?2, queued_at = NULL
         WHERE id = ?1 AND NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?3)
        RETURNING *`,
     )
@@ -317,6 +317,8 @@ export interface DueQuery {
   retryWaitMs: number;
   /** A 'syncing' row started after this holds a fresh lock and is skipped. */
   staleBefore: number;
+  /** A row queued after this already has a sync on its way and is skipped. */
+  queuedBefore: number;
   limit: number;
 }
 
@@ -341,6 +343,7 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
                 END AS due_at
            FROM connections
           WHERE NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?5)
+            AND COALESCE(queued_at, 0) <= ?7
        ),
        ranked AS (
          SELECT id, created_at, due_at,
@@ -350,7 +353,21 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
        )
        SELECT id FROM ranked ORDER BY turn, due_at, created_at, id LIMIT ?6`,
     )
-    .bind(q.now, q.okWaitMs, q.errorWaitMs, q.retryWaitMs, q.staleBefore, q.limit)
+    .bind(q.now, q.okWaitMs, q.errorWaitMs, q.retryWaitMs, q.staleBefore, q.limit, q.queuedBefore)
     .all<{ id: string }>();
   return (results ?? []).map((r) => r.id);
+}
+
+/** Marks connections as having a sync on the queue (`connections.queued_at`). */
+export function markQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
+  return db
+    .prepare('UPDATE connections SET queued_at = ?1 WHERE id IN (SELECT value FROM json_each(?2))')
+    .bind(at, JSON.stringify(ids));
+}
+
+/** Undoes `markQueued` when the send failed, unless something queued them again since. */
+export function clearQueued(db: D1Database, ids: readonly string[], at: number): D1PreparedStatement {
+  return db
+    .prepare('UPDATE connections SET queued_at = NULL WHERE id IN (SELECT value FROM json_each(?2)) AND queued_at = ?1')
+    .bind(at, JSON.stringify(ids));
 }
