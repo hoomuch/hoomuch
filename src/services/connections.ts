@@ -24,6 +24,8 @@ import { acquireSyncLock } from '../sync/repo';
 
 export const MAX_CONNECTIONS_PER_USER = 25;
 export const MANUAL_SYNC_COOLDOWN_MS = 60_000;
+/** The add / replace-key form waits for the live check: no new request starts after this long. */
+export const VERIFY_DEADLINE_MS = 20_000;
 
 export type FormResult<T extends object = object> =
   | ({ ok: true; warnings: string[] } & T)
@@ -74,7 +76,7 @@ async function verifyInput(
   try {
     verified = await getAdapter(meta.id).verify(
       { credentials, config },
-      createProviderContext({ pageBudget: 5, tag: `verify:${meta.id}` }),
+      createProviderContext({ pageBudget: 5, tag: `verify:${meta.id}`, deadline: Date.now() + VERIFY_DEADLINE_MS }),
     );
   } catch (err) {
     const message = describeProviderError(err, meta);

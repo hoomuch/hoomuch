@@ -6,9 +6,10 @@
  *                5 min is taken over) + open a `sync_runs` row.
  *   2. snapshot  fetchSnapshot → upsert today's row (+ the adapter's history on a first sync)
  *                in its own batch, so it survives a later revenue failure.
- *                Both provider calls run against a wall-clock deadline (see `withDeadline`): once it
- *                passes, the page budget reads 0, so adapters checkpoint with a cursor and the final
- *                batch still commits inside waitUntil's 30 s.
+ *                Both provider calls run against a wall-clock deadline (`ProviderContext.deadline`):
+ *                once it passes no new request starts, so adapters checkpoint with a cursor, and a
+ *                hard stop shortly after it aborts anything still in flight, so the final batch
+ *                still commits inside waitUntil's 30 s.
  *   3. revenue   fetchRevenue(since, cursor) → validate → ONE final batch that upserts transactions,
  *                rebuilds daily_revenue for the affected days, upserts provider daily points,
  *                moves the cursor / high-water mark, releases the lock and closes the run.
@@ -141,38 +142,21 @@ const globalFetch: typeof fetch = (input, init) => fetch(input, init);
 
 // ---------- deadlines ----------
 
-export interface DeadlineContext extends ProviderContext {
-  /** True once anything read the budget after the deadline. */
-  readonly deadlineHit: boolean;
-}
-
 /**
- * Wraps a provider context so `pageBudget` reads 0 once `Date.now()` passes `deadline`.
- * Adapters check `hasBudget` before each page and return a cursor; `fetchJson` refuses to start
- * another request. Requests already in flight are not cut short (they keep http.ts's own timeouts).
+ * After a phase's deadline no new request starts (`ProviderContext.deadline`), so adapters
+ * checkpoint with a cursor. A request already in flight may finish, but no later than this much
+ * past the deadline: then the context's signal aborts it, so the final batch always gets to commit.
  */
-export function withDeadline(base: ProviderContext, deadline: number): DeadlineContext {
-  let budget = base.pageBudget;
-  let hit = false;
-  return {
-    fetch: base.fetch,
-    now: base.now,
-    log: base.log,
-    get pageBudget(): number {
-      if (Date.now() < deadline) return budget;
-      if (!hit) {
-        hit = true;
-        base.log('sync_deadline_reached', { unusedBudget: Math.max(0, budget) });
-      }
-      return 0;
-    },
-    set pageBudget(v: number) {
-      budget = v;
-    },
-    get deadlineHit(): boolean {
-      return hit;
-    },
-  };
+export const HARD_STOP_GRACE_MS = 5_000;
+
+/** A phase's provider context: its budget, its deadline and the hard stop just after it. */
+function phaseContext(tag: string, pageBudget: number, deadline: number): ProviderContext {
+  return createProviderContext({
+    pageBudget,
+    tag,
+    deadline,
+    signal: AbortSignal.timeout(Math.max(1, deadline - Date.now() + HARD_STOP_GRACE_MS)),
+  });
 }
 
 /** Absolute deadlines for a sync that started at `startedAt`. */
@@ -292,8 +276,8 @@ async function runLocked(
     if (firstError === null) firstError = shown;
   };
   /** Engine-owned wording for running out of requests or time (never "the next sync continues" for a snapshot). */
-  const exhausted = (phase: 'snapshot' | 'revenue', err: unknown, ctx: DeadlineContext): unknown =>
-    err instanceof BudgetExhaustedError ? new SyncError(exhaustedMessage(phase, meta.name, ctx.deadlineHit)) : err;
+  const exhausted = (phase: 'snapshot' | 'revenue', err: unknown): unknown =>
+    err instanceof BudgetExhaustedError ? new SyncError(exhaustedMessage(phase, meta.name, err.reason === 'deadline')) : err;
   const deadlines = syncDeadlines(kind, now);
 
   let snapshot = false;
@@ -310,29 +294,23 @@ async function runLocked(
 
   if (input) {
     let skipRevenue = false;
-    const snapCtx = withDeadline(
-      createProviderContext({ pageBudget: SNAPSHOT_PAGE_BUDGET, tag: `sync:${row.id}:snapshot` }),
-      deadlines.snapshot,
-    );
+    const snapCtx = phaseContext(`sync:${row.id}:snapshot`, SNAPSHOT_PAGE_BUDGET, deadlines.snapshot);
     try {
       await syncSnapshot(db, adapter, row, input, now, snapCtx, logCtx, fx);
       snapshot = true;
     } catch (err) {
-      fail('snapshot', err, exhausted('snapshot', err, snapCtx));
+      fail('snapshot', err, exhausted('snapshot', err));
       // The same key would fail the same way on the revenue endpoints.
       skipRevenue = err instanceof ProviderError && (err.kind === 'auth' || err.kind === 'permission');
     }
 
     if (!skipRevenue) {
       const plan = planRevenue(row, now);
-      const revCtx = withDeadline(
-        createProviderContext({ pageBudget: REVENUE_PAGE_BUDGET, tag: `sync:${row.id}:revenue` }),
-        deadlines.revenue,
-      );
+      const revCtx = phaseContext(`sync:${row.id}:revenue`, REVENUE_PAGE_BUDGET, deadlines.revenue);
       try {
         revenue = await prepareRevenue(db, adapter, row, input, plan, now, revCtx, logCtx);
       } catch (err) {
-        fail('revenue', err, exhausted('revenue', err, revCtx));
+        fail('revenue', err, exhausted('revenue', err));
         if (plan.cursor !== null && isStaleCursorError(err)) {
           keptCursor = null; // restart the backfill next time instead of failing on this cursor forever
           emit('warn', 'sync_cursor_reset', logCtx);

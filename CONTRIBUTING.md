@@ -201,8 +201,9 @@ references.
    - `verify`: a live, read-only check of the key, at most about 3 requests, with a clear error
      message and the form `field` it belongs to.
    - `fetchSnapshot`: MRR (normalised to monthly, trials excluded), active subscriptions and trials.
-   - `fetchRevenue`: charges and refunds since `req.since`. Stop when `ctx.pageBudget` runs out and
-     return a `nextCursor`, so the next sync can resume.
+   - `fetchRevenue`: charges and refunds since `req.since`. Check `hasBudget(ctx)` before each page:
+     it turns false when the request budget runs out or the sync's deadline passes. Then return a
+     `nextCursor`, so the next sync can resume.
    - `fetchSnapshotHistory` (optional): past days' snapshots, oldest first, if the provider has an MRR
      series. It runs once, on a connection's first successful sync, so a new dashboard starts with a
      trend. The demo adapter is the reference.

@@ -105,6 +105,15 @@ export interface ProviderContext {
   log: (event: string, data?: Record<string, unknown>) => void;
   /** Max upstream HTTP requests for this call. Stop and return a cursor when exhausted. */
   pageBudget: number;
+  /**
+   * Epoch ms (compared with `now()`) after which no new upstream request starts: `hasBudget` reads
+   * false and `fetchJson` throws `BudgetExhaustedError` with `reason: 'deadline'`, so a resumable
+   * adapter returns its cursor exactly as it does when the budget runs out. Requests already in
+   * flight finish under their own timeouts. Absent: no deadline.
+   */
+  deadline?: number;
+  /** Hard stop: aborts requests in flight, and every later one, once it fires. Absent: never. */
+  signal?: AbortSignal;
 }
 
 /** Secret fields (decrypted). */

@@ -21,7 +21,6 @@ import {
   SYNC_BUSY_MESSAGE,
   syncConnection,
   syncDeadlines,
-  withDeadline,
 } from '../../src/sync/engine';
 import { INTERRUPTED_RUN_MESSAGE, SYNC_RUNS_KEPT } from '../../src/sync/repo';
 import { DECRYPT_ERROR } from '../../src/sync/errors';
@@ -798,29 +797,29 @@ async function pagedRevenue(req: RevenueRequest, ctx: ProviderContext, total = 1
   return page(events);
 }
 
-describe('withDeadline / syncDeadlines', () => {
-  it('reads the real budget until the deadline, then 0, and logs it once', () => {
+describe('context deadlines / syncDeadlines', () => {
+  it('hasBudget reads true until the deadline, then false, and logs it once', () => {
     ctx();
     const logs: unknown[] = [];
-    const dctx = withDeadline({ fetch, now: () => Date.now(), log: (e, d) => logs.push([e, d]), pageBudget: 5 }, NOW + 1_000);
+    const dctx: ProviderContext = { fetch, now: () => Date.now(), log: (e, d) => logs.push([e, d]), pageBudget: 5, deadline: NOW + 1_000 };
     expect(hasBudget(dctx)).toBe(true);
     dctx.pageBudget -= 1;
-    expect(dctx.pageBudget).toBe(4);
-    expect(dctx.deadlineHit).toBe(false);
 
     vi.setSystemTime(NOW + 1_000);
-    expect(dctx.pageBudget).toBe(0);
     expect(hasBudget(dctx)).toBe(false);
-    expect(dctx.pageBudget).toBe(0);
-    expect(dctx.deadlineHit).toBe(true);
+    expect(hasBudget(dctx)).toBe(false);
+    expect(dctx.pageBudget).toBe(4); // the budget itself is untouched
     expect(logs).toEqual([['sync_deadline_reached', { unusedBudget: 4 }]]);
   });
 
-  it('fetchJson refuses to start a request once the deadline has passed', async () => {
+  it('fetchJson refuses to start a request once the deadline has passed, with reason "deadline"', async () => {
     ctx();
     slowApi(1);
-    const dctx = withDeadline(makeCtx(fetch, { pageBudget: 10 }), NOW - 1);
-    await expect(slowGet(dctx, 0)).rejects.toBeInstanceOf(BudgetExhaustedError);
+    const dctx: ProviderContext = { ...makeCtx(fetch, { pageBudget: 10 }), deadline: NOW - 1 };
+    const err = await slowGet(dctx, 0).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(dctx.pageBudget).toBe(10);
   });
 
   it('interactive syncs get ~20 s (snapshot first, revenue the rest), cron syncs ~60 s', () => {
