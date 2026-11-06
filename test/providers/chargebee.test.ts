@@ -438,6 +438,15 @@ describe('chargebee fetchSnapshot', () => {
     expectNoSecretsInLogs(ctx, [KEY, btoa(`${KEY}:`), ...PII]);
   });
 
+  it('warns about a single item it can’t price, in the singular', async () => {
+    const { snap } = await snapshot({
+      active: [sub({ mrr: 4900 }), sub({ mrr: null, unit: 'fortnight', items: [item('plan', 5000)] })],
+    });
+    expect(snap.mrr).toEqual({ USD: 4900 });
+    expect(snap.warnings).toEqual([chargebeeUnpricedItemsWarning(1)]);
+    expect(snap.warnings).toEqual(['1 subscription item has no amount or billing period hoomuch can read, so it counts as 0 in MRR.']);
+  });
+
   it('trusts the object over the filter (lists are eventually consistent)', async () => {
     const { snap, ctx } = await snapshot({
       active: [sub({ mrr: 1000 }), sub({ mrr: 9000, status: 'cancelled' }), sub({ mrr: 9000, status: 'in_trial' }), sub({ mrr: 9000, deleted: true }), sub({ mrr: 9000, currency: '' })],

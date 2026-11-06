@@ -606,6 +606,26 @@ describe('lemonsqueezy fetchSnapshot: warnings', () => {
     expect(s.warnings).toEqual([LS_DISCOUNTS_BUDGET_WARNING]);
   });
 
+  it('says MRR is before discounts this time when the sync’s time runs out during a discount lookup', async () => {
+    // hasBudget said yes, then the sync's signal aborted the request in flight (its deadline passed).
+    const server = lsServer({});
+    const c = new AbortController();
+    server.routes.unshift(
+      route('/v1/discounts', () => {
+        c.abort();
+        return { hang: true };
+      }),
+    );
+    const ctx = { ...makeCtx(server.fetch, { pageBudget: 30 }), signal: c.signal };
+    const s = await ls.fetchSnapshot(input(), ctx);
+    expect(s).toMatchObject({ mrr: { EUR: 10100, USD: 3000 }, activeSubscriptions: 11, activeTrials: 3 });
+    expect(s.warnings).toEqual([LS_DISCOUNTS_BUDGET_WARNING]);
+    expect(callsTo(server.calls, '/v1/discounts')).toHaveLength(1);
+    expect(callsTo(server.calls, '/v1/discount-redemptions')).toHaveLength(0);
+    expect(ctx.logs.find((l) => l.event === 'ls_discounts_skipped')?.data).toEqual({ reason: 'budget', requests: 1 });
+    expectNoSecretsInLogs(ctx, [KEY]);
+  });
+
   it.each([
     [403, { errors: [{ status: '403', title: 'Forbidden', detail: 'Forbidden' }] }],
     [404, error404],

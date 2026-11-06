@@ -406,6 +406,29 @@ describe('superwall fetchSnapshot', () => {
     expect(JSON.stringify(snap.warnings)).not.toMatch(/DB::Exception/); // never Superwall's raw answer
   });
 
+  it.each([
+    [500, { status: 500, body: 'Code: 241. DB::Exception: Memory limit exceeded' }],
+    [429, { status: 429, json: err429, headers: { 'retry-after': '0' } }],
+    [401, { status: 401, json: err401 }],
+  ])('says trials are skipped this time, not that a scope is missing, when the trials query answers %i', async (_status, responder) => {
+    const { fetch } = fakeFetch([route(DEFS, { json: definitionsFixture }), route(DATA, chartData(), { method: 'POST' }), route(QUERY, responder)]);
+    const ctx = makeCtx(fetch);
+    const snap = await superwallAdapter.fetchSnapshot(input(), ctx);
+    expect(snap.activeTrials).toBeNull();
+    expect(snap.activeSubscriptions).toBe(409);
+    expect(snap.warnings).toEqual([SW_TRIALS_SKIPPED_WARNING]);
+    expectClean(ctx);
+  });
+
+  it('does not warn about project access when Superwall doesn’t say whether the key reaches all projects', async () => {
+    const defs = clone(definitionsFixture) as unknown as { scope: Json };
+    delete defs.scope['all_projects'];
+    const { fetch } = fakeFetch([route(DEFS, { json: defs }), route(DATA, chartData(), { method: 'POST' }), route(QUERY, queryData())]);
+    const snap = await superwallAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeTrials).toBe(57);
+    expect(snap.warnings).toBeUndefined();
+  });
+
   it('warns about restricted project access and partial chart coverage in fixed words, never Superwall’s reason', async () => {
     const defs = clone(definitionsFixture) as unknown as { chart_types: Json[]; scope: Json };
     defs.scope['all_projects'] = false;

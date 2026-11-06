@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createProviderContext } from '../../src/providers/context';
 import {
   BudgetExhaustedError,
   buildUrl,
@@ -256,6 +257,45 @@ describe('fetchJson deadline and signal', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('does not start a backoff wait that would end past the deadline (no Retry-After)', async () => {
+    const sleeps = recordSleeps();
+    const { fetch, calls } = fakeFetch([route('/v1/things', [{ status: 503, json: {} }, { json: { ok: 1 } }])]);
+    // The first backoff is at least 400 ms.
+    const ctx = { ...makeCtx(fetch, { now: NOW }), deadline: NOW + 300 };
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect(err.message).toMatch(/HTTP 503/);
+    expect(sleeps).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not retry a network error when the backoff would end past the deadline', async () => {
+    const sleeps = recordSleeps();
+    const { fetch, calls } = fakeFetch([route('/v1/things', [{ networkError: true }, { json: { ok: 1 } }])]);
+    const ctx = { ...makeCtx(fetch, { now: NOW }), deadline: NOW + 300 };
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect(err.kind).toBe('upstream');
+    expect(err.message).toBe('Couldn’t reach Example.');
+    expect(sleeps).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not start a wait that would end exactly at the deadline, but does one that ends 1 ms before', async () => {
+    // At the deadline itself the context already counts as out of time (`now >= deadline`), so the
+    // retry could never start.
+    const sleeps = recordSleeps();
+    const responses = () => fakeFetch([route('/v1/things', [{ status: 503, headers: { 'retry-after': '5' }, json: {} }, { json: { ok: 1 } }])]);
+    const at = responses();
+    const err = await catchErr(fetchJson({ ...makeCtx(at.fetch, { now: NOW }), deadline: NOW + 5_000 }, spec()));
+    expect(err.message).toMatch(/HTTP 503/);
+    expect(sleeps).toEqual([]);
+    expect(at.calls).toHaveLength(1);
+
+    const before = responses();
+    await expect(fetchJson({ ...makeCtx(before.fetch, { now: NOW }), deadline: NOW + 5_001 }, spec())).resolves.toEqual({ ok: 1 });
+    expect(sleeps).toEqual([5_000]);
+    expect(before.calls).toHaveLength(2);
+  });
+
   it('the signal aborts a request in flight without retrying it', async () => {
     recordSleeps();
     const { fetch, calls } = fakeFetch([route('/v1/things', { hang: true })]);
@@ -277,6 +317,50 @@ describe('fetchJson deadline and signal', () => {
     expect(hasBudget(ctx)).toBe(false);
     await expect(fetchJson(ctx, spec())).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('createProviderContext', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('passes the signal through: aborting it stops a request in flight, without retrying', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    let calls = 0;
+    // Hangs until the request's signal aborts, then rejects like fetch does.
+    vi.stubGlobal('fetch', (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1;
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    });
+    const c = new AbortController();
+    const ctx = createProviderContext({ pageBudget: 2, deadline: Date.now() + 60_000, signal: c.signal });
+    // A short timeout, so a context that dropped the signal fails fast (timeouts, retries) instead of hanging.
+    const pending = catchErr(fetchJson(ctx, spec({ timeoutMs: 50 })));
+    await Promise.resolve();
+    c.abort();
+    const err = await pending;
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(calls).toBe(1);
+  });
+
+  it('passes the deadline through: nothing starts once it has passed', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const fetchSpy = vi.fn(async () => new Response('{"ok":1}'));
+    vi.stubGlobal('fetch', fetchSpy);
+    const ctx = createProviderContext({ pageBudget: 2, tag: 'verify:stripe', deadline: Date.now() - 1 });
+    const err = await catchErr(fetchJson(ctx, spec()));
+    expect(err).toBeInstanceOf(BudgetExhaustedError);
+    expect((err as BudgetExhaustedError).reason).toBe('deadline');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(ctx.pageBudget).toBe(2);
+    expect(log.mock.calls.map((a) => JSON.parse(String(a[0])))).toEqual([
+      { event: 'sync_deadline_reached', tag: 'verify:stripe', unusedBudget: 2 },
+    ]);
   });
 });
 

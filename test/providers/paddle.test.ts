@@ -330,6 +330,23 @@ describe('paddle fetchSnapshot (metrics)', () => {
     expect(calls).toHaveLength(1);
     expect(ctx.pageBudget).toBe(0);
   });
+
+  it('fails the snapshot on a 5xx from the metric instead of estimating', async () => {
+    const { fetch, calls } = fakeFetch(
+      estimateRoutes({
+        subs: [simple(4000)],
+        extra: [route('/metrics/monthly-recurring-revenue', { status: 500, json: { error: { type: 'api_error', code: 'internal_error', detail: 'oops' } } })],
+      }),
+    );
+    const err = await catchErr(paddleAdapter.fetchSnapshot(input(LIVE_KEY), makeCtx(fetch)));
+    expect(err.kind).toBe('upstream');
+    expect(err.status).toBe(500);
+    expect(calls.map(pathOf)).toEqual([
+      '/metrics/monthly-recurring-revenue',
+      '/metrics/monthly-recurring-revenue',
+      '/metrics/monthly-recurring-revenue',
+    ]);
+  });
 });
 
 // ---------- snapshot: estimate from subscriptions ----------
@@ -743,6 +760,10 @@ describe('paddle fetchSnapshot: warnings', () => {
       [{ json: metrics([], '2026-11-05T03:00:00Z') }, PADDLE_METRICS_UNAVAILABLE_WARNING],
       [{ status: 403, json: errorForbiddenFx }, PADDLE_METRICS_PERMISSION_WARNING],
       [{ status: 404, json: errorNotInSandboxFx }, PADDLE_METRICS_UNAVAILABLE_WARNING],
+      [
+        { status: 400, json: { error: { type: 'request_error', code: 'invalid_field', detail: 'Request does not pass validation.' } } },
+        PADDLE_METRICS_UNAVAILABLE_WARNING,
+      ],
     ];
     for (const [responder, warning] of cases) {
       const { snap, ctx } = await estimate({ key: LIVE_KEY, subs: [simple(4000)], extra: [route('/metrics/monthly-recurring-revenue', responder)] });
@@ -783,6 +804,14 @@ describe('paddle fetchSnapshot: warnings', () => {
     const snap = await paddleAdapter.fetchSnapshot(input(), makeCtx(fetch));
     expect(snap.activeSubscriptions).toBe(100_001);
     expect(snap.warnings).toEqual([PADDLE_COUNT_CAPPED_WARNING]);
+  });
+
+  it('does not call a count of exactly 100,000 capped (Paddle counts exactly up to there)', async () => {
+    const m = metrics([['2026-11-05T00:00:00Z', '5000']], '2026-11-05T03:00:00Z');
+    const { fetch } = fakeFetch([route('/metrics/monthly-recurring-revenue', { json: m }), ...countRoutes(100_000, 100_000)]);
+    const snap = await paddleAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap).toMatchObject({ activeSubscriptions: 100_000, activeTrials: 100_000 });
+    expect(snap.warnings).toBeUndefined();
   });
 
   it('keeps every sentence short and free of IDs', () => {

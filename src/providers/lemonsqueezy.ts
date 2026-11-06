@@ -750,7 +750,7 @@ async function recurringDiscounts(
       }
     }
   } catch (err) {
-    // The deadline can empty the budget between hasBudget and the request.
+    // A deadline passing after hasBudget, or the sync's signal aborting a request in flight, ends the lookups.
     if (err instanceof BudgetExhaustedError) return skip('budget');
     if (err instanceof ProviderError && (err.kind === 'not_found' || err.kind === 'permission')) return skip(err.kind);
     throw err; // rate limit / upstream: the snapshot fails rather than being written wrong

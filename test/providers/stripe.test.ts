@@ -1092,6 +1092,19 @@ describe('stripe fetchSnapshot: warnings', () => {
     expect(down.snap.warnings).toEqual([STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING]);
   });
 
+  it('says the split was skipped this time, not that Products: Read is missing, when Stripe rate-limits the names', async () => {
+    const limited = { status: 429, json: { error: { type: 'invalid_request_error', code: 'rate_limit', message: 'Too many requests' } } };
+    const { snap, ctx } = await snapshot({ active: [simple(4000)], extra: [route('/v1/products', limited)] });
+    expect(snap.mrr).toEqual({ USD: 4000 });
+    expect(snap.mrrByProduct).toBeNull();
+    expect(snap.warnings).toEqual([STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING]);
+    expect(ctx.logs.find((l) => l.event === 'stripe_product_names_skipped')?.data).toEqual({
+      reason: 'rate_limit',
+      effect: 'mrr_not_split_by_product',
+    });
+    expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
+  });
+
   it('lists several problems in one snapshot, each once', async () => {
     const forbidden = clone(errorPermissionFx);
     forbidden.error.message = forbidden.error.message.replace('rak_subscription_read', 'rak_coupon_read');
