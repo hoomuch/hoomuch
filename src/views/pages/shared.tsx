@@ -118,9 +118,10 @@ export function zoneName(tz: string): string {
 
 /**
  * "Nov 4, 09:14 UTC" (or "… Europe/Istanbul"); the year is added when it isn't the current one
- * ("Dec 30, 2025, 09:14 UTC").
+ * ("Dec 30, 2025, 09:14 UTC"). `now` is the request's clock (useNow()), so the server and the browser
+ * agree on the current year.
  */
-export function formatWhen(ms: number, now: number = Date.now(), tz: string = 'UTC'): string {
+export function formatWhen(ms: number, now: number, tz: string = 'UTC'): string {
   const year = cached(yearFormats, tz, { year: 'numeric' });
   if (year.format(new Date(ms)) !== year.format(new Date(now))) return `${formatDateTime(ms, tz)} ${zoneName(tz)}`;
   return `${cached(whenFormats, tz, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))} ${zoneName(tz)}`;
