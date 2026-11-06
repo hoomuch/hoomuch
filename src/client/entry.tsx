@@ -22,6 +22,7 @@ const LOADERS: Record<PageName, Loader> = {
   connectionDetail: () => import('../views/pages/connection-detail').then((m) => m.ConnectionDetailPage),
   transactions: () => import('../views/pages/transactions').then((m) => m.TransactionsPage),
   settings: () => import('../views/pages/settings').then((m) => m.SettingsPage),
+  verifyEmail: () => import('../views/pages/verify-email').then((m) => m.VerifyEmailPage),
   notFound: () => import('../views/pages/errors').then((m) => m.NotFoundPage),
   serverError: () => import('../views/pages/errors').then((m) => m.ServerErrorPage),
 };

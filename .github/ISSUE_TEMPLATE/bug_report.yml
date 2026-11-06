@@ -1,0 +1,68 @@
+name: Bug report
+description: A wrong number, a broken page or a sync that fails.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this.
+
+        **Never paste API keys, tokens, your `ENCRYPTION_KEY` or your customers' emails, names or
+        addresses.** Amounts, currencies, dates and IDs are fine. For a security problem, use
+        [the private form](https://github.com/tahabozdemir/hoomuch/security/advisories/new) instead.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      description: Which connection is affected?
+      options:
+        - Not about one provider
+        - Stripe
+        - Paddle
+        - Lemon Squeezy
+        - Polar
+        - RevenueCat
+        - Chargebee
+        - Dodo Payments
+        - Gumroad
+        - Adapty
+        - Superwall
+        - Demo data
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: For a wrong number, say what hoomuch shows and what the provider's own dashboard shows.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: |
+        1. Connect a Paddle account with yearly plans
+        2. Wait for the first sync
+        3. Open the dashboard
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: How you run hoomuch
+      options:
+        - Deploy to Cloudflare button
+        - Deployed by hand with wrangler
+        - Local dev (npm run dev)
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Run `git rev-parse --short HEAD` in your copy, or say roughly when you last updated it.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error message or Worker logs
+      description: The text on the page or in `wrangler tail`, with keys and customer data removed.
+      render: text

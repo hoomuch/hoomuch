@@ -6,22 +6,64 @@ import {
   authenticate,
   clientIp,
   endSession,
+  normalizeEmail,
   registerUser,
   safeNext,
   signupAllowed,
   startSession,
 } from '../lib/auth';
 import { parseRange } from '../data/types';
+import {
+  HONEYPOT_FIELD,
+  TURNSTILE_FIELD,
+  TURNSTILE_MESSAGES,
+  TURNSTILE_TOKEN_MAX,
+  turnstileSiteKey,
+  verifyTurnstile,
+  type BotAction,
+} from '../lib/bot-defense';
+import { sendVerificationLink, VERIFY_PATH, verificationRequired } from '../lib/email-verification';
 import { redirectWithFlash, setCelebrate } from '../lib/flash';
+import { RATE_LIMIT_PERIOD_SECONDS, withinAuthLimit } from '../lib/rate-limit';
 import { fixtureDashboard } from '../views/fixtures';
 import { syncCadence } from '../views/pages/shared';
-import { chrome, formLimit, readForm } from './util';
+import { chrome, formLimit, readForm, type AppContext, type FormFields } from './util';
+import { MAIL_FAILED_MESSAGE } from './verify-email';
 import { renderPage } from '../views/render';
 
 const EMAIL_MAX = 254;
 /** lib/auth rejects > 256 with a clear message; this only bounds the work. */
 const PASSWORD_INPUT_MAX = 1024;
 const NEXT_MAX = 512;
+
+/**
+ * Runs before any account logic, cheapest first: the network's submission rate (no D1), the
+ * honeypot, then Turnstile when it's configured. Null means carry on.
+ */
+async function botCheck(
+  c: AppContext,
+  form: FormFields,
+  action: BotAction,
+): Promise<{ error: string; status: 400 | 429 | 503 } | null> {
+  if (!(await withinAuthLimit(c))) {
+    c.header('Retry-After', String(RATE_LIMIT_PERIOD_SECONDS));
+    return { error: 'Too many attempts. Wait a minute, then try again.', status: 429 };
+  }
+  if (form.text(HONEYPOT_FIELD)) {
+    // A field people never see was filled in. No email or IP in the log: the event is enough.
+    console.log(JSON.stringify({ event: 'bot_honeypot', form: action }));
+    return { error: 'Something went wrong. Try again.', status: 400 };
+  }
+  if (turnstileSiteKey(c.env)) {
+    const result = await verifyTurnstile(c.env, form.text(TURNSTILE_FIELD, TURNSTILE_TOKEN_MAX), {
+      ip: clientIp(c),
+      action,
+      hostname: new URL(c.req.url).hostname,
+    });
+    if (result !== 'ok') return { error: TURNSTILE_MESSAGES[result], status: result === 'unavailable' ? 503 : 400 };
+  }
+  return null;
+}
 
 /** Keeps `next` only if it is a safe same-site path, so we never carry junk around. */
 function carryNext(v: string | undefined | null): string | null {
@@ -52,6 +94,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
         mode: 'signup',
         next,
         signupOpen: signupAllowed(c.env),
+        turnstileSiteKey: turnstileSiteKey(c.env),
       });
   });
 
@@ -67,20 +110,22 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     const email = form.text('email', EMAIL_MAX);
     const password = form.secret('password', PASSWORD_INPUT_MAX);
     const next = carryNext(form.text('next', NEXT_MAX + 1));
+    const again = { chrome: chrome(c), mode: 'signup', signupOpen: true, next, email, turnstileSiteKey: turnstileSiteKey(c.env) } as const;
+
+    const blocked = await botCheck(c, form, 'signup');
+    if (blocked) return renderPage(c, 'auth', { ...again, error: blocked.error }, blocked.status);
 
     const result = await registerUser(c.env, email, password, clientIp(c));
     if (!result.ok) {
-      return renderPage(c, 'auth', {
-          chrome: chrome(c),
-          mode: 'signup',
-          signupOpen: true,
-          next,
-          email,
-          error: result.error,
-          field: result.field,
-        }, result.throttled ? 429 : 400);
+      return renderPage(c, 'auth', { ...again, error: result.error, field: result.field }, result.throttled ? 429 : 400);
     }
     await startSession(c, result.userId);
+    if (verificationRequired(c.env)) {
+      // Held at check-your-inbox until the mailed link is used; the welcome waits for that.
+      const user = { id: result.userId, email: normalizeEmail(email) };
+      if (await sendVerificationLink(c.env, user, new URL(c.req.url).origin)) return c.redirect(VERIFY_PATH, 303);
+      return redirectWithFlash(c, VERIFY_PATH, 'error', MAIL_FAILED_MESSAGE);
+    }
     // No flash: the empty dashboard is the welcome (design/system.md §6). Just one confetti burst.
     setCelebrate(c);
     return c.redirect(safeNext(next), 303);
@@ -96,6 +141,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
         mode: 'login',
         next,
         signupOpen: signupAllowed(c.env),
+        turnstileSiteKey: turnstileSiteKey(c.env),
       });
   });
 
@@ -104,18 +150,21 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     const email = form.text('email', EMAIL_MAX);
     const password = form.secret('password', PASSWORD_INPUT_MAX);
     const next = carryNext(form.text('next', NEXT_MAX + 1));
+    const again = {
+      chrome: chrome(c),
+      mode: 'login',
+      signupOpen: signupAllowed(c.env),
+      next,
+      email,
+      turnstileSiteKey: turnstileSiteKey(c.env),
+    } as const;
+
+    const blocked = await botCheck(c, form, 'login');
+    if (blocked) return renderPage(c, 'auth', { ...again, error: blocked.error }, blocked.status);
 
     const result = await authenticate(c.env, email, password, clientIp(c));
     if (!result.ok) {
-      return renderPage(c, 'auth', {
-          chrome: chrome(c),
-          mode: 'login',
-          signupOpen: signupAllowed(c.env),
-          next,
-          email,
-          error: result.error,
-          field: result.field,
-        }, result.throttled ? 429 : 401);
+      return renderPage(c, 'auth', { ...again, error: result.error, field: result.field }, result.throttled ? 429 : 401);
     }
     await startSession(c, result.userId);
     return c.redirect(safeNext(next), 303);

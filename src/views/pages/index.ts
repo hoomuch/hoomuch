@@ -14,6 +14,7 @@ import { NotFoundPage, ServerErrorPage } from './errors';
 import { LandingPage } from './landing';
 import { SettingsPage } from './settings';
 import { TransactionsPage } from './transactions';
+import { VerifyEmailPage } from './verify-email';
 
 export const PAGES = {
   landing: LandingPage,
@@ -25,6 +26,7 @@ export const PAGES = {
   connectionDetail: ConnectionDetailPage,
   transactions: TransactionsPage,
   settings: SettingsPage,
+  verifyEmail: VerifyEmailPage,
   notFound: NotFoundPage,
   serverError: ServerErrorPage,
 } as const;

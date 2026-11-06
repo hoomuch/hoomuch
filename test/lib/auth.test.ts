@@ -58,9 +58,11 @@ describe('registerUser', () => {
 
   it('throttles sign-up attempts per network, successful or not', async () => {
     const { env } = setup();
+    await newUser(env, 'taken@example.com', '198.51.100.50');
     for (let i = 0; i < 10; i++) {
       // Mix of new and already-taken emails: both count (bounds account creation AND probing).
-      const r = await registerUser(env, i % 2 ? `probe${i}@example.com` : 'taken@example.com', PW, '2001:db8:1:2::10');
+      // Four new accounts at most, so the daily account cap (5) stays out of this test.
+      const r = await registerUser(env, i % 3 ? 'taken@example.com' : `probe${i}@example.com`, PW, '2001:db8:1:2::10');
       // The limit is exactly 10: none of these is throttled (a lower limit would fail here).
       expect(r.ok === false && r.throttled).toBeFalsy();
     }

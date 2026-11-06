@@ -12,9 +12,11 @@ import { registerDashboardRoutes } from './dashboard';
 import { registerErrorHandlers } from './errors';
 import { registerSettingsRoutes } from './settings';
 import { registerTransactionRoutes } from './transactions';
+import { registerVerifyEmailRoutes } from './verify-email';
 
 export function registerRoutes(app: Hono<AppEnv>): void {
   registerAuthRoutes(app);
+  registerVerifyEmailRoutes(app);
   registerDashboardRoutes(app);
   registerConnectionRoutes(app);
   registerTransactionRoutes(app);

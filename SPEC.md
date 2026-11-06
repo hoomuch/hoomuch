@@ -149,15 +149,16 @@ Günde bir kez FX kurları yenilenir.
 
 ## 5. Veri modeli (D1)
 
-Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kaynağı; `0003` `connections.provider` üzerindeki CHECK'i kaldırır, geçerli kimlikleri `isProviderId` denetler). Özet:
+Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kaynağı; `0003` `connections.provider` üzerindeki CHECK'i kaldırır, geçerli kimlikleri `isProviderId` denetler; `0004` e-posta doğrulaması; `0005` `snapshots.mrr_by_product`). Özet:
 
 | Tablo | Anahtar | Amaç |
 |-------|---------|------|
-| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency`, `currency_source` (`default` / `inferred` / `chosen`, migration 0002) |
+| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency`, `currency_source` (`default` / `inferred` / `chosen`, migration 0002), `email_verified_at` (adres onaylandığı an; `NULL` = onaylanmadı, migration 0004) |
 | `sessions` | `id` = sha256(token) | oturumlar; token'ın kendisi saklanmaz |
+| `email_verifications` | `id` = sha256(token) | tek kullanımlık e-posta onay bağlantıları (`user_id`, `expires_at`); token'ın kendisi saklanmaz |
 | `login_attempts` | `key` = sha256(email\|ip) | giriş deneme sınırı |
 | `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor |
-| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0004): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL |
+| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0005): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL |
 | `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok) |
 | `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir; dashboard grafiği buradan okur |
 | `fx_rates` | `day` | USD bazlı günlük kurlar (JSON) |
@@ -536,6 +537,8 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 |-----|--------|
 | `/` | Landing: wordmark, tek cümlelik değer önerisi, "Get started" / "Log in", desteklenen sağlayıcı satırı. Giriş yapmışsa `/dashboard`'a yönlenir |
 | `/signup`, `/login` | Tek kart, iki alan. Kayıt kapalıysa `/signup` bunu söyler |
+| `/verify-email` | E-posta doğrulaması açıkken onaylanmamış hesabın tutulduğu "Check your inbox" kartı: bağlantının gittiği adres, "Send the link again", çıkış. Navigasyon yok |
+| `/verify-email/confirm?token=` | E-postadaki bağlantı: tek düğmeli onay kartı (GET hiçbir şey değiştirmez); süresi geçmiş ya da geçersiz bağlantıda bunu söyler |
 | `/dashboard?range=7\|30\|90` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği, MRR trendi, bağlantı ve ürün kırılım tabloları, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
 | `/connections/new` | Sağlayıcı seçimi (10 logolu kart + demo satırı) |
@@ -561,13 +564,17 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | Parola | PBKDF2-SHA256, 100.000 iterasyon (Workers üst sınırı), 16 bayt tuz, sabit zamanlı karşılaştırma. Min. 10 karakter |
 | Oturum | 32 bayt rastgele token → `__Host-hm_session` çerezi (HttpOnly, SameSite=Lax, Secure, Path=/; yalnızca düz HTTP localhost'ta önek ve Secure yok). 30 gün kayan yenileme, **90 gün mutlak üst sınır**. D1'de yalnızca SHA-256 hash. Girişte eski oturum iptal edilir; parola değişince **tüm** oturumlar (mevcut dahil) iptal edilip yeni token verilir |
 | CSRF | Hono `csrf()` (Origin kontrolü) + SameSite=Lax |
-| HTTP başlıkları | CSP: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'` + HSTS, nosniff, Referrer-Policy |
-| Deneme sınırı | Sayaç, pahalı PBKDF2'den **önce** tek bir `INSERT … ON CONFLICT … RETURNING` ile atomik artırılır (paralel isteklerle aşılamaz). Giriş: e-posta + ağ başına 15 dk'da 10 (aşılınca 429). Parola teyidi (parola değiştirme, hesap silme): kullanıcı başına aynı sınır. Kayıt: ağ başına 15 dk'da 10 (hesap üretimini ve e-posta yoklamasını sınırlar). IPv6 adresleri /64 olarak gruplanır. Süresi geçen satırları cron siler |
+| HTTP başlıkları | CSP: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'` + HSTS, nosniff, Referrer-Policy. Turnstile açıksa yalnızca `/login` ve `/signup` sayfalarında `script-src` ve `frame-src`'ye `https://challenges.cloudflare.com` eklenir |
+| Deneme sınırı | Sayaç, pahalı PBKDF2'den **önce** tek bir `INSERT … ON CONFLICT … RETURNING` ile atomik artırılır (paralel isteklerle aşılamaz). Giriş: e-posta + ağ başına 15 dk'da 10, hesap başına (tüm ağlar) 15 dk'da 50, **ağ başına (tüm e-postalar) 15 dk'da 30** (credential stuffing'i ve bir ağın harcatabileceği CPU'yu sınırlar); aşılınca 429. Parola teyidi (parola değiştirme, hesap silme): kullanıcı başına 15 dk'da 10. Kayıt: ağ başına 15 dk'da 10 deneme (hesap üretimini ve e-posta yoklamasını sınırlar) ve **ağ başına günde 5 yeni hesap** (yalnızca kayıt gerçekten oluşacakken sayılır). Onay bağlantısını yeniden gönderme: hesap başına 15 dk'da 3, günde 10. IPv6 adresleri /64 olarak gruplanır. Süresi geçen satırları cron siler; günlük sayaçların anahtarı `day:` önekiyle bir gün tutulur |
+| İstek sınırı | Cloudflare Rate Limiting binding'leri, D1'e dokunmadan **önce**, ağ başına: tüm istekler dakikada 300 (`RL_REQUESTS`), giriş ve kayıt gönderimleri dakikada 10 (`RL_AUTH`); aşılınca 429 + `Retry-After: 60`. Sayaçlar Cloudflare lokasyonu başına ve yaklaşıktır; kesin sınırlar D1'dedir. Binding yoksa ya da hata verirse istek geçer (fail open) |
+| Bot koruması | Giriş ve kayıt formlarında görünmeyen bir bal küpü alanı (`website`, `display: none`, `aria-hidden`); doluysa istek 400 ile reddedilir, e-posta ve IP loglanmaz. İsteğe bağlı Cloudflare Turnstile: `TURNSTILE_SITE_KEY` ve `TURNSTILE_SECRET_KEY` ikisi de tanımlıysa açılır; token Siteverify ile doğrulanır, `action` (`login`/`signup`) ve `hostname` eşleşmelidir; Siteverify'a ulaşılamazsa form reddedilir (fail closed, 503) |
+| Tek kullanımlık e-posta | Kayıtta [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) listesi (CC0) reddedilir; alan adı ve tüm üst alan adları kontrol edilir (`x@a.mailinator.com` → `mailinator.com`). Liste `src/lib/disposable-domains.ts` içinde, kaynak commit'e sabitlenmiş olarak tutulur; çalışma anında ağ çağrısı yoktur. `npm run domains:update` ile yenilenir |
 | Yetkilendirme | Her sorgu `user_id` ile kapsamlı; bağlantı ID'leri UUID |
 | Açık yönlendirme | `?next=` izin listesiyle: `/` ile başlar, `//` ile başlamaz, yalnızca yazdırılabilir ASCII, ters eğik çizgi yok (tarayıcıların sildiği tab/CR/LF ile `//evil.com` üretilemez) |
 | Önbellek | Worker'ın döndürdüğü tüm sayfalar `Cache-Control: no-store` |
 | Kaynak sınırı | Kullanıcı başına 25 bağlantı, koşullu `INSERT … SELECT … WHERE COUNT < 25` ile atomik |
-| Loglama | Anahtar, token, parola, şifreli blob **asla** loglanmaz; sağlayıcı hata gövdeleri ≤ 300 karaktere kırpılır ve anahtar benzeri dizgeler maskelenir |
+| E-posta doğrulama | İsteğe bağlı; `RESEND_API_KEY` secret'ı tanımlıysa açılır (gönderen: `MAIL_FROM` var'ı). Posta [Resend](https://resend.com) HTTP API'sine tek bir `fetch` ile gider, npm paketi yok. Kayıttan sonra 32 bayt rastgele token içeren bir bağlantı gönderilir; D1'de yalnızca SHA-256 hash'i saklanır (`email_verifications`), **24 saat** geçerlidir ve tek kullanımlıktır (satır tek bir `DELETE … RETURNING` ile harcanır, eşzamanlı iki tıklama ikisi birden geçemez). Bağlantının GET'i yalnızca bir onay düğmesi gösterir; onayı POST yapar, böylece e-postadaki her bağlantıyı açan tarayıcı/güvenlik tarayıcıları adresi kendiliğinden onaylayamaz. Onay oturum açmaz. Onaylanmamış hesap oturum açabilir ama `requireUser` arkasındaki her sayfa ve eylem `/verify-email`'e yönlenir. Yeniden gönderme yukarıdaki sınırlarla. Bütün bağlantıları süresi geçmiş, onaylanmamış ve bağlantısı (connection) olmayan hesap cron'da silinir; aynı adresle yeni kayıt geldiğinde de anında silinir, böylece başkasının adresini yazmak gerçek sahibini kilitleyemez. Hiç bağlantı gönderilmemiş hesaba (posta kapalıyken açılmış) dokunulmaz. Migration 0004'ten önceki hesaplar onaylı sayılır. Posta gönderilemezse kayıt yine olur, kullanıcı tekrar gönderebilir; log'a yalnızca HTTP durumu ve Resend hata kodu yazılır, adres, token ve bağlantı **asla** |
+| Loglama | Anahtar, token, parola, şifreli blob, e-posta onay token'ı ve gönderilen adres **asla** loglanmaz; sağlayıcı hata gövdeleri ≤ 300 karaktere kırpılır ve anahtar benzeri dizgeler maskelenir |
 
 ---
 

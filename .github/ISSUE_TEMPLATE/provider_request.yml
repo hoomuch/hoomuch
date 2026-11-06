@@ -1,0 +1,50 @@
+name: Provider request
+description: Ask for a billing provider hoomuch doesn't support yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        hoomuch reads three things from a provider: what's active now (MRR or the subscriptions to
+        work it out from), the charges since a date, and refunds with their own dates. A provider
+        whose API can't give those can't be added yet, so the questions below are about them.
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      placeholder: e.g. Creem
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: API reference
+      description: A link to the provider's API docs.
+      placeholder: https://
+    validations:
+      required: true
+  - type: dropdown
+    id: keys
+    attributes:
+      label: Read-only keys
+      description: Can a key be limited to reading?
+      options:
+        - Yes, keys can be scoped to read-only
+        - No, every key has full access
+        - I don't know
+    validations:
+      required: true
+  - type: checkboxes
+    id: api
+    attributes:
+      label: What the API offers
+      description: Tick what you've seen in the docs. It's fine to leave all of these unticked.
+      options:
+        - label: MRR, or a list of active subscriptions with their prices
+        - label: Charges or transactions, filtered by date
+        - label: Refunds, with the date of each refund
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: How many people use it, edge cases you know about, or whether you'd like to write the adapter yourself.

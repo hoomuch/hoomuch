@@ -11,6 +11,9 @@
   },
   "homepage": "https://github.com/tahabozdemir/hoomuch#readme",
   "bugs": "https://github.com/tahabozdemir/hoomuch/issues",
+  "engines": {
+    "node": ">=24.14.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "predeploy": "npm run db:migrate:remote",
@@ -23,6 +26,7 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf-typegen": "wrangler types",
+    "domains:update": "node scripts/update-disposable-domains.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && npm run build",
@@ -35,6 +39,18 @@
       },
       "ALLOW_SIGNUP": {
         "description": "Leave `true` until you've created your own account, then set it to `false` so nobody else can sign up on your instance."
+      },
+      "TURNSTILE_SITE_KEY": {
+        "description": "Optional. A Cloudflare Turnstile site key. With `TURNSTILE_SECRET_KEY` set too, log in and sign up require the Turnstile check. Leave empty to keep it off."
+      },
+      "TURNSTILE_SECRET_KEY": {
+        "description": "Optional secret. The secret key of the same Turnstile widget."
+      },
+      "MAIL_FROM": {
+        "description": "Optional. Sender of the sign-up confirmation email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set."
+      },
+      "RESEND_API_KEY": {
+        "description": "Optional secret. A Resend API key with sending access. When set, new accounts must confirm their email address before using hoomuch. Leave empty to keep it off."
       }
     }
   },

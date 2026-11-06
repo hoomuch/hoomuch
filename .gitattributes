@@ -1,0 +1,8 @@
+# Store text with LF line endings, whatever the contributor's OS.
+* text=auto eol=lf
+
+*.png binary
+*.woff2 binary
+
+# Written by `npm run cf-typegen`: collapsed in pull request diffs and left out of language stats.
+worker-configuration.d.ts linguist-generated

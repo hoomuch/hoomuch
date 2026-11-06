@@ -33,11 +33,29 @@
   "vars": {
     "APP_NAME": "hoomuch",
     "ALLOW_SIGNUP": "true",
-    "SYNC_INTERVAL_MINUTES": "60"
+    "SYNC_INTERVAL_MINUTES": "60",
+    // Cloudflare Turnstile on log in and sign up: put the widget's site key here and set the
+    // TURNSTILE_SECRET_KEY secret. Empty (the default) leaves Turnstile off.
+    "TURNSTILE_SITE_KEY": "",
+    // Email verification: who the sign-up confirmation mail comes from, on a domain verified in
+    // Resend, e.g. "hoomuch <hello@example.com>". It's on once the RESEND_API_KEY secret is set;
+    // without that secret, nothing is mailed and new accounts don't need confirming.
+    "MAIL_FROM": ""
   },
+
+  // Per-network request limits, checked before any D1 work (src/lib/rate-limit.ts). Counts are per
+  // Cloudflare location and approximate; the exact limits live in D1. namespace_id only has to be
+  // unique within your Cloudflare account: change it if another Worker of yours already uses it.
+  "ratelimits": [
+    // Every request the Worker serves (static assets never reach it).
+    { "name": "RL_REQUESTS", "namespace_id": "730001", "simple": { "limit": 300, "period": 60 } },
+    // Log-in and sign-up submissions: each one costs a password hash.
+    { "name": "RL_AUTH", "namespace_id": "730002", "simple": { "limit": 10, "period": 60 } }
+  ],
 
   "observability": {
     "enabled": true
   }
-  // Secrets (not in this file): ENCRYPTION_KEY — see .dev.vars.example
+  // Secrets (not in this file): ENCRYPTION_KEY, TURNSTILE_SECRET_KEY if you turn Turnstile on, and
+  // RESEND_API_KEY if you turn email verification on. See .dev.vars.example
 }
