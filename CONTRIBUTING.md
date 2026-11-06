@@ -71,10 +71,10 @@ src/
   lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
   providers/         adapter contract, registry, one adapter per provider, Demo
-  sync/              sync engine, aggregation, FX (frankfurter.dev), repository
+  sync/              sync engine, the sync queue and its consumer, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
-  services/          connection use-cases: create, rotate key, sync now, delete
-  routes/            HTTP handlers (Post/Redirect/Get); pages render with views/render.tsx
+  services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks
+  routes/            HTTP handlers (Post/Redirect/Get), and /webhooks for providers; pages render with views/render.tsx
   views/             layout, pages, hoomuch components, charts (React)
   components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
   client/entry.tsx   browser entry: hydrates the page the server rendered

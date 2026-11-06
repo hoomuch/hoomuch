@@ -1,6 +1,6 @@
-# hoomuch — Ürün ve Teknik Spesifikasyon (v1)
+# hoomuch — Ürün ve Teknik Spesifikasyon (v1.1)
 
-> Durum: **v1 uygulandı, entegrasyon doğrulamasında** · Tarih: 2026-11-05 · Sahibi: Lead (ana session)
+> Durum: **v1.1 uygulandı** (§12.1'in tamamı ve F-17) · Tarih: 2026-11-06 · Sahibi: Lead (ana session)
 >
 > Bu doküman tek doğruluk kaynağıdır. Kod ile çelişirse spec kazanır; spec yanlışsa önce spec güncellenir.
 
@@ -56,7 +56,9 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-14 | Birleşik işlem listesi (ödeme/iade), sağlayıcı filtresi, sayfalama | P1 |
 | F-15 | Ayarlar: para birimi, parola değiştirme, hesabı tüm verisiyle silme | P1 |
 | F-16 | Günlük gelir CSV dışa aktarma | P2 |
-| F-17 | Webhook ile gerçek zamanlı güncelleme | v1.1 |
+| F-17 | Webhook ile gerçek zamanlı güncelleme (v1.1): Stripe, Paddle, Lemon Squeezy, Polar, Chargebee, Dodo Payments ve Gumroad için bağlantı başına gizli bir webhook URL'si. Çağrı yalnızca bir senkronizasyon tetikler; gövdesi okunmaz, saklanmaz, loglanmaz; imza doğrulanmaz. Ayrıntı §4.1 "Webhook", güvenlik §8 | P1 |
+| F-19 | Senkronizasyon uyarıları (v1.1): adaptör, eksik ya da tahmini bir rakamı (`MetricsSnapshot.warnings`, ör. Coupons izni olmayan Stripe anahtarı) kısa bir cümleyle bildirir; snapshot ile saklanır, dashboard notlarında bağlantı adıyla ve bağlantı sayfasında gösterilir, sonraki temiz snapshot'ta kalkar | P1 |
+| F-20 | Saat dilimi (v1.1): günler kullanıcının saat diliminde gece yarısından gece yarısına sayılır. Dilim ilk girişte Cloudflare'in isteğe koyduğu dilimden bir kez alınır, Ayarlar'dan değiştirilir. Ayrıntı §6 "Günler" | P1 |
 | F-18 | Ürün bazında kırılım ("By product" kartı), iki tablo: **MRR** — bağlantının son snapshot'ındaki MRR, ürüne göre (Stripe, App Store Connect ve Google Play böler; `ProviderMeta.mrrByProduct`); bölmeyen bağlantılar ve adsız ürünler "No product name" satırında, tablo MRR KPI'ına eşittir. **Gelir** — seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına); ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall, App Store Connect) ve adsız işlemler "No product name" satırında, tablo gelir KPI'ına eşittir. Bölünecek bir şeyi olmayan tablo gösterilmez; neden gösterilmediği notta söylenir. MRR'ı bölebilecekken bölemeyen (anahtarında Products: Read olmayan) Stripe bağlantıları notta adıyla anılır | P1 |
 
 ### 3.2 Fonksiyonel olmayan ihtiyaçlar
@@ -76,10 +78,10 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 
 ### 3.3 Kapsam dışı (v1)
 
-Takım/organizasyon hesapları · App Store Connect / Google Play doğrudan entegrasyonu · Creem (API'si gelir
-geçmişine yetmiyor, §6.9) · Whop, Recurly, FastSpring (anahtar kapsamı, kişisel veri veya asenkron rapor
-zorunluluğu nedeniyle ertelendi) · kohort/LTV analizi · e-posta raporları · webhook'lar ·
-OAuth (Stripe Connect) ile bağlama · tarihsel döviz kuru ile geriye dönük çevrim.
+Takım/organizasyon hesapları · Creem (API'si gelir geçmişine yetmiyor, §6.9) · Whop, Recurly, FastSpring
+(anahtar kapsamı, kişisel veri veya asenkron rapor zorunluluğu nedeniyle ertelendi) · kohort/LTV analizi ·
+e-posta raporları · webhook yükünü okuyup işleme (webhook yalnızca senkronizasyon tetikler, F-17) · sağlayıcıda webhook
+kaydetme (salt okunur kuralı; URL'yi kullanıcı elle ekler) · OAuth (Stripe Connect) ile bağlama.
 
 ---
 
@@ -91,7 +93,9 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
                     ├─ Hono router + React SSR sayfaları (tarayıcıda hydrate)
                     ├─ D1 (SQLite) ─ users, sessions, connections, snapshots,
                     │                transactions, daily_revenue, fx_rates, sync_runs
-                    └─ scheduled()  ──▶ sync engine ──▶ Stripe API
+                    ├─ POST /webhooks/:id/:token ─▶ (sağlayıcıdan) senkronizasyonu kuyruğa koyar
+                    ├─ scheduled()  ──▶ FX + vadesi gelenleri kuyruğa koyar ──▶ Queue `hoomuch-sync`
+                    └─ queue()      ──▶ sync engine (mesaj başına bir bağlantı) ──▶ Stripe API
                                                    ├──▶ Paddle Billing API
                                                    ├──▶ Lemon Squeezy API
                                                    ├──▶ Polar API
@@ -103,7 +107,7 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
                                                    ├──▶ Superwall API (charts + query)
                                                    ├──▶ App Store Connect API (Sales and Trends raporları)
                                                    ├──▶ Google Cloud Storage (Play Console raporları) + Android Publisher API
-                                                   └──▶ frankfurter.dev (ECB kurları)
+                                                   └──▶ frankfurter.dev v2 (ECB + merkez bankaları)
 ```
 
 | Katman | Seçim |
@@ -115,14 +119,22 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
 | Font | Geist Sans + Geist Mono (kendi sunucumuzdan, `public/fonts`) |
 | Stil | Tailwind CSS 4 (+ radial-gradient; Magic UI ışın, grain ve dither shader arka planları), Tailwind CLI ile `public/app.css`'e; istemci paketi esbuild ile `public/client/`'a derlenir (Wrangler `build` adımı) |
 | Veritabanı | Cloudflare D1, `migrations/` |
-| Zamanlama | Cron Triggers `*/30 * * * *` |
+| Zamanlama | Cron Triggers `*/30 * * * *` + Cloudflare Queues (`hoomuch-sync`, consumer `max_batch_size: 1`, `max_concurrency: 10`) |
 | Test | Vitest (Node ortamı; adaptörler ve saf fonksiyonlar) |
 | Dil | TypeScript (strict) |
 
 ### 4.1 Akışlar
 
-**Bağlantı ekleme:** form → `parseInput` (alan doğrulama) → `adapter.verify` (canlı API çağrısı) →
-kimlik bilgisi şifrelenir → D1 → `waitUntil(syncConnection(..., 'initial'))` → `/connections/:id`.
+**Bağlantı ekleme:** form → `parseInput` (alan doğrulama) → `adapter.verify` (canlı API çağrısı, 20 sn son
+tarih) → kimlik bilgisi şifrelenir → D1 → ilk senkronizasyon kuyruğa (`initial`) → `/connections/:id`.
+
+**Kuyruk (v1.1):** Her senkronizasyon `hoomuch-sync` kuyruğunun tüketicisinde, çağrı başına tek bağlantı olarak çalışır;
+böylece her biri kendi alt istek bütçesini ve 15 dk duvar saatini alır (eskiden cron'un ya da `waitUntil`'in 30 sn'si).
+Mesaj `{v: 1, connectionId, kind, at}`. Kuyrukta tekilleştirme olmadığı için `connections.queued_at` (migration 0007) bir
+bağlantının yolda bir senkronizasyonu olduğunu işaretler: cron ve "Sync now" ikinciyi eklemez; kilit alınınca temizlenir;
+15 dk içinde başlamazsa kaybolmuş sayılır. Biten senkronizasyon sonucu ne olursa olsun ack'lenir (hata bağlantıya
+yazılır); yalnızca senkronizasyon dışındaki bir çökme yeniden denenir (`max_retries: 3`). Meşgul bağlantıyı bulan mesaj
+ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra yeniden dener. `wrangler deploy` kuyruk yoksa oluşturur.
 
 **Senkronizasyon (bir bağlantı):**
 1. `status='syncing'`, `sync_runs` kaydı aç.
@@ -130,40 +142,58 @@ kimlik bilgisi şifrelenir → D1 → `waitUntil(syncConnection(..., 'initial'))
 3. `fetchRevenue` → `revenue_cursor` varsa oradan, yoksa `revenue_synced_until − 2 gün` (ilk sefer: şimdi − 90 gün).
    Dönen `events` → `transactions` upsert; etkilenen günler için `daily_revenue` yeniden hesaplanır.
    Dönen `daily` (RevenueCat gibi) → doğrudan `daily_revenue` upsert (`source='provider'`).
+   İlk başarılı senkronizasyonda adaptörün `fetchSnapshotHistory`'si varsa (demo) geçmiş günlerin snapshot'ları
+   eklenir; var olan gün ezilmez.
 4. Sayfa bütçesi dolduysa `revenue_cursor` saklanır (sonraki çalışmada devam); bittiyse cursor temizlenir,
    `revenue_synced_until` ilerletilir.
 5. `status='ok'|'error'`, `last_error`, `last_synced_at`, `sync_runs` kapanır.
 
-**Cron:** Her 30 dakikada bir; `last_synced_at` en eski olan ve `SYNC_INTERVAL_MINUTES`'tan eski
-**en fazla 10 bağlantı** sırayla senkronize edilir. Her bağlantı için sayfa bütçesi 20 istek.
-Günde bir kez FX kurları yenilenir.
+**Cron:** Her 30 dakikada bir: önce FX (günde bir; kur geçmişi kurulumdan/yükseltmeden sonra bir kez doldurulur),
+sonra vadesi gelen **en fazla 100 bağlantı** (kiracı başına sıralı, `queued_at`'i taze olanlar hariç) tek `sendBatch`
+ile kuyruğa konur. Her senkronizasyonda sayfa bütçesi gelir için 20, snapshot için 80 istek; son tarih 60 sn
+(`ProviderContext.deadline`: snapshot payı %60, kalan gelire), son tarihten 5 sn sonra `ProviderContext.signal` uçuştaki
+istekleri keser.
 
-**Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir. Arka planda çalışır (`waitUntil`); istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir. Anahtar yenileme de aynı yolu kullanır.
+**Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir; yolda bir senkronizasyon varsa ikincisi eklenmez. Kuyruğa
+konur; istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir.
+Anahtar yenileme de aynı yolu kullanır.
+
+**Webhook (F-17, v1.1):** Bağlantı sayfasında "Real-time updates" → **Turn on**: `webhook_nonce` (rastgele) yazılır ve
+URL `/webhooks/<id>/<token>` gösterilir; `token = base64url(HMAC-SHA256(HKDF(ENCRYPTION_KEY, "hoomuch webhook v1"),
+"<id>:<nonce>"))`. Token saklanmaz; sahip URL'yi her zaman görebilir, **New URL** nonce'u yeniler (eski URL anında
+geçersiz), **Turn off** siler. Sağlayıcı çağırınca: kimlik/nonce/token sabit zamanlı doğrulanır, `webhook_last_at`
+yazılır ve yolda bir senkronizasyon yoksa `webhook` türünde bir mesaj **60 sn gecikmeyle** (aynı bağlantının webhook
+senkronizasyonları en az 5 dk arayla) kuyruğa konur; böylece bir ödemenin birkaç olayı tek senkronizasyon olur. Yanıt
+`200 {"ok":true}`; geçersiz her URL aynı `404 {"ok":false}`; kuyruk reddederse `503` (sağlayıcı yeniden dener). Gövde
+hiç okunmaz. Sunulan sağlayıcılar ve kurulum adımları `ProviderMeta.webhook`'ta (Stripe, Paddle, Lemon Squeezy, Polar,
+Chargebee, Dodo Payments, Gumroad). App Store Connect ve Google Play (raporlar bir gün geride), Adapty (ortam başına tek
+URL) ve RevenueCat, Superwall (grafikler kendi takviminde yenilenir) için sunulmaz.
 
 **Dashboard:** Yalnızca D1'den okur → tipik yanıt < 150 ms.
 
 ### 4.2 Limitler ve ölçeklenme
 
 - PBKDF2 100k iterasyon ve senkronizasyon, Free plan'ın 10 ms CPU limitini aşabilir → **Workers Paid önerilir**.
-- v1.1 ölçeklenme yolu: Cron → Cloudflare Queues fan-out (bağlantı başına mesaj) + sağlayıcı webhook'ları.
+- Queues Free plan'da da var: günde 10.000 işlem; bir senkronizasyon ≈ 3 işlem, yani günde ≈ 3.300 senkronizasyon
+  (varsayılan saatlik aralıkta ≈ 130 bağlantı). Paid'de ayda 1M işlem dahildir.
 
 ---
 
 ## 5. Veri modeli (D1)
 
-Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kaynağı; `0003` `connections.provider` üzerindeki CHECK'i kaldırır, geçerli kimlikleri `isProviderId` denetler; `0004` e-posta doğrulaması; `0005` `snapshots.mrr_by_product`). Özet:
+Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kaynağı; `0003` `connections.provider` üzerindeki CHECK'i kaldırır, geçerli kimlikleri `isProviderId` denetler; `0004` e-posta doğrulaması; `0005` `snapshots.mrr_by_product`; `0006` `snapshots.warnings`; `0007` `connections.queued_at`; `0008` `connections.webhook_nonce`, `webhook_last_at` ve `sync_runs.kind`'a `webhook`; `0009` `users.timezone`, `timezone_source`). Özet:
 
 | Tablo | Anahtar | Amaç |
 |-------|---------|------|
-| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency`, `currency_source` (`default` / `inferred` / `chosen`, migration 0002), `email_verified_at` (adres onaylandığı an; `NULL` = onaylanmadı, migration 0004) |
+| `users` | `id` | e-posta (NOCASE, unique), parola hash'i, `base_currency`, `currency_source` (`default` / `inferred` / `chosen`, migration 0002), `email_verified_at` (adres onaylandığı an; `NULL` = onaylanmadı, migration 0004), `timezone` (IANA, varsayılan `UTC`) ve `timezone_source` (`default` / `inferred` / `chosen`, migration 0009) |
 | `sessions` | `id` = sha256(token) | oturumlar; token'ın kendisi saklanmaz |
 | `email_verifications` | `id` = sha256(token) | tek kullanımlık e-posta onay bağlantıları (`user_id`, `expires_at`); token'ın kendisi saklanmaz |
 | `login_attempts` | `key` = sha256(email\|ip) | giriş deneme sınırı |
-| `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor |
-| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0005): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL |
+| `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor, `queued_at` (yolda bir senkronizasyon, 0007), `webhook_nonce` (`NULL` = webhook kapalı) ve `webhook_last_at` (0008) |
+| `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; gün, sahibin yerel günü (v1.1; önceki satırlar UTC); MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0005): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL; `warnings` (0006): o senkronizasyonun sayamadıkları, en fazla 5 cümle × 200 karakter |
 | `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok) |
-| `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir; dashboard grafiği buradan okur |
-| `fx_rates` | `day` | USD bazlı günlük kurlar (JSON) |
+| `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir, **UTC** günü. İşlem bazlı sağlayıcılarda `transactions`'tan türetilir (okuma modelleri bunları yerel güne göre `transactions`'tan gruplar, §6 "Günler"); günlük toplam veren sağlayıcılarda (`source='provider'`) doğrudan okunur |
+| `fx_rates` | `day` | USD bazlı kurlar (JSON), her kur kendi tarihinde; `json_patch` ile birleşir. Boş satır (`{}`) yalnızca geçmişin nereye kadar çekildiğini işaretler |
 | `sync_runs` | `id` | senkronizasyon geçmişi |
 
 **MoneyMap:** Bir sağlayıcı birden fazla para biriminde satış yapabilir. MRR ve dönem geliri
@@ -200,14 +230,29 @@ yalnızca bugünün snapshot'ını ve son 2 günü yeniler; geçmişi düzeltmek
 | **ARR** | MRR × 12 |
 | **Aktif abonelik** | Ücretli aktif abonelik sayısı (past_due dahil, deneme hariç) |
 | **Aktif deneme** | Deneme süresindeki abonelik sayısı |
-| **Dönem geliri** | Seçili pencerede `daily_revenue` toplamı: brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall, App Store Connect, Google Play) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
+| **Dönem geliri** | Seçili penceredeki günlük gelirin toplamı (yerel günler, §6 "Günler"): brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall, App Store Connect, Google Play) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
 | **Değişim %** | MRR/abonelik/deneme: pencerenin başındaki en yakın snapshot'a göre. Gelir: bir önceki eşit uzunluktaki pencereye göre. Veri yoksa `null` (UI'da "—"). |
 
 **Aylığa normalize:** `day → ×365/12`, `week → ×52/12`, `month → ×1`, `year → ×1/12`; hepsi `interval_count`'a bölünür.
 Sonuç en yakın tamsayıya yuvarlanır.
 
-**Döviz:** frankfurter.dev (ECB) günlük kurlar, USD baz, günde bir çekilir. Çevrim görüntüleme anında güncel kurla yapılır.
-Desteklenmeyen para birimi toplamdan hariç tutulur ve dashboard'da uyarı gösterilir.
+**Döviz (v1.1):** [frankfurter.dev v2](https://frankfurter.dev), USD baz: merkez bankaları ve resmî kaynaklardan
+harmanlanmış 181 para birimi, ECB'nin yayımladığı yerde ECB'nin kendi kuru (her çekimde önce harmanlanmış, üstüne ECB
+yazılır; `providers=ecb`). Her kur kendi yayın tarihine yazılır. Günde bir çekilir; kurulumdan ya da yükseltmeden sonra cron
+bir kez yaklaşık 200 günlük geçmişi (kullanımdaki para birimleri için) doldurur. **Gelir** (günlük çubuklar, gelir KPI'ı ve
+önceki dönemi, ürün geliri, takvim, işlem listesi) **kendi gününün kuruyla** (o gün ya da öncesindeki en yeni kur)
+çevrilir; **MRR** ve trendi **en güncel kurla** (trend iş değişimini göstersin, kur oynaklığını değil). Geçmişi
+başlamadan önceki günler o para biriminin en eski kurunu, geçmişi hiç olmayan para birimi güncel kuru kullanır. Kuru
+olmayan para birimi toplamdan hariç tutulur ve dashboard'da uyarı gösterilir.
+
+**Günler (v1.1):** Günler kullanıcının saat diliminde (`users.timezone`) gece yarısından gece yarısına sayılır: "bugün",
+7/30/90 pencereleri, önceki dönem, takvim ve `?day=`. `daily_revenue` UTC günüyle saklanmaya devam eder; işlem bazlı
+sağlayıcıların geliri okuma anında `transactions`'tan yerel güne göre gruplanır (D1'de saat dilimi olmadığı için her
+DST aralığının farkı JS'te hesaplanıp SQL `CASE` ile uygulanır). Günlük toplam veren sağlayıcılar yeniden gruplanamaz ve
+kendi günlerini korur (`ProviderMeta.dayZone`): RevenueCat, Dodo Payments, Adapty, Superwall UTC; App Store Connect
+Pasifik saati. Kullanıcının dilimi farklıysa dashboard bunu söyler. Snapshot günü sahibin yerel günüdür; ilk backfill
+yerel gece yarısından başlar. Tarih içermeyen Google Play satırları UTC öğlene konur, ±12 saatlik her dilimde kendi
+tarihinde kalır.
 
 ### 6.1 Stripe
 
@@ -638,9 +683,10 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
 | `/connections/new` | Sağlayıcı seçimi (10 logolu kart + demo satırı) |
 | `/connections/new?provider=…` | Dinamik form (`ProviderMeta.fields`), anahtar oluşturma adımları, gerekli izinler, uyarı |
-| `/connections/:id` | Detay: durum, son hata, son snapshot'lar, katlanmış senkronizasyon geçmişi. Birincil eylem Sync now; son senkronizasyon hatalıysa "Replace key". Yeniden adlandır, anahtar yenile ve sil (onay kutusu ile) tek bir "Manage" bölümünde, gerekmedikçe kapalı. Demo bağlantı başlıktan tek tıkla kaldırılır |
+| `/connections/:id` | Detay: durum, son hata, son senkronizasyonun uyarıları (F-19), son snapshot'lar, katlanmış senkronizasyon geçmişi, webhook destekleyen sağlayıcılarda "Real-time updates" kartı (F-17: Turn on; açıkken URL, kopyala, sağlayıcıdaki adımlar ve seçilecek olaylar, son çağrı zamanı, New URL, Turn off). Birincil eylem Sync now; son senkronizasyon hatalıysa "Replace key". Yeniden adlandır, anahtar yenile ve sil (onay kutusu ile) tek bir "Manage" bölümünde, gerekmedikçe kapalı. Demo bağlantı başlıktan tek tıkla kaldırılır |
 | `/transactions?provider=&page=` | Birleşik işlem tablosu |
-| `/settings` | Para birimi, parola değiştirme, hesabı silme (onay kutusu + parola) |
+| `/settings` | Para birimi, saat dilimi (F-20), parola değiştirme, hesabı silme (onay kutusu + parola) |
+| `POST /webhooks/:id/:token` | Sağlayıcı webhook'u (F-17): oturum yok, CSRF yok, JSON yanıt; §4.1 "Webhook" |
 | `/healthz` | `{"ok":true}` |
 
 ### 7.3 Bileşenler
@@ -658,10 +704,11 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | Kimlik bilgisi şifreleme | `ENCRYPTION_KEY` (32 bayt, base64) Worker secret. AES-256-GCM, rastgele 12 bayt IV, biçim `v1.<iv>.<ciphertext>` (base64url). `v1` öneki anahtar rotasyonuna izin verir |
 | Parola | PBKDF2-SHA256, 100.000 iterasyon (Workers üst sınırı), 16 bayt tuz, sabit zamanlı karşılaştırma. Min. 10 karakter |
 | Oturum | 32 bayt rastgele token → `__Host-hm_session` çerezi (HttpOnly, SameSite=Lax, Secure, Path=/; yalnızca düz HTTP localhost'ta önek ve Secure yok). 30 gün kayan yenileme, **90 gün mutlak üst sınır**. D1'de yalnızca SHA-256 hash. Girişte eski oturum iptal edilir; parola değişince **tüm** oturumlar (mevcut dahil) iptal edilip yeni token verilir |
-| CSRF | Hono `csrf()` (Origin kontrolü) + SameSite=Lax |
+| CSRF | Hono `csrf()` (Origin kontrolü) + SameSite=Lax. Yalnızca `/webhooks/` yolu muaf: sağlayıcılar tarayıcı değildir ve oturum taşımaz (Gumroad form-encoded gönderir); kendi URL token'ı vardır |
+| Webhook | URL token'ı `HMAC-SHA256(HKDF(ENCRYPTION_KEY, "hoomuch webhook v1"), "<id>:<nonce>")`, 256 bit; saklanmaz, sabit zamanlı karşılaştırılır. Geçersiz kimlik, kapalı webhook, yanlış token aynı `404`'ü alır (hangi bağlantının var olduğu sızmaz). Gövde hiç okunmaz, saklanmaz, loglanmaz (müşteri e-postası taşıyabilir); log yalnızca `{connectionId, scheduled}`. Sağlayıcı imzası doğrulanmaz: geçerli bir çağrı yalnızca salt okunur anahtarla, bağlantı başına en çok 5 dk'da bir senkronizasyon başlatabilir. `ENCRYPTION_KEY` değişirse URL'ler de değişir |
 | HTTP başlıkları | CSP: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'` + HSTS, nosniff, Referrer-Policy. Turnstile açıksa yalnızca `/login` ve `/signup` sayfalarında `script-src` ve `frame-src`'ye `https://challenges.cloudflare.com` eklenir |
 | Deneme sınırı | Sayaç, pahalı PBKDF2'den **önce** tek bir `INSERT … ON CONFLICT … RETURNING` ile atomik artırılır (paralel isteklerle aşılamaz). Giriş: e-posta + ağ başına 15 dk'da 10, hesap başına (tüm ağlar) 15 dk'da 50, **ağ başına (tüm e-postalar) 15 dk'da 30** (credential stuffing'i ve bir ağın harcatabileceği CPU'yu sınırlar); aşılınca 429. Parola teyidi (parola değiştirme, hesap silme): kullanıcı başına 15 dk'da 10. Kayıt: ağ başına 15 dk'da 10 deneme (hesap üretimini ve e-posta yoklamasını sınırlar) ve **ağ başına günde 5 yeni hesap** (yalnızca kayıt gerçekten oluşacakken sayılır). Onay bağlantısını yeniden gönderme: hesap başına 15 dk'da 3, günde 10. IPv6 adresleri /64 olarak gruplanır. Süresi geçen satırları cron siler; günlük sayaçların anahtarı `day:` önekiyle bir gün tutulur |
-| İstek sınırı | Cloudflare Rate Limiting binding'leri, D1'e dokunmadan **önce**, ağ başına: tüm istekler dakikada 300 (`RL_REQUESTS`), giriş ve kayıt gönderimleri dakikada 10 (`RL_AUTH`); aşılınca 429 + `Retry-After: 60`. Sayaçlar Cloudflare lokasyonu başına ve yaklaşıktır; kesin sınırlar D1'dedir. Binding yoksa ya da hata verirse istek geçer (fail open) |
+| İstek sınırı | Cloudflare Rate Limiting binding'leri, D1'e dokunmadan **önce**, ağ başına: tüm istekler dakikada 300 (`RL_REQUESTS`), giriş ve kayıt gönderimleri dakikada 10 (`RL_AUTH`); aşılınca 429 + `Retry-After: 60`. Webhook'lar ağ başına sınırdan muaftır (sağlayıcı tüm kiracıların çağrılarını aynı adreslerden yollar) ve bunun yerine bağlantı başına dakikada 30 ile sınırlıdır (`RL_WEBHOOKS`). Sayaçlar Cloudflare lokasyonu başına ve yaklaşıktır; kesin sınırlar D1'dedir. Binding yoksa ya da hata verirse istek geçer (fail open) |
 | Bot koruması | Giriş ve kayıt formlarında görünmeyen bir bal küpü alanı (`website`, `display: none`, `aria-hidden`); doluysa istek 400 ile reddedilir, e-posta ve IP loglanmaz. İsteğe bağlı Cloudflare Turnstile: `TURNSTILE_SITE_KEY` ve `TURNSTILE_SECRET_KEY` ikisi de tanımlıysa açılır; token Siteverify ile doğrulanır, `action` (`login`/`signup`) ve `hostname` eşleşmelidir; Siteverify'a ulaşılamazsa form reddedilir (fail closed, 503) |
 | Tek kullanımlık e-posta | Kayıtta [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) listesi (CC0) reddedilir; alan adı ve tüm üst alan adları kontrol edilir (`x@a.mailinator.com` → `mailinator.com`). Liste `src/lib/disposable-domains.ts` içinde, kaynak commit'e sabitlenmiş olarak tutulur; çalışma anında ağ çağrısı yoktur. `npm run domains:update` ile yenilenir |
 | Yetkilendirme | Her sorgu `user_id` ile kapsamlı; bağlantı ID'leri UUID |
@@ -689,10 +736,10 @@ hoomuch/
 │  ├─ providers/types.ts         Lead — ADAPTÖR KONTRATI
 │  ├─ providers/registry.ts      Lead — sağlayıcı meta verisi + adaptör eşlemesi
 │  ├─ providers/{http,stripe,paddle,lemonsqueezy,polar,revenuecat,chargebee,dodo,gumroad,adapty,superwall,demo}.ts   Data Plane
-│  ├─ sync/                      Data Plane — engine, fx, repo
+│  ├─ sync/                      Data Plane — engine, queue (üretici), consumer (kuyruk tüketicisi), fx, repo
 │  ├─ data/types.ts              Lead — OKUMA MODELİ KONTRATI
-│  ├─ data/{dashboard,transactions,connections}.ts   Data Plane
-│  ├─ services/connections.ts    Data Plane (imzalar Lead tarafından sabitlendi)
+│  ├─ data/{dashboard,transactions,connections,calendar,days}.ts   Data Plane
+│  ├─ services/{connections,webhooks}.ts    Data Plane (imzalar Lead tarafından sabitlendi)
 │  ├─ routes/                    Experience
 │  ├─ views/                     Experience
 │  └─ styles/app.css             Experience
@@ -703,11 +750,11 @@ hoomuch/
 
 ### 9.1 Kontratlar (değiştirmek için Lead onayı gerekir)
 
-- `src/providers/types.ts` — `ProviderAdapter`, `ProviderMeta`, `MetricsSnapshot`, `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
-- `src/data/types.ts` — `DashboardData`, `CalendarMonth`, `CalendarDay`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail`
-- `src/services/connections.ts` — `createConnection`, `renameConnection`, `rotateCredentials`, `deleteConnection`, `triggerSync`
+- `src/providers/types.ts` — `ProviderAdapter` (v1.1: isteğe bağlı `fetchSnapshotHistory`), `ProviderMeta` (v1.1: `webhook`, `dayZone`), `ProviderContext` (v1.1: `deadline`, `signal`), `MetricsSnapshot` (v1.1: `warnings`), `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
+- `src/data/types.ts` — `DashboardData` (v1.1: `fx.daily`, `days`, dolu `warnings`), `CalendarMonth`, `CalendarDay`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail` (v1.1: `warnings`, `webhook`)
+- `src/services/connections.ts` — `createConnection`, `renameConnection`, `rotateCredentials`, `deleteConnection`, `triggerSync`, `startSync` (v1.1: senkronizasyonları kuyruğa koyar, `ExecutionContext` almaz); `src/services/webhooks.ts` — `setWebhook`, `receiveWebhook`
 - `src/data/*.ts` — `getDashboardData`, `getCalendarMonth`, `listTransactions`, `listConnectionSummaries`, `getConnectionDetail`
-- `src/sync/engine.ts` — `syncConnection`, `runScheduledSync`
+- `src/sync/engine.ts` — `syncConnection`, `runScheduledSync`; `src/sync/queue.ts` — `SyncMessage`, `enqueueSync(s)`; `src/sync/consumer.ts` — `handleSyncBatch`
 
 ---
 
@@ -746,6 +793,16 @@ Kurallar:
 - Hiçbir sayfada inline script yok; CSP ihlali konsolda görünmez.
 - `npm run check` (typecheck + test + css) yeşil.
 
+**Definition of Done (v1.1):**
+- Her senkronizasyon kuyruk tüketicisinde çalışır; cron, yeni bağlantı, Sync now ve anahtar yenileme kuyruğa koyar;
+  aynı bağlantı iki kez kuyruğa girmez.
+- Webhook açılmış bir bağlantıya üç hızlı çağrı tek bir `webhook` senkronizasyonu üretir; yanlış token 404 alır; gövde
+  hiçbir logda görünmez.
+- Eksik izinli bir Stripe anahtarı dashboard'da ve bağlantı sayfasında adıyla uyarı gösterir.
+- İki farklı günde gelen EUR geliri kendi günlerinin kuruyla, MRR güncel kurla çevrilir.
+- Los Angeles diliminde bir kullanıcı için akşam saatindeki satış o günün çubuğunda görünür; günlük toplam veren
+  sağlayıcıların kendi günü dashboard'da belirtilir.
+
 ---
 
 ## 12. Riskler ve açık sorular
@@ -753,15 +810,18 @@ Kurallar:
 | Risk | Etki | Azaltma |
 |------|------|---------|
 | RevenueCat `charts:read` izni verilmemiş olabilir | RC için günlük gelir grafiği yok | Snapshot geliri + uyarı ile zarif düşüş |
-| İlk senkronizasyon `waitUntil` 30 sn sınırına takılabilir | Backfill birkaç cron'a yayılır | Senk. süre sınırı (etkileşimli 20 sn, cron 60 sn) + cursor; v1.1 Queues |
-| Tarihsel kur yok | Geçmiş gelir bugünkü kurla çevrilir | v1'de not olarak gösterilir; v1.1 tarihsel kur |
+| Bir senkronizasyon tek çağrıya sığmaz | Backfill birkaç senkronizasyona yayılır | v1.1: her senkronizasyon kendi kuyruk çağrısında (60 sn son tarih + cursor) |
+| Free plan Queues kotası (günde 10.000 işlem) | Çok bağlantılı ya da yoğun webhook'lu kurulumda kota dolar | Webhook senkronizasyonları bağlantı başına 5 dk arayla; README Free plan sınırını söyler |
+| frankfurter.dev harmanlanmış kurları sonradan küçük oynayabilir | Geçmiş gün geliri birkaç kuruş farklı olabilir | Kur bir kez saklanır, yeniden yazılmaz; ECB yayımladığı yerde ECB kuru |
+| Günlük toplam veren sağlayıcılar kullanıcının diliminde gruplanamaz | O sağlayıcıların günü kullanıcının gününden kayabilir | `ProviderMeta.dayZone` ile dashboard'da açıkça belirtilir |
 | Free plan CPU limiti | Giriş/senk. başarısız olabilir | Paid plan önerisi (README) |
 | Stripe indirim/tiered fiyat kenar durumları | MRR sapması | Metered hariç, tiered = 0 + log; testlerle kapsanır |
 
-### 12.1 v1.1 teknik borç (ekiplerden gelen kontrat talepleri)
+### 12.1 v1.1 teknik borç (ekiplerden gelen kontrat talepleri) — tamamlandı
 
-- `ProviderAdapter.fetchSnapshotHistory?` (opsiyonel) — engine'deki demo'ya özel dal kalkar.
-- `MetricsSnapshot.warnings?: string[]` — adaptör uyarıları (ör. Coupons izni yok) dashboard'a taşınır.
-- `ProviderContext` içine `deadline` / `AbortSignal` — engine'deki geçici süre sınırı çözümünün yerini alır.
-- Cron → Cloudflare Queues fan-out; sağlayıcı webhook'ları (F-17).
-- Tarihsel döviz kuru; kullanıcı saat dilimine göre gün sınırları.
+- ✅ `ProviderAdapter.fetchSnapshotHistory?` (opsiyonel) — engine'deki demo'ya özel dal kalktı; demo uyguluyor.
+  Superwall ve Adapty'nin MRR serileri de bu kancayı kullanabilir (sonraki iş).
+- ✅ `MetricsSnapshot.warnings?: string[]` — adaptör uyarıları dashboard'a ve bağlantı sayfasına taşındı (F-19).
+- ✅ `ProviderContext.deadline` / `signal` — engine'deki getter çözümü (`withDeadline`) kalktı.
+- ✅ Cron → Cloudflare Queues fan-out; sağlayıcı webhook'ları (F-17).
+- ✅ Tarihsel döviz kuru (frankfurter.dev v2); kullanıcı saat dilimine göre gün sınırları (F-20).
