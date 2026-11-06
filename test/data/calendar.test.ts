@@ -7,7 +7,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addMonths, getCalendarMonth, monthBounds, parseCalendarQuery, parseDayParam } from '../../src/data/calendar';
+import { getDashboardData } from '../../src/data/dashboard';
 import { listTransactions } from '../../src/data/transactions';
+import { recomputeDailyRevenue } from '../../src/sync/repo';
 import type { CalendarMonth } from '../../src/data/types';
 import type { SessionUser } from '../../src/env';
 import { CalendarCard, calendarWeeks, cellAmount, heatStep, revenueLine } from '../../src/views/components/calendar-card';
@@ -151,6 +153,47 @@ describe('getCalendarMonth', () => {
     expect(m.revenueFrom).toBeNull();
     expect(m.days.every((d) => d.net === null)).toBe(true);
     expect(m.prevMonth).toBeNull();
+  });
+});
+
+describe('getCalendarMonth revenue at each day’s rate (SPEC §6)', () => {
+  const fxDay = (day: string, rates: Record<string, number>) =>
+    t.exec('INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)', day, 'USD', JSON.stringify(rates), NOW);
+
+  beforeEach(() => {
+    t.exec('DELETE FROM fx_rates');
+    seedConnection(t, { id: 's', userId: 'u1', provider: 'stripe', name: 'Acme' });
+  });
+
+  /** Stores transactions and the daily_revenue a sync derives from them (the FX history reads its currencies). */
+  async function sales(...items: Array<[id: string, iso: string, amount: number, currency: string]>) {
+    for (const [id, iso, amount, currency] of items) tx('s', id, at(iso), amount, currency);
+    await t.db.batch(recomputeDailyRevenue(t.db, 's', { from: '2026-10-01', to: '2026-11-05' }));
+  }
+
+  const cell = (m: CalendarMonth, day: string) => {
+    const d = m.days.find((x) => x.day === day)!;
+    return { gross: d.gross, refunds: d.refunds, net: d.net };
+  };
+
+  it('nets each day once, like the dashboard bar, so gross − refunds is the net', async () => {
+    fxDay('2026-11-04', { EUR: 0.8 });
+    await sales(['c', '2026-11-04T10:00:00Z', 5, 'EUR'], ['r', '2026-11-04T11:00:00Z', -3, 'EUR']);
+    const m = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    const bar = (await getDashboardData(testEnv(t.db), user, 7)).revenueSeries.find((r) => r.day === '2026-11-04')!.total;
+    // 2 ¢ net at 0.8 = 2.5 ¢ → 3, as the bar; 5 ¢ gross alone = 6.25 → 6; refunds are the rest.
+    expect(bar).toBe(3);
+    expect(cell(m, '2026-11-04')).toEqual({ gross: 6, refunds: 3, net: 3 });
+  });
+
+  it('converts a day’s charges and refunds at that day’s rate, not the latest', async () => {
+    fxDay('2026-11-02', { EUR: 0.5 });
+    fxDay('2026-11-04', { EUR: 0.8 });
+    await sales(['c', '2026-11-02T10:00:00Z', 100_00, 'EUR'], ['r', '2026-11-02T11:00:00Z', -50_00, 'EUR']);
+    const m = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    // At Nov 2's 0.5: +100 € = $200, −50 € = $100. (At the latest 0.8: $125 and $62.50.)
+    expect(cell(m, '2026-11-02')).toEqual({ gross: 200_00, refunds: 100_00, net: 100_00 });
+    expect(m.days[1]!.byConnection).toEqual({ s: 100_00 });
   });
 });
 

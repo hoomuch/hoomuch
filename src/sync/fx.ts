@@ -6,15 +6,17 @@
  * rates first and the ECB's over them.
  *
  * Storage: one `fx_rates` row per day holding the quotes dated that day (Frankfurter dates each
- * quote by its source's publication, so one fetch can fill two days). Rows merge with `json_patch`.
- * A row with no rates (`{}`) only marks how far back history has been fetched.
+ * quote by its source's publication, so one fetch can fill two days). Rows merge with `json_patch`:
+ * a quote for a day replaces that day's earlier quote. A row with no rates (`{}`) only marks that
+ * history has been fetched. `fetched_at` is when the daily refresh last wrote a row (0 on days only
+ * the history fill wrote), so a history fill never passes for a refresh.
  *
  * Use (SPEC §6): revenue converts at the rate of its own day (`FxConverter.amountOn`), the newest
  * rate on or before it; MRR and everything "now" converts at the latest rates (`amount`, `map`).
  */
 
 import { readTextBounded } from '../providers/http';
-import { convertMinor, normalizeCurrency, type FxTable, type MoneyMap } from '../lib/money';
+import { convertMinor, currencyExponent, normalizeCurrency, toMajor, type FxTable, type MoneyMap } from '../lib/money';
 import { DAY, HOUR, addDays, dayKey } from '../lib/time';
 import { BACKFILL_DAYS } from './aggregate';
 
@@ -29,6 +31,8 @@ export const FX_MAX_AGE_MS = 20 * HOUR;
  * previous period, with a margin for weekends and holidays before it.
  */
 export const FX_HISTORY_DAYS = 2 * BACKFILL_DAYS + 20;
+/** Days a failed ECB history is retried (one request a cron tick) before the blended rates alone stand. */
+export const ECB_HISTORY_RETRY_DAYS = 3;
 /** Days the "latest" table looks back for each currency (some sources publish weekly). */
 const LATEST_LOOKBACK_DAYS = 10;
 const FX_TIMEOUT_MS = 10_000;
@@ -189,7 +193,8 @@ export function parseFrankfurter(body: unknown, now: number = Date.now()): FxTab
   return [...byDay].map(([day, rates]) => ({ base: FX_BASE, day, rates })).sort((a, b) => (a.day < b.day ? -1 : 1));
 }
 
-async function fetchTables(fetchImpl: typeof fetch, url: string, maxBytes: number, now: number): Promise<FxTable[]> {
+/** `allowEmpty`: a ranged request can rightly have no quotes (the ECB publishes none of them). */
+async function fetchTables(fetchImpl: typeof fetch, url: string, maxBytes: number, now: number, allowEmpty = false): Promise<FxTable[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FX_TIMEOUT_MS);
   let body: unknown;
@@ -201,19 +206,23 @@ async function fetchTables(fetchImpl: typeof fetch, url: string, maxBytes: numbe
   } finally {
     clearTimeout(timer);
   }
+  if (allowEmpty && Array.isArray(body) && body.length === 0) return [];
   return parseFrankfurter(body, now);
 }
 
-/** Merges tables into `fx_rates`: a day's existing quotes are kept, the new ones win. */
-function storeStatements(db: D1Database, tables: readonly FxTable[], now: number): D1PreparedStatement[] {
+/**
+ * Merges tables into `fx_rates`: a day's existing quotes are kept, the new ones win. `fetchedAt`
+ * null (the history fill) leaves a row's fetched_at as it was, 0 on a day it adds.
+ */
+function storeStatements(db: D1Database, tables: readonly FxTable[], fetchedAt: number | null): D1PreparedStatement[] {
   return tables.map((t) =>
     db
       .prepare(
-        `INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES (?1, ?2, ?3, COALESCE(?4, 0))
          ON CONFLICT(day) DO UPDATE SET base = excluded.base, rates = json_patch(fx_rates.rates, excluded.rates),
-                                        fetched_at = excluded.fetched_at`,
+                                        fetched_at = COALESCE(?4, fx_rates.fetched_at)`,
       )
-      .bind(t.day, t.base, JSON.stringify(t.rates), now),
+      .bind(t.day, t.base, JSON.stringify(t.rates), fetchedAt),
   );
 }
 
@@ -269,15 +278,25 @@ export type FxHistoryOutcome = 'covered' | 'filled' | 'nothing_to_fill' | 'faile
 
 /**
  * Makes sure rates reach back FX_HISTORY_DAYS, for the currencies revenue is stored in and the
- * display currencies: once, after an install or an upgrade (one ranged request, plus the ECB's).
- * Afterwards the daily refresh keeps every day filled. Never throws. A currency that first appears
- * later converts its earlier days at its oldest stored rate (FxHistory.rateOn).
+ * display currencies: once, after an install or an upgrade (one ranged request for the blended
+ * rates, one for the ECB's). Afterwards the daily refresh keeps every day filled. If the ECB's part
+ * fails, the blended rates are kept and each later tick asks the ECB alone (one request), for up to
+ * ECB_HISTORY_RETRY_DAYS. Never throws. A currency that first appears later converts its earlier
+ * days at its oldest stored rate (FxHistory.rateOn).
  */
 export async function ensureFxHistory(db: D1Database, fetchImpl: typeof fetch, now: number): Promise<FxHistoryOutcome> {
   try {
-    const target = addDays(dayKey(now), -FX_HISTORY_DAYS);
-    const oldest = await db.prepare('SELECT MIN(day) AS d FROM fx_rates').first<{ d: string | null }>();
-    if (oldest?.d && oldest.d <= target) return 'covered';
+    const today = dayKey(now);
+    const target = addDays(today, -FX_HISTORY_DAYS);
+    // Done once a marker sits at or before `target`. The oldest rate says how far back the blended
+    // rates reach: to `target` already when a fill stored them and only the ECB's part failed.
+    const span = await db
+      .prepare(
+        `SELECT MIN(CASE WHEN rates = '{}' THEN day END) AS marked, MIN(CASE WHEN rates != '{}' THEN day END) AS oldest
+           FROM fx_rates`,
+      )
+      .first<{ marked: string | null; oldest: string | null }>();
+    if (span?.marked && span.marked <= target) return 'covered';
     const latest = await getLatestFx(db);
     if (!latest) return 'failed'; // the daily refresh hasn't landed yet; try on the next tick
     const { results } = await db
@@ -289,19 +308,27 @@ export async function ensureFxHistory(db: D1Database, fetchImpl: typeof fetch, n
     // Only currencies Frankfurter knows: one unknown quote fails the whole request (422).
     const quotes = [...new Set((results ?? []).map((r) => normalizeCurrency(r.c)))].filter((c) => c !== FX_BASE && c in latest.rates).sort();
     if (quotes.length === 0) return 'nothing_to_fill';
-    const to = oldest?.d ? addDays(oldest.d, -1) : dayKey(now);
-    const range = `&from=${target}&to=${to}&quotes=${quotes.join(',')}`;
-    const blended = await fetchTables(fetchImpl, FX_URL + range, FX_RANGE_MAX_BYTES, now);
-    let ecb: FxTable[] = [];
+    const oldest = span?.oldest ?? today;
+    const range = (from: string, to: string) => `&from=${from}&to=${to}&quotes=${quotes.join(',')}`;
+    const blended =
+      oldest > target ? await fetchTables(fetchImpl, FX_URL + range(target, addDays(oldest, -1)), FX_RANGE_MAX_BYTES, now, true) : [];
+    // The ECB's over the whole span, so a retry also covers the blended days stored without it.
+    let ecb: FxTable[] | null = null;
     try {
-      ecb = await fetchTables(fetchImpl, FX_ECB_URL + range, FX_RANGE_MAX_BYTES, now);
+      ecb = await fetchTables(fetchImpl, FX_ECB_URL + range(target, today), FX_RANGE_MAX_BYTES, now, true);
     } catch (err) {
       logFailure('fx_ecb_history_failed', err);
     }
-    // The empty row at `target` records that history was fetched back to there, even when no
-    // source had a rate that early, so this runs once.
-    const marker = { base: FX_BASE, day: target, rates: {} };
-    await db.batch([...storeStatements(db, [marker, ...blended], now), ...storeStatements(db, ecb, now)]);
+    const writes = storeStatements(db, [...blended, ...(ecb ?? [])], null);
+    // Where the blended history starts: the target of the fill that stored it, so it dates that fill.
+    const reach = blended[0]?.day ?? oldest;
+    if (ecb === null && reach > addDays(target, -ECB_HISTORY_RETRY_DAYS)) {
+      if (writes.length > 0) await db.batch(writes);
+      return 'failed';
+    }
+    // The day before `target`, so no fetched rate can merge into it and erase it.
+    const marker = { base: FX_BASE, day: addDays(target, -1), rates: {} };
+    await db.batch([...writes, ...storeStatements(db, [marker], now)]);
     return 'filled';
   } catch (err) {
     logFailure('fx_history_failed', err);
@@ -315,13 +342,16 @@ export async function ensureFxHistory(db: D1Database, fetchImpl: typeof fetch, n
  * Converts amounts into one display currency (read models). `amount` and `map` use the latest
  * rates (MRR, anything "now"); `amountOn` uses the rate of a given day (revenue), falling back to
  * the latest when there's no history for a currency. Unconvertible currencies count as 0 and are
- * collected in `missing`; `used` records whether a latest-rate conversion happened (so the latest
- * table's date is only shown when relevant).
+ * collected in `missing`; `used` records whether `amount` or `map` converted anything (so the latest
+ * table's date is shown for MRR, and only when relevant).
  */
 export class FxConverter {
   readonly missing = new Set<string>();
   used = false;
-  /** Whether a day's-rate conversion (`amountOn`) between two currencies happened. */
+  /**
+   * Whether a day's-rate conversion (`amountOn`, `amountsOn`) between two currencies happened. A
+   * currency without history takes the latest rate there and still counts here, not in `used`.
+   */
   usedDaily = false;
   readonly to: string;
 
@@ -371,10 +401,28 @@ export class FxConverter {
   tryAmountOn(minor: number, currency: string, day: string): number | null {
     const from = normalizeCurrency(currency);
     if (from === this.to) return minor;
-    const rf = this.history?.rateOn(from, day) ?? this.fx?.rates[from] ?? (from === FX_BASE ? 1 : null);
-    const rt = this.history?.rateOn(this.to, day) ?? this.fx?.rates[this.to] ?? (this.to === FX_BASE ? 1 : null);
-    if (rf == null || rt == null) return null;
-    return convertMinor(minor, from, this.to, { base: FX_BASE, day, rates: { [from]: rf, [this.to]: rt } });
+    const t = this.tableOn(from, day);
+    return t ? convertMinor(minor, from, this.to, t) : null;
+  }
+
+  /**
+   * Parts of one amount received on `day` (its products, say), each at that day's rate, rounded so
+   * they add up to `amountOn` of their sum: totals and the parts shown under them agree.
+   */
+  amountsOn(parts: readonly number[], currency: string, day: string): number[] {
+    const from = normalizeCurrency(currency);
+    if (from === this.to || parts.every((p) => p === 0)) return [...parts];
+    const t = this.tableOn(from, day);
+    if (!t) {
+      this.missing.add(from);
+      return parts.map(() => 0);
+    }
+    this.usedDaily = true;
+    const total = convertMinor(parts.reduce((s, p) => s + p, 0), from, this.to, t)!;
+    // convertMinor's arithmetic, short of its rounding.
+    const scale = 10 ** currencyExponent(this.to);
+    const exact = parts.map((p) => (toMajor(p, from) / t.rates[from]!) * t.rates[this.to]! * scale);
+    return apportion(exact, total);
   }
 
   map(m: MoneyMap): number {
@@ -382,4 +430,30 @@ export class FxConverter {
     for (const [cur, amt] of Object.entries(m)) total += this.amount(amt, cur);
     return total;
   }
+
+  /** `from` and the display currency at their rates on `day`: the history's, else the latest. */
+  private tableOn(from: string, day: string): FxTable | null {
+    const rf = this.history?.rateOn(from, day) ?? this.fx?.rates[from] ?? (from === FX_BASE ? 1 : null);
+    const rt = this.history?.rateOn(this.to, day) ?? this.fx?.rates[this.to] ?? (this.to === FX_BASE ? 1 : null);
+    if (rf == null || rt == null) return null;
+    return { base: FX_BASE, day, rates: { [from]: rf, [this.to]: rt } };
+  }
+}
+
+/**
+ * Whole numbers within one of `exact` each, adding up to `total` (the rounded sum of `exact`):
+ * every part rounded down, then a unit each to the largest remainders, ties in order.
+ */
+function apportion(exact: readonly number[], total: number): number[] {
+  const out = exact.map((v) => Math.floor(v));
+  let rest = total - out.reduce((s, v) => s + v, 0);
+  const order = exact.map((_, i) => i).sort((a, b) => exact[b]! - out[b]! - (exact[a]! - out[a]!) || a - b);
+  for (const i of order) {
+    if (rest <= 0) break;
+    out[i]! += 1;
+    rest -= 1;
+  }
+  // Only float error could leave anything over; the total still has to hold.
+  if (rest !== 0 && order.length > 0) out[order[0]!]! += rest;
+  return out;
 }

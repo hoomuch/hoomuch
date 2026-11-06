@@ -2,8 +2,8 @@
  * Calendar read model: one month of the dashboard, day by day. Owner: Data Plane.
  *
  * One D1 round trip (a single `db.batch`), no provider calls (SPEC N-02). Same money rules as the
- * dashboard: amounts in the user's display currency at the newest FX table, past days included;
- * currencies without a rate are left out (the dashboard already says so next to the MRR).
+ * dashboard: amounts in the user's display currency, revenue at the rate of its own day and MRR at
+ * the latest; currencies without a rate are left out (the dashboard already says so next to the MRR).
  */
 
 import type { ConnectionRow } from '../db/queries';
@@ -196,12 +196,14 @@ export async function getCalendarMonth(env: Bindings, user: SessionUser, month: 
     const i = index.get(r.day);
     if (i === undefined || r.day > today) continue;
     const d = out[i]!;
+    // Net converts as one sum, as the dashboard's bar does; refunds are what gross leaves over it,
+    // so the cell's gross − refunds is its net.
     const gross = cv.amountOn(r.gross, r.currency, r.day);
-    const refunds = cv.amountOn(r.refunds, r.currency, r.day);
+    const net = cv.amountOn(r.gross - r.refunds, r.currency, r.day);
     d.gross += gross;
-    d.refunds += refunds;
-    d.net = (d.net ?? 0) + gross - refunds;
-    d.byConnection[r.connection_id] = (d.byConnection[r.connection_id] ?? 0) + gross - refunds;
+    d.refunds += gross - net;
+    d.net = (d.net ?? 0) + net;
+    d.byConnection[r.connection_id] = (d.byConnection[r.connection_id] ?? 0) + net;
   }
   for (const d of out) {
     for (const [id, v] of Object.entries(d.byConnection)) if (v === 0) delete d.byConnection[id];

@@ -58,7 +58,7 @@ export interface ProductSumRow {
   /** Null when the transactions had no product name. */
   product: string | null;
   currency: string;
-  /** UTC day the transactions occurred on (each day converts at its own rate). */
+  /** The user's local day the transactions occurred on (each day converts at its own rate). */
   day: string;
   net: number;
   charges: number;
@@ -337,24 +337,40 @@ export function productBreakdown(
   const unnamedBy = new Map<string, number>();
   const addUnnamed = (connectionId: string, v: number) => unnamedBy.set(connectionId, (unnamedBy.get(connectionId) ?? 0) + v);
 
+  // The KPI converts each connection's day and currency as one sum; its products split that
+  // converted sum (FxConverter.amountsOn) rather than each rounding on its own.
+  const groups = new Map<string, ProductSumRow[]>();
   for (const r of rows) {
     const conn = connById.get(r.connection_id);
     // Only providers whose daily revenue is built from these rows; anything else would count twice.
     if (!conn || getProviderMeta(conn.provider).revenueHistory !== 'transactions') continue;
-    const net = cv.amountOn(r.net, r.currency, r.day);
-    if (r.product === null) {
-      addUnnamed(conn.id, net);
-      continue;
-    }
-    const key = `${conn.id}\u0000${r.product}`;
-    let p = products.get(key);
-    if (!p) {
-      const { dotClass } = getProviderMeta(conn.provider);
-      p = { name: r.product, connectionId: conn.id, connectionName: conn.name, dotClass, revenue: 0, charges: 0, sharePct: 0 };
-      products.set(key, p);
-    }
-    p.revenue += net;
-    p.charges += r.charges;
+    const key = `${conn.id}\u0000${r.day}\u0000${r.currency}`;
+    const group = groups.get(key);
+    if (group) group.push(r);
+    else groups.set(key, [r]);
+  }
+  for (const group of groups.values()) {
+    // By name (no name first), so a leftover minor unit lands the same way on every render.
+    group.sort((a, b) => (a.product ?? '').localeCompare(b.product ?? ''));
+    const { connection_id, currency, day } = group[0]!;
+    const conn = connById.get(connection_id)!;
+    const nets = cv.amountsOn(group.map((r) => r.net), currency, day);
+    group.forEach((r, i) => {
+      const net = nets[i]!;
+      if (r.product === null) {
+        addUnnamed(conn.id, net);
+        return;
+      }
+      const key = `${conn.id}\u0000${r.product}`;
+      let p = products.get(key);
+      if (!p) {
+        const { dotClass } = getProviderMeta(conn.provider);
+        p = { name: r.product, connectionId: conn.id, connectionName: conn.name, dotClass, revenue: 0, charges: 0, sharePct: 0 };
+        products.set(key, p);
+      }
+      p.revenue += net;
+      p.charges += r.charges;
+    });
   }
   // Providers that report daily totals: their whole window has no product name.
   for (const c of conns) {

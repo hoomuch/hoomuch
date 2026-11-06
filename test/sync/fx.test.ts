@@ -1,6 +1,7 @@
 /** FX on frankfurter.dev v2 (src/sync/fx.ts): storage, ECB precedence, history and day rates. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  ECB_HISTORY_RETRY_DAYS,
   FX_HISTORY_DAYS,
   FxConverter,
   FxHistory,
@@ -8,11 +9,14 @@ import {
   getLatestFx,
   latestFx,
   refreshFx,
+  refreshFxIfStale,
 } from '../../src/sync/fx';
-import { addDays } from '../../src/lib/time';
+import { DAY, HOUR, MINUTE, addDays } from '../../src/lib/time';
+import { runScheduledSync } from '../../src/sync/engine';
 import { createTestD1, seedConnection, seedUser } from '../fixtures/d1';
 import { fakeFetch, route } from '../fixtures/harness';
-import { fxV2 } from '../fixtures/fx';
+import { FX_BLENDED_AHEAD, fxV2 } from '../fixtures/fx';
+import { setup, teardown } from './helpers';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 const TODAY = '2026-11-05';
@@ -48,6 +52,27 @@ describe('refreshFx', () => {
     ]);
     await refreshFx(t.db, fetch, NOW);
     expect(rows(t)).toEqual([{ day: '2026-11-04', rates: { GBP: 0.8, EUR: 0.91 } }]);
+  });
+
+  it('when the blended rates are a day ahead of the ECB’s, the newest day wins; on one day the ECB’s does', async () => {
+    const t = createTestD1();
+    const { at, blended, ecb } = FX_BLENDED_AHEAD;
+    const ahead = fakeFetch([
+      route('/v2/rates', { json: fxV2(ecb) }, { query: { providers: 'ecb' } }),
+      route('/v2/rates', { json: fxV2(blended) }),
+    ]);
+    expect(await refreshFx(t.db, ahead.fetch, at)).toEqual({ base: 'USD', day: '2026-11-06', rates: { EUR: 0.89 } });
+    expect(rows(t)).toEqual([
+      { day: '2026-11-05', rates: { EUR: 0.8909 } },
+      { day: '2026-11-06', rates: { EUR: 0.89 } },
+    ]);
+    // That afternoon the ECB publishes Nov 6 too, and its rate replaces the blended one there.
+    const caughtUp = fakeFetch([
+      route('/v2/rates', { json: fxV2({ date: '2026-11-06', rates: { EUR: 0.8912 } }) }, { query: { providers: 'ecb' } }),
+      route('/v2/rates', { json: fxV2(blended) }),
+    ]);
+    await refreshFx(t.db, caughtUp.fetch, at + 6 * HOUR);
+    expect(await getLatestFx(t.db)).toEqual({ base: 'USD', day: '2026-11-06', rates: { EUR: 0.8912 } });
   });
 
   it('the latest table takes each currency’s newest rate within the last 10 days', async () => {
@@ -101,9 +126,10 @@ describe('ensureFxHistory', () => {
     seedConnection(t, { id: 'c', userId: 'u1', provider: 'stripe' });
     t.exec("INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES ('c', '2026-09-01', 'EUR', 100, 0, 1, 'transactions')");
     t.exec("INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES ('c', '2026-09-01', 'ZZZ', 100, 0, 1, 'transactions')");
-    t.exec(`INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES ('2026-11-04', 'USD', '{"EUR":0.9,"GBP":0.8,"TRY":50}', 0)`);
+    t.exec(`INSERT INTO fx_rates (day, base, rates, fetched_at) VALUES ('2026-11-04', 'USD', '{"EUR":0.9,"GBP":0.8,"TRY":50}', ?)`, FETCHED);
     return t;
   }
+  const FETCHED = NOW - 2 * DAY; // the last daily refresh: stale by now
 
   it('fetches the missing past once, for the currencies in use that Frankfurter knows, and marks how far back', async () => {
     const t = seed();
@@ -114,19 +140,105 @@ describe('ensureFxHistory', () => {
     ]);
 
     expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('filled');
-    const range = `&from=${target}&to=2026-11-03&quotes=EUR,GBP`; // ZZZ isn't a currency Frankfurter has; TRY isn't in use
+    const quotes = '&quotes=EUR,GBP'; // ZZZ isn't a currency Frankfurter has; TRY isn't in use
     expect(calls.map((c) => c.url)).toEqual([
-      `https://api.frankfurter.dev/v2/rates?base=USD${range}`,
-      `https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb${range}`,
+      `https://api.frankfurter.dev/v2/rates?base=USD&from=${target}&to=2026-11-03${quotes}`, // up to the oldest stored day
+      `https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb&from=${target}&to=${TODAY}${quotes}`,
     ]);
     expect(rows(t)).toEqual([
-      { day: target, rates: {} },
+      { day: addDays(target, -1), rates: {} },
       { day: '2026-09-01', rates: { EUR: 0.85, GBP: 0.74 } },
       { day: '2026-11-04', rates: { EUR: 0.9, GBP: 0.8, TRY: 50 } },
+    ]);
+    // The fill doesn't pass for a refresh: its days get 0, a refreshed day keeps its time. The
+    // marker records when the fill ran.
+    expect(t.rows('SELECT day, fetched_at FROM fx_rates ORDER BY day')).toEqual([
+      { day: addDays(target, -1), fetched_at: NOW },
+      { day: '2026-09-01', fetched_at: 0 },
+      { day: '2026-11-04', fetched_at: FETCHED },
     ]);
 
     expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('covered');
     expect(calls).toHaveLength(2);
+  });
+
+  it('keeps the blended rates when the ECB’s history fails, and retries the ECB’s alone on the next tick', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const t = seed();
+    const target = addDays(TODAY, -FX_HISTORY_DAYS);
+    const { fetch, calls } = fakeFetch([
+      route('/v2/rates', [{ status: 503, json: {} }, { json: fxV2({ date: '2026-09-01', rates: { EUR: 0.85 } }) }], { query: { providers: 'ecb' } }),
+      // The blended rates cover every day, the first one included.
+      route('/v2/rates', { json: fxV2({ date: target, rates: { EUR: 0.8, GBP: 0.7 } }, { date: '2026-09-01', rates: { EUR: 0.86, GBP: 0.74 } }) }),
+    ]);
+
+    expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('failed');
+    expect(rows(t)).toEqual([
+      { day: target, rates: { EUR: 0.8, GBP: 0.7 } },
+      { day: '2026-09-01', rates: { EUR: 0.86, GBP: 0.74 } },
+      { day: '2026-11-04', rates: { EUR: 0.9, GBP: 0.8, TRY: 50 } },
+    ]); // no marker: the ECB's part is still to do
+    expect(calls).toHaveLength(2);
+
+    // The next tick asks the ECB alone, then marks history done (the day before its first day).
+    expect(await ensureFxHistory(t.db, fetch, NOW + 30 * MINUTE)).toBe('filled');
+    expect(calls.slice(2).map((c) => c.url)).toEqual([
+      `https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb&from=${target}&to=${TODAY}&quotes=EUR,GBP`,
+    ]);
+    expect(rows(t)).toEqual([
+      { day: addDays(target, -1), rates: {} },
+      { day: target, rates: { EUR: 0.8, GBP: 0.7 } },
+      { day: '2026-09-01', rates: { EUR: 0.85, GBP: 0.74 } },
+      { day: '2026-11-04', rates: { EUR: 0.9, GBP: 0.8, TRY: 50 } },
+    ]);
+    expect(await ensureFxHistory(t.db, fetch, NOW + HOUR)).toBe('covered');
+    expect(calls).toHaveLength(3);
+  });
+
+  it(`gives up on the ECB’s history ${ECB_HISTORY_RETRY_DAYS} days after the blended rates landed`, async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const t = seed();
+    const target = addDays(TODAY, -FX_HISTORY_DAYS);
+    const { fetch, calls } = fakeFetch([
+      route('/v2/rates', { status: 503, json: {} }, { query: { providers: 'ecb' } }),
+      route('/v2/rates', { json: fxV2({ date: target, rates: { EUR: 0.8, GBP: 0.7 } }) }),
+    ]);
+    expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('failed');
+    expect(await ensureFxHistory(t.db, fetch, NOW + (ECB_HISTORY_RETRY_DAYS - 1) * DAY)).toBe('failed');
+    expect(calls).toHaveLength(3); // the blended once, then one ECB request a tick
+    expect(await ensureFxHistory(t.db, fetch, NOW + ECB_HISTORY_RETRY_DAYS * DAY)).toBe('filled');
+    expect(calls).toHaveLength(4);
+    expect(await ensureFxHistory(t.db, fetch, NOW + ECB_HISTORY_RETRY_DAYS * DAY + HOUR)).toBe('covered');
+    expect(calls).toHaveLength(4);
+  });
+
+  it('takes an empty ECB answer (none of the currencies is the ECB’s) as done', async () => {
+    const t = seed();
+    const { fetch } = fakeFetch([
+      route('/v2/rates', { json: [] }, { query: { providers: 'ecb' } }),
+      route('/v2/rates', { json: fxV2({ date: '2026-09-01', rates: { EUR: 0.86, GBP: 0.74 } }) }),
+    ]);
+    expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('filled');
+    expect(await ensureFxHistory(t.db, fetch, NOW + HOUR)).toBe('covered');
+  });
+
+  it('never stands in for the daily refresh, even on a tick where that refresh failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const t = seed(); // the 2026-11-04 rates were fetched long ago: stale
+    const { fetch, calls } = fakeFetch([
+      route('/v2/rates', { json: fxV2({ date: '2026-09-01', rates: { EUR: 0.85 } }) }, { query: { providers: 'ecb' } }),
+      route('/v2/rates', [{ status: 503, json: {} }, { json: fxV2({ date: '2026-11-05', rates: { EUR: 0.91, GBP: 0.81 } }) }], { absent: ['from'] }),
+      route('/v2/rates', { json: fxV2({ date: '2026-09-01', rates: { EUR: 0.86, GBP: 0.74 } }) }),
+    ]);
+    expect(await refreshFxIfStale(t.db, fetch, NOW)).toBe('failed');
+    expect(await ensureFxHistory(t.db, fetch, NOW)).toBe('filled');
+    // Half an hour later the refresh is still due: neither the history's rows nor its marker count as one.
+    expect(await refreshFxIfStale(t.db, fetch, NOW + 30 * MINUTE)).toBe('refreshed');
+    expect(calls.filter((c) => !c.url.includes('from=')).map((c) => c.url)).toEqual([
+      'https://api.frankfurter.dev/v2/rates?base=USD',
+      'https://api.frankfurter.dev/v2/rates?base=USD',
+      'https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb',
+    ]);
   });
 
   it('waits when there is nothing to fill or no rates yet, and a failure leaves no marker', async () => {
@@ -142,5 +254,26 @@ describe('ensureFxHistory', () => {
     const t = seed();
     expect(await ensureFxHistory(t.db, fakeFetch([route('/v2/rates', { status: 500, json: {} })]).fetch, NOW)).toBe('failed');
     expect(rows(t).map((r) => r.day)).toEqual(['2026-11-04']);
+  });
+});
+
+describe('the cron and the rate history', () => {
+  afterEach(() => teardown());
+
+  it('fills it once on a fresh install, right after the first refresh, and leaves it on later ticks', async () => {
+    const c = setup(); // frankfurter answers every /v2/rates call with FX_BODY (dated 2026-11-04)
+    seedConnection(c.t, { id: 's', userId: c.userId, provider: 'stripe', status: 'ok', lastSyncedAt: NOW });
+    c.t.exec("INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES ('s', '2026-11-01', 'EUR', 100, 0, 1, 'transactions')");
+    const target = addDays(TODAY, -FX_HISTORY_DAYS);
+
+    await runScheduledSync(c.env, NOW);
+    expect(c.fxCalls.map((x) => x.url)).toEqual([
+      'https://api.frankfurter.dev/v2/rates?base=USD',
+      'https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb',
+      `https://api.frankfurter.dev/v2/rates?base=USD&from=${target}&to=2026-11-03&quotes=EUR`,
+      `https://api.frankfurter.dev/v2/rates?base=USD&providers=ecb&from=${target}&to=${TODAY}&quotes=EUR`,
+    ]);
+    await runScheduledSync(c.env, NOW + 30 * MINUTE);
+    expect(c.fxCalls).toHaveLength(4);
   });
 });

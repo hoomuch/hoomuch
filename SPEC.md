@@ -202,7 +202,7 @@ Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kayna�
 | `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; gün, sahibin yerel günü (v1.1; önceki satırlar UTC); MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0005): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL; `warnings` (0006): o senkronizasyonun sayamadıkları, en fazla 5 cümle × 200 karakter |
 | `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok) |
 | `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir, **UTC** günü. İşlem bazlı sağlayıcılarda `transactions`'tan türetilir (okuma modelleri bunları yerel güne göre `transactions`'tan gruplar, §6 "Günler"); günlük toplam veren sağlayıcılarda (`source='provider'`) doğrudan okunur |
-| `fx_rates` | `day` | USD bazlı kurlar (JSON), her kur kendi tarihinde; `json_patch` ile birleşir. Boş satır (`{}`) yalnızca geçmişin nereye kadar çekildiğini işaretler |
+| `fx_rates` | `day` | USD bazlı kurlar (JSON), her kur kendi tarihinde; `json_patch` ile birleşir (aynı güne yeni gelen kur eskisinin yerine geçer). Boş satır (`{}`) yalnızca geçmişin çekildiğini işaretler. `fetched_at` günlük çekimin satırı son yazdığı an (yalnızca geçmiş doldurmanın yazdığı günlerde 0); geçmiş doldurma günlük çekim yerine sayılmaz |
 | `sync_runs` | `id` | senkronizasyon geçmişi |
 
 **MoneyMap:** Bir sağlayıcı birden fazla para biriminde satış yapabilir. MRR ve dönem geliri
@@ -248,9 +248,13 @@ Sonuç en yakın tamsayıya yuvarlanır.
 **Döviz (v1.1):** [frankfurter.dev v2](https://frankfurter.dev), USD baz: merkez bankaları ve resmî kaynaklardan
 harmanlanmış 181 para birimi, ECB'nin yayımladığı yerde ECB'nin kendi kuru (her çekimde önce harmanlanmış, üstüne ECB
 yazılır; `providers=ecb`). Her kur kendi yayın tarihine yazılır. Günde bir çekilir; kurulumdan ya da yükseltmeden sonra cron
-bir kez yaklaşık 200 günlük geçmişi (kullanımdaki para birimleri için) doldurur. **Gelir** (günlük çubuklar, gelir KPI'ı ve
-önceki dönemi, ürün geliri, takvim, işlem listesi) **kendi gününün kuruyla** (o gün ya da öncesindeki en yeni kur)
-çevrilir; **MRR** ve trendi **en güncel kurla** (trend iş değişimini göstersin, kur oynaklığını değil). Geçmişi
+bir kez yaklaşık 200 günlük geçmişi (kullanımdaki para birimleri için) doldurur; ECB'nin geçmişi alınamazsa harmanlanmış
+kurlar saklanır, ECB'ninki sonraki cron'larda (her birinde tek istekle) en çok 3 gün yeniden denenir. **Gelir** (günlük
+çubuklar, gelir KPI'ı ve önceki dönemi, ürün geliri, takvim, işlem listesi) **kendi gününün kuruyla** (o gün ya da
+öncesindeki en yeni kur) çevrilir; **MRR** ve trendi **en güncel kurla** (trend iş değişimini göstersin, kur oynaklığını
+değil). Bir günün geliri bağlantı ve para birimi başına tek tutar olarak çevrilir, parçaları bu toplama tamamlanır: ürün
+satırları yuvarlama farkını en büyük kalanlara dağıtarak gelir KPI'ına eşit olur; takvimde net dashboard çubuğuyla
+aynıdır, brüt tek başına çevrilir, iade ikisinin farkıdır. Geçmişi
 başlamadan önceki günler o para biriminin en eski kurunu, geçmişi hiç olmayan para birimi güncel kuru kullanır. Kuru
 olmayan para birimi toplamdan hariç tutulur ve dashboard'da uyarı gösterilir.
 
@@ -837,7 +841,7 @@ Kurallar:
 | RevenueCat `charts:read` izni verilmemiş olabilir | RC için günlük gelir grafiği yok | Snapshot geliri + uyarı ile zarif düşüş |
 | Bir senkronizasyon tek çağrıya sığmaz | Backfill birkaç senkronizasyona yayılır | v1.1: her senkronizasyon kendi kuyruk çağrısında (60 sn son tarih + cursor) |
 | Free plan Queues kotası (günde 10.000 işlem) | Çok bağlantılı ya da yoğun webhook'lu kurulumda kota dolar | Webhook senkronizasyonları bağlantı başına 5 dk arayla; README Free plan sınırını söyler |
-| frankfurter.dev harmanlanmış kurları sonradan küçük oynayabilir | Geçmiş gün geliri birkaç kuruş farklı olabilir | Kur bir kez saklanır, yeniden yazılmaz; ECB yayımladığı yerde ECB kuru |
+| frankfurter.dev harmanlanmış kurları sonradan küçük oynayabilir | Geçmiş gün geliri birkaç kuruş farklı olabilir | Kur kendi gününe yazılır; günlük çekim her para biriminin yalnızca en yeni kurunu getirdiği için bir günün kuru, o para biriminin en yeni kuru olduğu sürece sonraki çekimlerle değişebilir (`json_patch`, yeni gelen kazanır), sonra sabit kalır; geçmiş bir kez çekilir; ECB yayımladığı yerde ECB kuru |
 | Günlük toplam veren sağlayıcılar kullanıcının diliminde gruplanamaz | O sağlayıcıların günü kullanıcının gününden kayabilir | `ProviderMeta.dayZone` ile dashboard'da açıkça belirtilir |
 | Free plan CPU limiti | Giriş/senk. başarısız olabilir | Paid plan önerisi (README) |
 | Stripe indirim/tiered fiyat kenar durumları | MRR sapması | Metered hariç, tiered = 0 + log; testlerle kapsanır |

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getCalendarMonth } from '../../src/data/calendar';
 import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
+import type { DashboardData } from '../../src/data/types';
 import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
 import { cleanSnapshot } from '../../src/sync/aggregate';
 import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/stripe';
@@ -113,7 +115,7 @@ describe('getDashboardData', () => {
       ['stripe1', 250_00, 29.4],
     ]);
     expect(d.breakdown[0]).toMatchObject({ provider: 'lemonsqueezy', color: '#AD7D00', status: 'ok', activeTrials: null });
-    expect(d.fx).toMatchObject({ asOf: '2026-11-04', missing: [] });
+    expect(d.fx).toEqual({ asOf: '2026-11-04', daily: false, missing: [] });
     // MRR series: only days with snapshots, other connections carried forward.
     expect(d.mrrSeries).toEqual([
       { day: '2026-10-10', total: 110_00 + 500_00 },
@@ -315,6 +317,23 @@ describe('getDashboardData products', () => {
     expect(total).toBe(d.kpis.revenue.value);
     expect(p.rows[0]!.sharePct).toBe(23.8); // 35 of 147
     expect(p.unnamed.sharePct).toBe(57.1);
+  });
+
+  it('rounds products so they add up to the revenue KPI exactly', async () => {
+    fx({ EUR: 0.8 });
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Pagekit' });
+    tx('ls', 'a', at('2026-11-04'), 10_01, 'EUR', 'Pro');
+    tx('ls', 'b', at('2026-11-04'), 10_01, 'EUR', 'Team');
+    await aggregate('ls');
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    // The KPI converts the day once: 20.02 € at 0.8 = $25.025 → 2503. Each 10.01 € alone is
+    // $12.5125 → 1251, so the leftover cent goes to one of them (ties: by name).
+    expect(d.kpis.revenue.value).toBe(25_03);
+    expect(d.products.rows.map((r) => [r.name, r.revenue])).toEqual([
+      ['Pro', 12_52],
+      ['Team', 12_51],
+    ]);
+    expect(d.products.unnamed.revenue).toBe(0);
   });
 
   it('gives a product that lost money no share and lists it last', async () => {
@@ -598,5 +617,109 @@ describe('revenue at each day’s exchange rate (SPEC §6)', () => {
       ['b', 200_00],
       ['a', 200_00],
     ]);
+  });
+});
+
+describe('which day’s rate each figure takes (SPEC §6)', () => {
+  /** Stripe sales, and the daily_revenue a sync derives from them (the rate history reads its currencies). */
+  async function sales(...items: Array<[id: string, iso: string, amount: number, currency: string]>) {
+    for (const [id, iso, amount, currency] of items) tx('st', id, Date.parse(iso), amount, currency);
+    await t.db.batch(recomputeDailyRevenue(t.db, 'st', { from: '2026-04-01', to: TODAY }));
+  }
+  const bars = (d: DashboardData) => Object.fromEntries(d.revenueSeries.map((r) => [r.day, r.total]));
+  const shown = async (u: SessionUser, day: string | null = null) =>
+    Object.fromEntries((await listTransactions(testEnv(t.db), u, { provider: null, page: 1, day })).items.map((i) => [i.externalId, i.displayAmount]));
+
+  beforeEach(() => seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' }));
+
+  it('converts into a non-USD display currency at its own rate of the day too', async () => {
+    fx({ EUR: 0.5, GBP: 0.4 }, '2026-11-02');
+    fx({ EUR: 0.8, GBP: 0.6 }, '2026-11-04');
+    await sales(['eur', '2026-11-02T12:00:00Z', 100_00, 'EUR'], ['usd', '2026-11-02T13:00:00Z', 100_00, 'USD']);
+    const gbp: SessionUser = { ...user, baseCurrency: 'GBP' };
+    // 100 € = $200 on Nov 2 = £80 at its £0.4 per $; $100 = £40. (At the latest £0.6: £120 and £60.)
+    expect(bars(await getDashboardData(testEnv(t.db), gbp, 7))['2026-11-02']).toBe(80_00 + 40_00);
+    expect(await shown(gbp)).toEqual({ eur: 80_00, usd: 40_00 });
+  });
+
+  it('converts the previous period at its own days’ rates, as far back as it reaches', async () => {
+    fx({ EUR: 0.4 }, '2026-09-10');
+    fx({ EUR: 0.5 }, '2026-10-26');
+    fx({ EUR: 0.8 }, '2026-11-04');
+    await sales(['old', '2026-09-15T12:00:00Z', 100_00, 'EUR'], ['prev', '2026-10-27T12:00:00Z', 100_00, 'EUR'], ['now', '2026-11-04T12:00:00Z', 100_00, 'EUR']);
+    // 7 days (Oct 30–Nov 5 against Oct 23–29): 100 € at 0.8, against 100 € at Oct 26's 0.5.
+    expect((await getDashboardData(testEnv(t.db), user, 7)).kpis.revenue).toEqual({ value: 125_00, previous: 200_00, deltaPct: -37.5 });
+    // 30 days (Oct 7–Nov 5 against Sep 7–Oct 6): Sep 15 takes Sep 10's 0.4.
+    expect((await getDashboardData(testEnv(t.db), user, 30)).kpis.revenue).toMatchObject({ value: 200_00 + 125_00, previous: 250_00 });
+  });
+
+  it('converts MRR, its trend and the calendar’s MRR at the latest rate, never the day’s', async () => {
+    fx({ EUR: 0.5 }, '2026-11-02');
+    fx({ EUR: 0.8 }, '2026-11-04');
+    seedConnection(t, { id: 'ls', userId: 'u1', provider: 'lemonsqueezy', name: 'Shop' });
+    await sales(['one', '2026-11-03T12:00:00Z', 1_00, 'EUR']); // so the rate history holds EUR
+    snap('st', '2026-11-02', { EUR: 80_00 }, 1);
+    snap('st', TODAY, { EUR: 80_00 }, 1);
+    snap('ls', '2026-10-28', { EUR: 40_00 }, 1); // before the window, carried into it
+    // 80 € and 40 € at the latest 0.8 are $100 and $50 on every day (at Nov 2's 0.5: $160 and $80).
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.mrrSeries).toEqual([
+      { day: '2026-11-02', total: 150_00 },
+      { day: TODAY, total: 150_00 },
+    ]);
+    expect(d.kpis.mrr).toEqual({ value: 150_00, previous: 150_00, deltaPct: 0 });
+    const cal = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    expect(cal.days.find((x) => x.day === '2026-11-02')!.mrr).toBe(150_00);
+  });
+
+  it('looks back before a range’s first day for its rate: a Sunday takes Friday’s', async () => {
+    fx({ EUR: 0.5 }, '2026-10-30'); // Friday
+    fx({ EUR: 0.8 }, '2026-11-02'); // Monday
+    await sales(['sun', '2026-11-01T12:00:00Z', 100_00, 'EUR']);
+    expect(bars(await getDashboardData(testEnv(t.db), user, 7))['2026-11-01']).toBe(200_00);
+    // The calendar's November and that day's transactions start on the Sunday itself.
+    const cal = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    expect(cal.days[0]).toMatchObject({ day: '2026-11-01', net: 200_00 });
+    expect(await shown(user, '2026-11-01')).toEqual({ sun: 200_00 });
+  });
+
+  it('takes a transaction’s rate on its day in the user’s zone, like its bar', async () => {
+    fx({ EUR: 0.5 }, '2026-11-02');
+    fx({ EUR: 0.8 }, '2026-11-03');
+    await sales(['eve', '2026-11-03T03:00:00Z', 100_00, 'EUR']); // 7 pm on Nov 2 in Los Angeles
+    const la: SessionUser = { ...user, timeZone: 'America/Los_Angeles' };
+    expect(bars(await getDashboardData(testEnv(t.db), la, 7))['2026-11-02']).toBe(200_00);
+    expect(await shown(la)).toEqual({ eve: 200_00 }); // not Nov 3's (UTC) $125
+  });
+
+  it('reads a three-decimal currency right at the day rate (KWD)', async () => {
+    fx({ KWD: 0.3 }, '2026-11-02');
+    fx({ KWD: 0.25 }, '2026-11-04');
+    await sales(['kwd', '2026-11-02T12:00:00Z', 1_500, 'KWD']); // 1.500 KWD
+    // 1.500 KWD at 0.3 per $ = $5.00 (at the latest 0.25: $6.00; read as 15.00 KWD: $50.00).
+    expect(bars(await getDashboardData(testEnv(t.db), user, 7))['2026-11-02']).toBe(5_00);
+    expect(await shown(user)).toEqual({ kwd: 5_00 });
+  });
+
+  it('reads a zero-decimal display currency right at the day rate (JPY)', async () => {
+    fx({ EUR: 0.5, JPY: 150 }, '2026-11-02');
+    fx({ EUR: 0.8, JPY: 100 }, '2026-11-04');
+    await sales(['usd', '2026-11-02T12:00:00Z', 10_00, 'USD'], ['eur', '2026-11-02T13:00:00Z', 10_00, 'EUR']);
+    const jpy: SessionUser = { ...user, baseCurrency: 'JPY' };
+    // At Nov 2's ¥150 per $: $10 = ¥1,500, 10 € = $20 = ¥3,000. Yen have no minor unit.
+    expect(bars(await getDashboardData(testEnv(t.db), jpy, 7))['2026-11-02']).toBe(4_500);
+    expect(await shown(jpy)).toEqual({ usd: 1_500, eur: 3_000 });
+  });
+
+  it('a currency without rates in the range takes the latest as its day rate; the latest table’s date stays with MRR', async () => {
+    fx({ EUR: 0.5 }, '2026-10-01'); // the only rates, from before the range's history
+    await sales(['eur', '2026-11-02T12:00:00Z', 100_00, 'EUR']);
+    let d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(bars(d)['2026-11-02']).toBe(200_00); // Oct 1's 0.5, the newest rate on or before Nov 2
+    // The footnote says "revenue at each day's exchange rate" and names no table: none was used for MRR.
+    expect(d.fx).toEqual({ asOf: null, daily: true, missing: [] });
+    snap('st', TODAY, { EUR: 10_00 }, 1);
+    d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.fx).toEqual({ asOf: '2026-10-01', daily: true, missing: [] });
   });
 });
