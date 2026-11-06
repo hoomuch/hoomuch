@@ -22,7 +22,7 @@ import { Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
 import { PagePayloadScript } from './page-root';
 
-export type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
+type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
 
 /** What every page needs from the request to draw the chrome. */
 export interface PageChrome {
@@ -69,17 +69,17 @@ export interface LayoutProps extends PageChrome {
   children?: ReactNode;
 }
 
-export const APP_NAME = 'hoomuch';
+const APP_NAME = 'hoomuch';
 /**
  * AGPL-3.0 §13: anyone using a modified, hosted copy must be offered its source.
  * If you run a modified version, point this at your fork.
  */
-export const SOURCE_URL = 'https://github.com/hoomuch/hoomuch';
+const SOURCE_URL = 'https://github.com/hoomuch/hoomuch';
 /** Where a self-hoster starts: the README's deploy section. */
 const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
 const ISSUES_URL = `${SOURCE_URL}/issues`;
 const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
-export const DEFAULT_DESCRIPTION =
+const DEFAULT_DESCRIPTION =
   'MRR, ARR, subscriptions and revenue from Stripe, Lemon Squeezy and RevenueCat, on one dashboard.';
 
 /** The daily places. Settings sits apart on the right; Log out lives inside Settings. */

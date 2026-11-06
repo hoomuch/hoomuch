@@ -14,7 +14,7 @@
 import { ProviderError } from './types';
 
 /** Expanded size at which a report is given up on (decompression-bomb guard). */
-export const MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
+const MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
 
 export type Row = readonly string[];
 
@@ -50,7 +50,7 @@ function limitBytes(provider: string, max: number): TransformStream<Uint8Array, 
 }
 
 /** True for a gzip member (RFC 1952 magic bytes). */
-export function isGzip(bytes: Uint8Array): boolean {
+function isGzip(bytes: Uint8Array): boolean {
   return bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
 }
 
@@ -308,7 +308,7 @@ export async function readRows(
 }
 
 /** Header name for matching: lowercase letters and digits only ("Developer Proceeds (per unit)" → "developerproceedsperunit"). */
-export function headerKey(name: string): string {
+function headerKey(name: string): string {
   return name.replace(/^﻿/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 

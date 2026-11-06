@@ -59,9 +59,9 @@ import {
 /** Where a report row with a date but no timestamp is placed within its UTC day. */
 const DATE_ONLY_NOON_MS = 12 * 60 * 60 * 1000;
 const PROVIDER = 'Google Play';
-export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
-export const GCS_API_BASE = 'https://storage.googleapis.com/storage/v1';
-export const PUBLISHER_API_BASE = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GCS_API_BASE = 'https://storage.googleapis.com/storage/v1';
+const PUBLISHER_API_BASE = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
 export const SCOPE_STORAGE = 'https://www.googleapis.com/auth/devstorage.read_only';
 export const SCOPE_PUBLISHER = 'https://www.googleapis.com/auth/androidpublisher';
 /** Google accepts assertions that expire at most one hour after `iat`. */
@@ -181,7 +181,7 @@ function mapTokenError(status: number, body: unknown): ProviderError | null {
 }
 
 /** A short-lived access token for `scopes`. One request; never logged, never stored. */
-export async function accessToken(ctx: ProviderContext, inp: GpInput, scopes: readonly string[]): Promise<string> {
+async function accessToken(ctx: ProviderContext, inp: GpInput, scopes: readonly string[]): Promise<string> {
   const key = await importSigningKey(inp.der, 'RS256');
   if (!key) {
     throw new ProviderError('invalid_input', `The private key in that file isn’t a Google service account key. ${PASTE_JSON}`, {
@@ -319,7 +319,7 @@ function bytesStream(bytes: Uint8Array): ReadableStream<Uint8Array> {
 // ---------- months ----------
 
 /** 'YYYYMM' of an epoch-ms instant (UTC). */
-export function monthOf(ms: number): string {
+function monthOf(ms: number): string {
   return dayKey(ms).slice(0, 7).replace('-', '');
 }
 
@@ -368,7 +368,7 @@ function eventType(status: string): 'charge' | 'refund' | null {
  * Reads one month's estimated sales report (a zip holding one CSV) into contract events, keeping those at or
  * after `since`. Lines that aren't a charge or a refund (e.g. declined or cancelled orders) are skipped.
  */
-export async function parseSalesZip(ctx: ProviderContext, zip: Uint8Array, since: number): Promise<RevenueEvent[]> {
+async function parseSalesZip(ctx: ProviderContext, zip: Uint8Array, since: number): Promise<RevenueEvent[]> {
   const entries = zipEntries(zip);
   const entry = entries?.find((e) => /\.csv$/i.test(e.name)) ?? entries?.[0];
   if (!entry) throw unreadableError(ctx, 'sales report', { reason: 'zip' });
@@ -444,7 +444,7 @@ function byTimeThenId(a: RevenueEvent, b: RevenueEvent): number {
 
 // ---------- subscription statistics → snapshot ----------
 
-export interface StatRow {
+interface StatRow {
   packageName: string;
   productId: string;
   country: string;
@@ -458,7 +458,7 @@ interface StatFile {
 }
 
 /** One statistics CSV: the rows of its newest day. Null when it has no rows. */
-export async function parseStatsCsv(ctx: ProviderContext, bytes: Uint8Array): Promise<StatFile | null> {
+async function parseStatsCsv(ctx: ProviderContext, bytes: Uint8Array): Promise<StatFile | null> {
   let day = '';
   let rows: StatRow[] = [];
   let c: Record<string, number> = {};
@@ -589,7 +589,7 @@ function listingTitle(listings: unknown): string | null {
 }
 
 /** Parses one page of monetization.subscriptions.list into the catalog. */
-export function addCatalogPage(catalog: Map<string, ProductInfo>, body: unknown): void {
+function addCatalogPage(catalog: Map<string, ProductInfo>, body: unknown): void {
   if (!isRecord(body) || !Array.isArray(body['subscriptions'])) return;
   for (const sub of body['subscriptions']) {
     if (!isRecord(sub) || typeof sub['productId'] !== 'string') continue;
@@ -666,7 +666,7 @@ async function readCatalog(
   return catalog;
 }
 
-export interface StatsTotals {
+interface StatsTotals {
   mrr: MoneyMap;
   activeSubscriptions: number;
   byProduct: ProductMrr[];
@@ -674,7 +674,7 @@ export interface StatsTotals {
 }
 
 /** Prices statistics rows with the catalog. Exported for tests. */
-export function priceStats(rows: readonly StatRow[], catalogs: ReadonlyMap<string, ReadonlyMap<string, ProductInfo> | null>): StatsTotals {
+function priceStats(rows: readonly StatRow[], catalogs: ReadonlyMap<string, ReadonlyMap<string, ProductInfo> | null>): StatsTotals {
   const totals: StatsTotals = { mrr: {}, activeSubscriptions: 0, byProduct: [], unpriced: 0 };
   const products = new Map<string, ProductMrr>();
   for (const r of rows) {

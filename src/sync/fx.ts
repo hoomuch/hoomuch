@@ -20,10 +20,10 @@ import { convertMinor, currencyExponent, normalizeCurrency, toMajor, type FxTabl
 import { DAY, HOUR, addDays, dayKey } from '../lib/time';
 import { BACKFILL_DAYS } from './aggregate';
 
-export const FX_BASE = 'USD';
+const FX_BASE = 'USD';
 const FX_API = 'https://api.frankfurter.dev/v2/rates';
-export const FX_URL = `${FX_API}?base=${FX_BASE}`;
-export const FX_ECB_URL = `${FX_API}?base=${FX_BASE}&providers=ecb`;
+const FX_URL = `${FX_API}?base=${FX_BASE}`;
+const FX_ECB_URL = `${FX_API}?base=${FX_BASE}&providers=ecb`;
 /** Sources publish once per working day; one fetch per ~day is plenty. */
 export const FX_MAX_AGE_MS = 20 * HOUR;
 /**

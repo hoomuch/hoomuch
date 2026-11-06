@@ -95,7 +95,7 @@ const PAGE_SIZE = 100;
  */
 export const DODO_SNAPSHOT_PAGE_BUDGET = 160;
 /** Ledger days read per slice; a slice's days are emitted together once it has been read in full. */
-export const SLICE_DAYS = 7;
+const SLICE_DAYS = 7;
 /** next_billing_date may sit a little after created_at + trial_period_days. */
 const TRIAL_SLACK_MS = HOUR;
 
@@ -104,9 +104,9 @@ const PERM_SUBSCRIPTIONS = 'Subscriptions: Read';
 const PERM_BALANCES = 'Balances: Read';
 
 /** Config keys this adapter writes. */
-export const CONFIG_TEST_MODE = 'testMode';
+const CONFIG_TEST_MODE = 'testMode';
 /** Read by the calendar for providers with revenueHistory 'daily' (same convention as RevenueCat). */
-export const CONFIG_REVENUE_HISTORY = 'revenueHistory';
+const CONFIG_REVENUE_HISTORY = 'revenueHistory';
 
 export const LEGACY_KEY_WARNING =
   'This key was created before Dodo Payments added per-resource access, so it may be able to change data as well as read it. A new key with Read on Subscriptions and Balances only is safer. You can replace the key on this page.';
@@ -186,7 +186,7 @@ function baseFor(testMode: boolean): string {
 }
 
 /** Dodo-specific 403s; everything else falls through to the shared status mapping. */
-export function mapDodoError(status: number, body: unknown, detail: string, permission: string): ProviderError | null {
+function mapDodoError(status: number, body: unknown, detail: string, permission: string): ProviderError | null {
   if (status !== 403) return null;
   const code = isObject(body) ? str(body['code']) : null;
   if (code === 'IP_ADDRESS_NOT_ALLOWED') {
@@ -251,7 +251,7 @@ export type SubscriptionClass =
   | { kind: 'not_active' };
 
 /** True while the recurring price hasn't been charged yet (see the header: no trialing status exists). */
-export function isInTrial(sub: Json, now: number): boolean {
+function isInTrial(sub: Json, now: number): boolean {
   const days = int(sub['trial_period_days']);
   const created = time(sub['created_at']);
   if (days === null || days <= 0 || created === null) return false;
@@ -390,7 +390,7 @@ interface RevenueCursor {
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ACC_KEY_RE = /^\d{4}-\d{2}-\d{2}\|[A-Z]{3}$/;
 
-export function encodeCursor(c: RevenueCursor): string {
+function encodeCursor(c: RevenueCursor): string {
   return JSON.stringify(c);
 }
 
@@ -477,7 +477,7 @@ const EMPTY_DAY_CURRENCY = 'USD';
  * Days of the slice with no revenue entry get a 0 USD point, so "read, nothing sold" is stored as such (the
  * dashboard treats a 'daily' provider without any rows as one that can't report history).
  */
-export function pointsOf(acc: Sums, from: string, to: string): DailyRevenuePoint[] {
+function pointsOf(acc: Sums, from: string, to: string): DailyRevenuePoint[] {
   const out: DailyRevenuePoint[] = [];
   const daysWithEntries = new Set<string>();
   for (const [key, s] of Object.entries(acc)) {

@@ -23,9 +23,9 @@ import { isProviderId } from '../providers/types';
 
 const MAC_INFO = 'hoomuch webhook url v1';
 /** A burst of events within this long becomes one sync. */
-export const WEBHOOK_SYNC_DELAY_SECONDS = 60;
+const WEBHOOK_SYNC_DELAY_SECONDS = 60;
 /** Webhook syncs of one connection start at least this far apart (each is a full sync). */
-export const WEBHOOK_MIN_GAP_MS = 5 * MINUTE;
+const WEBHOOK_MIN_GAP_MS = 5 * MINUTE;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 export const WEBHOOK_PATH_PREFIX = '/webhooks/';

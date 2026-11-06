@@ -24,9 +24,9 @@ import { QUEUED_STALE_MS, enqueueSync } from '../sync/queue';
 import { acquireSyncLock } from '../sync/repo';
 
 export const MAX_CONNECTIONS_PER_USER = 25;
-export const MANUAL_SYNC_COOLDOWN_MS = 60_000;
+const MANUAL_SYNC_COOLDOWN_MS = 60_000;
 /** The add / replace-key form waits for the live check: no new request starts after this long. */
-export const VERIFY_DEADLINE_MS = 20_000;
+const VERIFY_DEADLINE_MS = 20_000;
 
 export type FormResult<T extends object = object> =
   | ({ ok: true; warnings: string[] } & T)
@@ -38,7 +38,7 @@ type RawInput = Record<string, string | undefined>;
 const SEE_FIELD = 'Nothing was saved. See the field below.';
 
 /** Turns any thrown error from an adapter into a message that is safe to show the user. */
-export function describeProviderError(err: unknown, meta: ProviderMeta): string {
+function describeProviderError(err: unknown, meta: ProviderMeta): string {
   if (err instanceof ProviderError) {
     switch (err.kind) {
       case 'auth':

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DATA_PERMISSION_WARNING,
-  RESTRICTED_PROJECTS_WARNING,
   REVENUE_SQL,
   SW_MRR_CHART_PARTIAL_WARNING,
   SW_RESTRICTED_PROJECTS_WARNING,
@@ -332,7 +331,7 @@ describe('superwall verify', () => {
     expect(res).toMatchObject({
       ok: true,
       accountLabel: 'Superwall organization 123',
-      warnings: ['Superwall’s MRR chart covers only some of this organization’s apps: Web apps have no MRR yet', RESTRICTED_PROJECTS_WARNING],
+      warnings: ['Superwall’s MRR chart covers only some of this organization’s apps: Web apps have no MRR yet', SW_RESTRICTED_PROJECTS_WARNING],
     });
   });
 

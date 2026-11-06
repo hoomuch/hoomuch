@@ -40,7 +40,7 @@ import {
 } from './types';
 
 const PROVIDER = 'App Store Connect';
-export const ASC_API_BASE = 'https://api.appstoreconnect.apple.com/v1';
+const ASC_API_BASE = 'https://api.appstoreconnect.apple.com/v1';
 const AUDIENCE = 'appstoreconnect-v1';
 /** Apple rejects tokens that live longer than 20 minutes; one sync needs far less. */
 const TOKEN_LIFETIME_S = 10 * 60;
@@ -221,7 +221,7 @@ function cleanCurrency(raw: string): string | null {
 }
 
 /** Turns one day's Summary Sales Report into contract points, one per customer currency. */
-export async function parseSalesReport(ctx: ProviderContext, bytes: Uint8Array, day: string): Promise<DailyRevenuePoint[]> {
+async function parseSalesReport(ctx: ProviderContext, bytes: Uint8Array, day: string): Promise<DailyRevenuePoint[]> {
   const byCurrency = new Map<string, DailyRevenuePoint>();
   let iUnits = -1;
   let iPrice = -1;
@@ -290,7 +290,7 @@ const TRIAL_COLUMNS = [
   ['Free Trial Win-Back Offers'],
 ] as const;
 
-export interface SubscriptionTotals {
+interface SubscriptionTotals {
   mrr: MoneyMap;
   activeSubscriptions: number;
   activeTrials: number;
@@ -303,7 +303,7 @@ export interface SubscriptionTotals {
  * offer-code or win-back price are active but left out of MRR: the report doesn't say what they pay per
  * period. Free trials are counted as trials only.
  */
-export async function parseSubscriptionReport(ctx: ProviderContext, bytes: Uint8Array): Promise<SubscriptionTotals> {
+async function parseSubscriptionReport(ctx: ProviderContext, bytes: Uint8Array): Promise<SubscriptionTotals> {
   const totals: SubscriptionTotals = { mrr: {}, activeSubscriptions: 0, activeTrials: 0, byProduct: [] };
   const products = new Map<string, ProductMrr>();
   let iName = -1;

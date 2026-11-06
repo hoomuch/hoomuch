@@ -284,7 +284,7 @@ export function bandGapRatio(n: number): number {
 }
 
 /** fill-opacity steps for series that share a colour (two Stripe accounts): 1 / 0.65 / 0.4 / 0.25. */
-export const SAME_COLOR_OPACITY = [1, 0.65, 0.4, 0.25] as const;
+const SAME_COLOR_OPACITY = [1, 0.65, 0.4, 0.25] as const;
 
 export function sameColorOpacities(colors: string[]): number[] {
   const seen = new Map<string, number>();

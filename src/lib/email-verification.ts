@@ -32,7 +32,7 @@ export function verificationRequired(env: Pick<Bindings, 'RESEND_API_KEY'>): boo
   return mailEnabled(env);
 }
 
-export function wellFormedToken(token: string): boolean {
+function wellFormedToken(token: string): boolean {
   return TOKEN_RE.test(token);
 }
 

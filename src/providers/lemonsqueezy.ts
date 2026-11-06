@@ -86,7 +86,7 @@ import {
 } from './types';
 
 const PROVIDER = 'Lemon Squeezy';
-export const LS_API_BASE = 'https://api.lemonsqueezy.com/v1';
+const LS_API_BASE = 'https://api.lemonsqueezy.com/v1';
 /** JSON:API maximum. */
 const PAGE_SIZE = 100;
 const DAY_MS = 86_400_000;
@@ -95,17 +95,17 @@ const DAY_MS = 86_400_000;
  * "updated since" filter). 30 days + the engine's 2-day overlap covers the common 30-day
  * money-back window; refunds issued later than that are missed (documented limitation).
  */
-export const REFUND_LOOKBACK_MS = 30 * DAY_MS;
+const REFUND_LOOKBACK_MS = 30 * DAY_MS;
 /**
  * A checkout order is created moments before its subscription. A subscription created at least this long
  * after the order scan's floor therefore has its checkout order inside the scanned range.
  */
-export const CHECKOUT_ORDER_MARGIN_MS = 60 * 60_000;
+const CHECKOUT_ORDER_MARGIN_MS = 60 * 60_000;
 /**
  * Most order totals a revenue cursor carries between calls (≈ 13 bytes each; the cursor is one D1 value).
  * Past this the cursor stops vouching for unseen orders and they are looked up one by one instead.
  */
-export const MAX_CARRIED_ORDERS = 3000;
+const MAX_CARRIED_ORDERS = 3000;
 /** Subscription statuses listed for the snapshot (each is a separate filtered listing). */
 const SNAPSHOT_STATUSES = ['active', 'past_due', 'cancelled', 'on_trial'] as const;
 /**
@@ -120,9 +120,9 @@ const INTERVALS = new Set<BillingInterval>(['day', 'week', 'month', 'year']);
 const ORDER_NOT_FOUND = -1;
 
 /** Config keys this adapter writes (all values are strings; shown on the connection page). */
-export const CONFIG_STORE_CURRENCIES = 'storeCurrencies';
-export const CONFIG_TEST_MODE = 'testMode';
-export const CONFIG_STORE_ID = 'storeId';
+const CONFIG_STORE_CURRENCIES = 'storeCurrencies';
+const CONFIG_TEST_MODE = 'testMode';
+const CONFIG_STORE_ID = 'storeId';
 
 // Snapshot warnings (`MetricsSnapshot.warnings`).
 export const LS_DISCOUNTS_BUDGET_WARNING =
@@ -397,7 +397,7 @@ class StoreCurrencies {
 // Prices
 // ---------------------------------------------------------------------------------------------
 
-export interface LsPriceTier {
+interface LsPriceTier {
   /** Infinity for the "inf" tier. */
   lastUnit: number;
   unitPrice: number | null;
@@ -933,7 +933,7 @@ interface RevenueCursor {
 
 type CursorPosition = Pick<RevenueCursor, 'since' | 'phase' | 'page' | 'total' | 'pending'>;
 
-export function encodeCursor(c: RevenueCursor): string {
+function encodeCursor(c: RevenueCursor): string {
   return JSON.stringify(c);
 }
 

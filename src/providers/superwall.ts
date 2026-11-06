@@ -77,11 +77,11 @@ import {
 } from './types';
 
 const PROVIDER = 'Superwall';
-export const SW_API_BASE = 'https://api.superwall.com';
+const SW_API_BASE = 'https://api.superwall.com';
 
 /** Exact scope names from the API reference ("Requires charts:read scope", "Requires data:read scope"). */
-export const SW_SCOPE_CHARTS = 'charts:read';
-export const SW_SCOPE_DATA = 'data:read';
+const SW_SCOPE_CHARTS = 'charts:read';
+const SW_SCOPE_DATA = 'data:read';
 
 /** Superwall reports revenue converted to USD. */
 const REPORTING_CURRENCY = 'USD';
@@ -109,12 +109,12 @@ export const DATA_PERMISSION_WARNING =
   `refunds or trials. To get them, add the ${SW_SCOPE_DATA} scope to the key.`;
 const DATA_UNKNOWN_WARNING =
   'hoomuch couldn’t check Superwall’s query API just now. It will try again on the first sync.';
-export const RESTRICTED_PROJECTS_WARNING =
-  'This key can only reach some of your Superwall projects, so MRR and subscriptions cover only those. ' +
-  'Give it access to all projects so every number covers the same apps.';
 
 // Snapshot warnings (`MetricsSnapshot.warnings`). Fixed text only: never Superwall's own chart names or reasons.
-export const SW_RESTRICTED_PROJECTS_WARNING = RESTRICTED_PROJECTS_WARNING;
+/** Verify's warning too, word for word. */
+export const SW_RESTRICTED_PROJECTS_WARNING =
+  'This key can only reach some of your Superwall projects, so MRR and subscriptions cover only those. ' +
+  'Give it access to all projects so every number covers the same apps.';
 export const SW_MRR_CHART_PARTIAL_WARNING =
   'Superwall says its MRR chart isn’t fully available for this organization’s apps, so MRR may be incomplete.';
 export const SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING =
@@ -140,7 +140,7 @@ interface SwInput {
 type InputCheck = { ok: true; value: SwInput } | { ok: false; error: string; field: 'apiKey' | 'organizationId' };
 
 /** Validates field shapes without any network call. Never echoes secret values back. */
-export function checkSuperwallInput(input: ConnectionInput): InputCheck {
+function checkSuperwallInput(input: ConnectionInput): InputCheck {
   const apiKey = (input.credentials['apiKey'] ?? '').trim();
   const rawOrg = (input.config['organizationId'] ?? '').trim();
   const fail = (field: 'apiKey' | 'organizationId', error: string): InputCheck => ({ ok: false, error, field });
@@ -705,7 +705,7 @@ function availabilityWarnings(defs: Definitions): string[] {
         : `Superwall’s ${spec.name} chart covers only some of this organization’s apps${reason}`,
     );
   }
-  if (defs.allProjects === false) out.push(RESTRICTED_PROJECTS_WARNING);
+  if (defs.allProjects === false) out.push(SW_RESTRICTED_PROJECTS_WARNING);
   return out;
 }
 

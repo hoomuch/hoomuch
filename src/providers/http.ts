@@ -12,8 +12,8 @@
 
 import { ProviderError, type ProviderContext } from './types';
 
-export const DEFAULT_TIMEOUT_MS = 15_000;
-export const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const DEFAULT_MAX_ATTEMPTS = 3;
 /** Longest Retry-After we are willing to sleep through; beyond this we give up with `rate_limit`. */
 export const MAX_RETRY_WAIT_MS = 10_000;
 const BACKOFF_BASE_MS = 400;
@@ -79,7 +79,7 @@ export interface DownloadSpec extends RequestSpec {
  * monthly sales report). Bigger than `MAX_RESPONSE_BYTES` because these are compressed exports of a
  * whole day or month, not pages; they are decompressed as a stream, never held expanded in memory.
  */
-export const MAX_REPORT_BYTES = 32 * 1024 * 1024;
+const MAX_REPORT_BYTES = 32 * 1024 * 1024;
 
 /**
  * Thrown when a request can't start: `ctx.pageBudget` is spent (`reason: 'budget'`), or the context's
@@ -116,7 +116,7 @@ export class RateLimitedError extends ProviderError {
 const deadlineLogged = new WeakSet<ProviderContext>();
 
 /** True once the context's deadline has passed or its signal fired. Logs the first time. */
-export function outOfTime(ctx: ProviderContext): boolean {
+function outOfTime(ctx: ProviderContext): boolean {
   const late = ctx.signal?.aborted === true || (ctx.deadline !== undefined && ctx.now() >= ctx.deadline);
   if (late && !deadlineLogged.has(ctx)) {
     deadlineLogged.add(ctx);
@@ -240,7 +240,7 @@ function pathOf(url: string): string {
 // ---------- retry timing ----------
 
 /** Parses Retry-After (seconds or HTTP date) or RevenueCat's `backoff_ms`; null when absent. */
-export function retryAfterMs(res: Response, body: unknown, now: number): number | null {
+function retryAfterMs(res: Response, body: unknown, now: number): number | null {
   const h = res.headers.get('retry-after');
   if (h) {
     const secs = Number(h);
@@ -264,10 +264,10 @@ function backoffMs(attempt: number): number {
 
 class RetryableNetworkError extends Error {}
 
-export class ResponseTooLargeError extends Error {}
+class ResponseTooLargeError extends Error {}
 
 /** Reads the body as bytes, giving up (and cancelling the stream) once it passes `max` bytes. */
-export async function readBytesBounded(res: Response, max: number): Promise<Uint8Array> {
+async function readBytesBounded(res: Response, max: number): Promise<Uint8Array> {
   const declared = Number(res.headers.get('content-length') ?? NaN);
   if (Number.isFinite(declared) && declared > max) {
     await res.body?.cancel().catch(() => {});

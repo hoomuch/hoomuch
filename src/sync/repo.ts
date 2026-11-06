@@ -14,9 +14,9 @@ import type { DailyRevenuePoint, MetricsSnapshot, RevenueEvent } from '../provid
 import { rangeBounds, type DayRange } from './aggregate';
 
 /** Rows per bulk statement. */
-export const BULK_MAX_ROWS = 200;
+const BULK_MAX_ROWS = 200;
 /** JSON bytes per bulk statement (D1 caps a statement at 100 KB; stay well clear). */
-export const BULK_MAX_BYTES = 50_000;
+const BULK_MAX_BYTES = 50_000;
 /** External ids per lookup statement. */
 const LOOKUP_MAX_IDS = 500;
 

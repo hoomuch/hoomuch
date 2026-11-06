@@ -101,7 +101,7 @@ export interface SyncResult {
  */
 export const SNAPSHOT_PAGE_BUDGET = 400;
 /** Days of past snapshots asked of `fetchSnapshotHistory` on a first sync (the longest dashboard range). */
-export const SNAPSHOT_HISTORY_DAYS = 90;
+const SNAPSHOT_HISTORY_DAYS = 90;
 /** Upstream requests per sync for revenue paging (SPEC §4.1: 20 per connection). */
 export const REVENUE_PAGE_BUDGET = 20;
 /**
@@ -145,9 +145,9 @@ export const CRON_MAX_ROUNDS = 10;
  * runs, so a slow FX never stops syncs from being queued.
  */
 export const CRON_QUEUE_DEADLINE_MS = 2 * MINUTE;
-export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
+const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 /** A connection in 'error' is retried after this many intervals since its last attempt. */
-export const ERROR_BACKOFF_INTERVALS = 3;
+const ERROR_BACKOFF_INTERVALS = 3;
 /**
  * Wall-clock budget of one sync. Every sync runs in its own queue consumer invocation (15 min of
  * wall time), so this bounds how long a slow provider keeps one connection's sync open, not a
@@ -158,16 +158,16 @@ export const SYNC_DEADLINE_MS = 4 * MINUTE;
  * Share of the deadline the snapshot may use (3 minutes, time for its whole page budget at about
  * 2 requests a second); revenue (resumable) gets the remainder, at least a minute.
  */
-export const SNAPSHOT_DEADLINE_SHARE = 0.75;
+const SNAPSHOT_DEADLINE_SHARE = 0.75;
 /**
  * Due-time slack for the cron. Syncs start a few seconds after each tick, so a strict
  * "older than the interval" check would always miss the tick exactly one interval later and
  * turn a 60-min interval into 90 min on a 30-min cron.
  */
-export const MAX_SCHEDULE_GRACE_MS = 5 * MINUTE;
+const MAX_SCHEDULE_GRACE_MS = 5 * MINUTE;
 
 export const SYNC_BUSY_MESSAGE = 'A sync is already running for this connection.';
-export const SYNC_NOT_FOUND_MESSAGE = 'Connection not found.';
+const SYNC_NOT_FOUND_MESSAGE = 'Connection not found.';
 /** D1 failed while taking the lock: nothing ran or changed, so the queue consumer retries. */
 export const SYNC_NOT_STARTED_MESSAGE = 'Couldn’t start the sync. Try again in a minute.';
 export const BACKFILL_CONTINUES_MESSAGE = 'Revenue backfill in progress; the next sync continues.';
@@ -522,7 +522,7 @@ function syncIntervalMs(env: Bindings): number {
  *   unclaimed  a round queued nothing, every claim lost to another producer: stop rather than spin;
  *   error      D1 or the queue failed.
  */
-export type CronStop = 'done' | 'cap' | 'deadline' | 'unclaimed' | 'error';
+type CronStop = 'done' | 'cap' | 'deadline' | 'unclaimed' | 'error';
 
 /**
  * Cron entry point (SPEC §4.1): refresh FX daily, then put the due connections on the sync queue,

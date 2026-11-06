@@ -35,11 +35,11 @@ import {
 } from './types';
 
 const PROVIDER = 'RevenueCat';
-export const RC_API_BASE = 'https://api.revenuecat.com/v2';
+const RC_API_BASE = 'https://api.revenuecat.com/v2';
 
 /** Exact API v2 scope names (x-scopes in RevenueCat's OpenAPI spec). */
-export const RC_SCOPE_OVERVIEW = 'charts_metrics:overview:read';
-export const RC_SCOPE_CHARTS = 'charts_metrics:charts:read';
+const RC_SCOPE_OVERVIEW = 'charts_metrics:overview:read';
+const RC_SCOPE_CHARTS = 'charts_metrics:charts:read';
 
 /** RevenueCat's own default; requested explicitly so the answer never depends on account settings. */
 const REQUEST_CURRENCY = 'USD';
@@ -84,7 +84,7 @@ interface RcInput {
 type InputCheck = { ok: true; value: RcInput } | { ok: false; error: string; field: 'apiKey' | 'projectId' };
 
 /** Validates field shapes without any network call. Never echoes secret values back. */
-export function checkRevenueCatInput(input: ConnectionInput): InputCheck {
+function checkRevenueCatInput(input: ConnectionInput): InputCheck {
   const apiKey = (input.credentials['apiKey'] ?? '').trim();
   const projectId = (input.config['projectId'] ?? '').trim();
   const fail = (field: 'apiKey' | 'projectId', error: string): InputCheck => ({ ok: false, error, field });

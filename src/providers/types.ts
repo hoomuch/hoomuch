@@ -49,7 +49,7 @@ export function isProviderId(v: unknown): v is ProviderId {
 
 // ---------- metadata (drives the "add connection" UI) ----------
 
-export interface CredentialField {
+interface CredentialField {
   /** Form field name and key inside credentials/config. */
   name: string;
   label: string;

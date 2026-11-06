@@ -117,7 +117,7 @@ export function ChartFrame(props: {
 }
 
 /** Calm centred message over the plot area. Hidden from AT: the description says the same thing. */
-export function PlotMessage(props: { children?: ReactNode }) {
+function PlotMessage(props: { children?: ReactNode }) {
   return (
     <p
       aria-hidden="true"

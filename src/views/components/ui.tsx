@@ -26,9 +26,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { Table } from '@/components/ui/table';
 import { cn } from '../../lib/utils';
 
-/** Joins class names (clsx + tailwind-merge). Kept under its old name for the pages. */
-export const cx = cn;
-
 // ---------- page structure ----------
 
 export function PageHeader(props: {
@@ -145,7 +142,7 @@ const TONE_WORD: Record<Tone, string> = {
   error: 'Error:',
 };
 
-export function ToneIcon(props: { tone: Tone; className?: string }) {
+function ToneIcon(props: { tone: Tone; className?: string }) {
   switch (props.tone) {
     case 'success':
       return <CircleCheck className={cn('size-4 shrink-0 text-success', props.className)} />;

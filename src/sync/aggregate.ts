@@ -25,13 +25,13 @@ export const REVENUE_OVERLAP_MS = 2 * DAY;
 export const MIN_PLAUSIBLE_TIME = Date.UTC(2000, 0, 1);
 /** Clock skew we tolerate for events stamped "in the future". */
 export const MAX_FUTURE_SKEW_MS = DAY;
-export const MAX_EXTERNAL_ID_LENGTH = 255;
+const MAX_EXTERNAL_ID_LENGTH = 255;
 export const MAX_DESCRIPTION_LENGTH = 200;
 /** Products kept per snapshot split; MRR beyond them shows as "No product name". */
 export const MAX_SNAPSHOT_PRODUCTS = 500;
 /** Warnings kept per snapshot, and the length of each (`MetricsSnapshot.warnings`). */
 export const MAX_SNAPSHOT_WARNINGS = 5;
-export const MAX_WARNING_LENGTH = 200;
+const MAX_WARNING_LENGTH = 200;
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -186,7 +186,7 @@ export function cleanMoneyMap(input: unknown): { map: MoneyMap; dropped: number 
 }
 
 /** A product or plan name as stored: one line, trimmed, capped; null when there's nothing left. */
-export function cleanProductName(v: unknown): string | null {
+function cleanProductName(v: unknown): string | null {
   if (typeof v !== 'string') return null;
   return v.replace(/\s+/g, ' ').trim().slice(0, MAX_DESCRIPTION_LENGTH) || null;
 }

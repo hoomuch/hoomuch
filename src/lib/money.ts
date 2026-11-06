@@ -95,7 +95,7 @@ export function currencyExponent(currency: string): number {
  * Decimals shown for an amount: CLDR's display precision, capped at the minor unit (HUF 4,990.00 → "HUF 4,990").
  * Rounds away minor units that CLDR doesn't display, e.g. 4,990.50 HUF shows as 4,991.
  */
-export function displayDigits(currency: string): number {
+function displayDigits(currency: string): number {
   const cur = normalizeCurrency(currency);
   return Math.min(cldrDigits(cur), currencyExponent(cur));
 }
@@ -120,12 +120,6 @@ export function normalizeToMonthly(amountMinor: number, interval: BillingInterva
   };
   const n = count > 0 ? count : 1;
   return Math.round((amountMinor * perMonth[interval]) / n);
-}
-
-export function addMoney(a: MoneyMap, b: MoneyMap): MoneyMap {
-  const out: MoneyMap = { ...a };
-  for (const [cur, amt] of Object.entries(b)) out[cur] = (out[cur] ?? 0) + amt;
-  return out;
 }
 
 export function addToMoney(map: MoneyMap, currency: string, amount: number): MoneyMap {
