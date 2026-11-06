@@ -220,7 +220,8 @@ wasn't. The ones you'd notice:
   partial refunds on one order show as one refund. Its docs don't say which units it uses for
   currencies without two decimals; hoomuch assumes ISO 4217.
 - **Paddle and Polar:** MRR is the provider's own figure, in one currency (Paddle: your balance
-  currency; Polar: USD). Polar's version pin (`2026-10`) has to be updated before April 2027.
+  currency; Polar: USD). Polar's version pin (`2026-10`) has to be updated before April 2027. A
+  test fails from mid-January 2027 until it is.
 - **RevenueCat, Adapty, Superwall:** daily history is in USD only, revenue is the stores' gross (tax
   and store fees included), and test mode can't be detected.
 - **Dodo Payments:** revenue comes from the balance ledger, so it's daily totals with no transaction
