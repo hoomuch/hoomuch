@@ -13,7 +13,7 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, dayNumberToKeySql, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
+import { STRIPE_PRODUCTS_WARNING } from '../providers/warnings';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
 import type { FxTable } from '../lib/money';
 import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx, type FxRow } from '../sync/fx';

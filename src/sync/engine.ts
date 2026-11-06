@@ -27,7 +27,8 @@ import { decryptJson } from '../lib/crypto';
 import { MINUTE, UTC, normalizeTimeZone, zonedDayKey } from '../lib/time';
 import { createProviderContext } from '../providers/context';
 import { BudgetExhaustedError } from '../providers/http';
-import { getAdapter, getProviderMeta } from '../providers/registry';
+import { getAdapter } from '../providers/adapters';
+import { getProviderMeta } from '../providers/registry';
 import {
   ProviderError,
   type ConnectionInput,

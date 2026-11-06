@@ -17,7 +17,8 @@ import {
 } from '../db/queries';
 import { createProviderContext } from '../providers/context';
 import { sanitizeErrorText } from '../providers/http';
-import { getAdapter, getProviderMeta, splitInput } from '../providers/registry';
+import { getAdapter } from '../providers/adapters';
+import { getProviderMeta, splitInput } from '../providers/registry';
 import { ProviderError, type ProviderId, type ProviderMeta, type VerifyResult } from '../providers/types';
 import { SYNC_LOCK_STALE_MS, syncConnection, type SyncResult } from '../sync/engine';
 import { QUEUED_STALE_MS, enqueueSync } from '../sync/queue';

@@ -103,6 +103,7 @@ import {
   type RevenueRequest,
   type VerifyResult,
 } from './types';
+import { STRIPE_PRODUCTS_WARNING } from './warnings';
 
 const STRIPE_API_BASE = 'https://api.stripe.com/v1';
 export const STRIPE_API_VERSION = '2026-10-28.endive';
@@ -124,12 +125,10 @@ const PERM_PRODUCTS = 'Products: Read';
 export const SECRET_KEY_WARNING =
   'This is a full-access secret key. A restricted key (rk_…) with read access is safer. You can replace the key on this page.';
 
-// Snapshot warnings (`MetricsSnapshot.warnings`). The permission ones are verify's warnings too, word for word.
+// Snapshot warnings (`MetricsSnapshot.warnings`). The permission ones are verify's warnings too, word for
+// word; STRIPE_PRODUCTS_WARNING is in ./warnings.ts, because the dashboard matches it.
 export const STRIPE_COUPONS_WARNING =
   'This key can’t read coupons, so MRR is shown before discounts. Add Coupons: Read to fix it.';
-/** The dashboard matches this exact string to name the Stripe connections it can't split by product. */
-export const STRIPE_PRODUCTS_WARNING =
-  'This key can’t read product names, so MRR isn’t split by product. Add Products: Read to fix it.';
 export const STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING =
   'MRR isn’t split by product this time, because Stripe didn’t return the product names; the next sync tries again.';
 

@@ -8,13 +8,13 @@ import {
   STRIPE_API_VERSION,
   STRIPE_COUPONS_WARNING,
   STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING,
-  STRIPE_PRODUCTS_WARNING,
   stripeAdapter,
   stripeDigits,
   stripeDiscountsUnresolvedWarning,
   stripeInclusiveTaxWarning,
   stripeUnpricedItemsWarning,
 } from '../../src/providers/stripe';
+import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/warnings';
 import { ProviderError, type MetricsSnapshot } from '../../src/providers/types';
 import {
   expectNoSecretsInLogs,

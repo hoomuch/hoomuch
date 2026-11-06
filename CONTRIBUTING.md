@@ -115,7 +115,7 @@ src/
   index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
   lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
-  providers/         adapter contract, registry, one adapter per provider, Demo
+  providers/         adapter contract, registry (metadata), adapter lookup, one adapter per provider, Demo
   sync/              sync engine, the sync queue and its consumer, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
   services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks
@@ -274,8 +274,9 @@ references.
      `req.today`, the owner's local day that today's snapshot is stored under: it can be a day either
      side of the UTC one. The demo adapter is the reference; Adapty and Superwall read it from the
      provider's daily charts. A day without a subscription count is left out, never zero-filled.
-4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
-   `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
+4. **Registry.** Add its `ProviderMeta` to `PROVIDERS` in `src/providers/registry.ts`, and the
+   adapter to `ADAPTERS` in `src/providers/adapters.ts`. The registry never imports an adapter: pages
+   and the browser bundle read it. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.
    List the exact read permissions the key needs. If the provider's API shows a change within
    minutes and its dashboard lets anyone add a webhook URL by hand, add `webhook` (steps, event names)

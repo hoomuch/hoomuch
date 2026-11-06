@@ -801,7 +801,8 @@ hoomuch/
 │  ├─ lib/                       Lead — crypto, auth, money, time, flash
 │  ├─ db/queries.ts              Lead — users/sessions/connections temel sorguları
 │  ├─ providers/types.ts         Lead — ADAPTÖR KONTRATI
-│  ├─ providers/registry.ts      Lead — sağlayıcı meta verisi + adaptör eşlemesi
+│  ├─ providers/registry.ts      Lead — sağlayıcı meta verisi (hiçbir adaptörü içe aktarmaz)
+│  ├─ providers/adapters.ts      Lead — adaptör eşlemesi (getAdapter)
 │  ├─ providers/{http,stripe,paddle,lemonsqueezy,polar,revenuecat,chargebee,dodo,gumroad,adapty,superwall,demo}.ts   Data Plane
 │  ├─ sync/                      Data Plane — engine, queue (üretici), consumer (kuyruk tüketicisi), fx, repo
 │  ├─ data/types.ts              Lead — OKUMA MODELİ KONTRATI
