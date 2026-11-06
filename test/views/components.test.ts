@@ -116,8 +116,8 @@ describe('Layout', () => {
     // No backdrop here, so no owl.
     const footer = out.slice(out.indexOf('<footer'), out.indexOf('</footer>'));
     expect(footer).toContain('<span class="sr-only">hoomuch</span>');
-    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch"');
-    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch/issues"');
+    expect(footer).toContain('href="https://github.com/hoomuch/hoomuch"');
+    expect(footer).toContain('href="https://github.com/hoomuch/hoomuch/issues"');
     expect(footer).toContain('Only ever reads. Keys are encrypted at rest.');
     expect(footer).not.toContain('/mascot/');
   });
@@ -141,10 +141,10 @@ describe('Layout', () => {
     expect(footer).toContain('src="/mascot/asleep.png"');
     expect(footer).toContain('Syncs every hour, so you can check less often.');
     expect(footer).toContain('aria-label="Footer"');
-    for (const href of ['/#demo', '/#store', '/login', 'https://github.com/tahabozdemir/hoomuch#deploy-to-cloudflare']) {
+    for (const href of ['/#demo', '/#store', '/login', 'https://github.com/hoomuch/hoomuch#deploy-to-cloudflare']) {
       expect(footer).toContain(`href="${href}"`);
     }
-    expect(footer).toContain('href="https://github.com/tahabozdemir/hoomuch/blob/main/LICENSE"');
+    expect(footer).toContain('href="https://github.com/hoomuch/hoomuch/blob/main/LICENSE"');
   });
 
   it('hides the app nav when signed out and supports the narrow column and refresh', async () => {

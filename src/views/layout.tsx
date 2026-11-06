@@ -74,7 +74,7 @@ export const APP_NAME = 'hoomuch';
  * AGPL-3.0 §13: anyone using a modified, hosted copy must be offered its source.
  * If you run a modified version, point this at your fork.
  */
-export const SOURCE_URL = 'https://github.com/tahabozdemir/hoomuch';
+export const SOURCE_URL = 'https://github.com/hoomuch/hoomuch';
 /** Where a self-hoster starts: the README's deploy section. */
 const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
 const ISSUES_URL = `${SOURCE_URL}/issues`;

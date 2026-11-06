@@ -9,7 +9,7 @@ body:
 
         **Never paste API keys, tokens, your `ENCRYPTION_KEY` or your customers' emails, names or
         addresses.** Amounts, currencies, dates and IDs are fine. For a security problem, use
-        [the private form](https://github.com/tahabozdemir/hoomuch/security/advisories/new) instead.
+        [the private form](https://github.com/hoomuch/hoomuch/security/advisories/new) instead.
   - type: dropdown
     id: provider
     attributes:

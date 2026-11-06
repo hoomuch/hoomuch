@@ -12,7 +12,7 @@ commit on `main`. Self-hosters get a fix by updating their copy and deploying (R
 Please don't report a vulnerability in a public issue, discussion or pull request.
 
 Report it privately through GitHub instead: **Security → Report a vulnerability** on this repository,
-or [open a draft advisory](https://github.com/tahabozdemir/hoomuch/security/advisories/new) directly.
+or [open a draft advisory](https://github.com/hoomuch/hoomuch/security/advisories/new) directly.
 
 It helps to include:
 
