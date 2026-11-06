@@ -6,6 +6,7 @@ import type { Bindings, SessionUser } from '../env';
 import { listConnections, parseConfig, type ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { getProviderMeta } from '../providers/registry';
+import { parseStoredWarnings } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
 import type { ConnectionDetail, ConnectionSummary, SnapshotRow, SyncRunRow } from './types';
 
@@ -43,6 +44,7 @@ interface SnapRow {
   mrr: string;
   active_subscriptions: number;
   active_trials: number | null;
+  warnings: string | null;
 }
 
 interface RunRow {
@@ -66,7 +68,7 @@ export async function getConnectionDetail(
     db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').bind(connectionId, user.id),
     db
       .prepare(
-        `SELECT s.day, s.mrr, s.active_subscriptions, s.active_trials FROM snapshots s
+        `SELECT s.day, s.mrr, s.active_subscriptions, s.active_trials, s.warnings FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
           WHERE s.connection_id = ? AND c.user_id = ? ORDER BY s.day DESC LIMIT 30`,
       )
@@ -108,5 +110,6 @@ export async function getConnectionDetail(
     currency,
     snapshots,
     recentRuns,
+    warnings: parseStoredWarnings(((snapR!.results ?? []) as unknown as SnapRow[])[0]?.warnings),
   };
 }

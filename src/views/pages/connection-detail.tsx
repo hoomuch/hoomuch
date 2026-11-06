@@ -179,6 +179,20 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
           </Alert>
         ) : null}
 
+        {d.warnings.length > 0 ? (
+          <Alert tone="warning" title={d.warnings.length === 1 ? 'One thing the last sync couldn’t count' : 'What the last sync couldn’t count'}>
+            {d.warnings.length === 1 ? (
+              d.warnings[0]
+            ) : (
+              <ul className="grid list-disc gap-1 pl-5">
+                {d.warnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            )}
+          </Alert>
+        ) : null}
+
         <Card title="Details">
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-body">
             <dt className="text-faint">Last synced</dt>

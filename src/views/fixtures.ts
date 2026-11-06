@@ -402,5 +402,6 @@ export function fixtureConnectionDetail(idx = 0): ConnectionDetail {
       },
       { kind: 'initial', startedAt: FIXTURE_NOW - 41 * DAY, finishedAt: FIXTURE_NOW - 41 * DAY + 48_000, ok: true, events: 1_204, message: null },
     ],
+    warnings: [],
   };
 }

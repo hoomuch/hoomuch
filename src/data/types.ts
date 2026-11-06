@@ -172,7 +172,8 @@ export interface DashboardData {
     missing: string[];
   };
   /**
-   * Human-readable notices the structured fields can't express (empty today). Not repeated here:
+   * What connections' latest syncs couldn't count, as "<connection name>: <sentence>"
+   * (`MetricsSnapshot.warnings`), connections in breakdown order. Not repeated here:
    * sync problems (breakdown status / lastError / lastSyncedAt), currencies without a rate
    * (fx.missing) and providers without daily revenue (BreakdownRow.periodRevenue). The dashboard
    * turns those into sentences next to the figure they affect.
@@ -285,4 +286,6 @@ export interface ConnectionDetail extends ConnectionSummary {
   snapshots: SnapshotRow[];
   /** Latest first, up to 10. */
   recentRuns: SyncRunRow[];
+  /** What the latest snapshot couldn't count (`MetricsSnapshot.warnings`); [] when nothing. */
+  warnings: string[];
 }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
 import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
 import { cleanSnapshot } from '../../src/sync/aggregate';
+import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/stripe';
 import { listTransactions } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
@@ -366,11 +367,11 @@ describe('getDashboardData products', () => {
 
 describe('getDashboardData MRR by product', () => {
   type Split = Array<{ name: string | null; mrr: Record<string, number>; subscriptions: number }> | null;
-  function snapSplit(conn: string, day: string, mrr: Record<string, number>, split: Split) {
+  function snapSplit(conn: string, day: string, mrr: Record<string, number>, split: Split, warnings: string[] | null = null) {
     t.exec(
-      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, mrr_by_product, captured_at)
-       VALUES (?, ?, ?, 1, NULL, ?, 0)`,
-      conn, day, JSON.stringify(mrr), split === null ? null : JSON.stringify(split),
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, active_trials, mrr_by_product, warnings, captured_at)
+       VALUES (?, ?, ?, 1, NULL, ?, ?, 0)`,
+      conn, day, JSON.stringify(mrr), split === null ? null : JSON.stringify(split), warnings ? JSON.stringify(warnings) : null,
     );
   }
 
@@ -387,8 +388,8 @@ describe('getDashboardData MRR by product', () => {
       { name: 'Team', mrr: { USD: 30_00 }, subscriptions: 2 },
       { name: null, mrr: { USD: 10_00 }, subscriptions: 1 },
     ]);
-    snapSplit('st2', TODAY, { USD: 40_00 }, null); // its key can't read product names
-    snapSplit('st3', TODAY, {}, null); // no MRR: nothing to ask for
+    snapSplit('st2', TODAY, { USD: 40_00 }, null, [STRIPE_PRODUCTS_WARNING]); // its key can't read product names
+    snapSplit('st3', TODAY, {}, null, [STRIPE_PRODUCTS_WARNING]); // no MRR: nothing to ask for
     snapSplit('ls', TODAY, { USD: 50_00 }, null); // Lemon Squeezy doesn't split MRR
     snapSplit('x', TODAY, { USD: 999_00 }, [{ name: 'Secret', mrr: { USD: 999_00 }, subscriptions: 9 }]);
 
@@ -408,6 +409,18 @@ describe('getDashboardData MRR by product', () => {
     expect(m.needsPermission).toEqual(['Acme EU']);
     expect(m.unnamedProviders).toEqual(['Lemon Squeezy']);
     expect(m.more).toBeNull();
+    // The Products: Read warning is the By product card's to say, not a dashboard note.
+    expect(d.warnings).toEqual([]);
+  });
+
+  it('a split missing for another reason (no Products warning) is plain unnamed MRR, not a permission ask', async () => {
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    seedConnection(t, { id: 'as', userId: 'u1', provider: 'appstore', name: 'iOS' });
+    snapSplit('st', TODAY, { USD: 40_00 }, null, ['Product names were skipped this sync.']);
+    snapSplit('as', TODAY, { USD: 10_00 }, null);
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.productMrr).toMatchObject({ needsPermission: [], unnamedProviders: ['Stripe', 'App Store Connect'] });
+    expect(d.warnings).toEqual(['Acme: Product names were skipped this sync.']);
   });
 
   it(`merges one name within a connection and folds products past ${PRODUCT_ROWS} into one row`, async () => {
@@ -443,7 +456,9 @@ describe('getDashboardData MRR by product', () => {
     await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot(raw).snapshot, NOW)]);
     expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr.rows.map((r) => [r.name, r.mrr])).toEqual([['Pro', 30_00]]);
 
-    await t.db.batch([upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot({ ...raw, mrrByProduct: null }).snapshot, NOW)]);
+    await t.db.batch([
+      upsertSnapshot(t.db, 'st', TODAY, cleanSnapshot({ ...raw, mrrByProduct: null, warnings: [STRIPE_PRODUCTS_WARNING] }).snapshot, NOW),
+    ]);
     expect(t.rows('SELECT mrr_by_product FROM snapshots')).toEqual([{ mrr_by_product: null }]);
     expect((await getDashboardData(testEnv(t.db), user, 7)).productMrr).toMatchObject({ split: false, needsPermission: ['Acme'] });
   });
@@ -513,6 +528,19 @@ describe('connection read models', () => {
     expect(d!.recentRuns[0]).toEqual({ kind: 'cron', startedAt: 1011, finishedAt: null, ok: null, events: 11, message: null });
     expect(d!.recentRuns[1]).toMatchObject({ ok: false, message: 'boom' });
     expect(d!.recentRuns[2]).toMatchObject({ ok: true });
+    expect(d!.warnings).toEqual([]);
+  });
+
+  it('carries the latest snapshot’s warnings only', async () => {
+    seedConnection(t, { id: 'c', userId: 'u1', provider: 'stripe', name: 'Acme' });
+    t.exec(
+      `INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, warnings, captured_at) VALUES
+         ('c', ?, '{}', 0, '["Old news."]', 0), ('c', ?, '{}', 0, '["MRR is before discounts.","MRR is before discounts.", 7]', 0)`,
+      addDays(TODAY, -1),
+      TODAY,
+    );
+    const d = await getConnectionDetail(testEnv(t.db), user, 'c');
+    expect(d!.warnings).toEqual(['MRR is before discounts.']);
   });
 
   it("returns null for someone else’s connection", async () => {

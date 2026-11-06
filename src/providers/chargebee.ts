@@ -85,6 +85,12 @@ export const CHARGEBEE_PERMISSION = 'Allow read-only access to transactional dat
  */
 export const LATE_SETTLEMENT_WINDOW_MS = 30 * DAY;
 
+/** Snapshot warning (`MetricsSnapshot.warnings`): items of subscriptions without `mrr` that couldn't be priced. */
+export const chargebeeUnpricedItemsWarning = (items: number) =>
+  items === 1
+    ? '1 subscription item has no amount or billing period hoomuch can read, so it counts as 0 in MRR.'
+    : `${items} subscription items have no amount or billing period hoomuch can read, so they count as 0 in MRR.`;
+
 // ---------- site + key ----------
 
 interface Connection {
@@ -412,6 +418,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(stats.unpriced > 0 ? { warnings: [chargebeeUnpricedItemsWarning(stats.unpriced)] } : {}),
   };
 }
 

@@ -108,6 +108,24 @@ export const PERM_DISCOUNTS: Permission = { label: 'Discounts: Read', api: 'disc
 export const DISCOUNTS_WARNING =
   'This key can’t read discounts (Discounts: Read). When Paddle’s MRR metric isn’t available (sandbox accounts, brand-new accounts), hoomuch estimates MRR from subscriptions and will leave discounts out.';
 
+// Snapshot warnings (`MetricsSnapshot.warnings`).
+export const PADDLE_METRICS_PERMISSION_WARNING =
+  'MRR is estimated from subscriptions, because this key can’t read Paddle’s MRR metric. Add Metrics: Read to fix it.';
+export const PADDLE_METRICS_UNAVAILABLE_WARNING =
+  'MRR is estimated from subscriptions, because Paddle’s MRR metric wasn’t available.';
+/** `DISCOUNTS_WARNING` once it has happened: the estimate ran without Discounts: Read. */
+export const PADDLE_DISCOUNTS_WARNING =
+  'MRR is estimated before discounts, because this key can’t read discounts. Add Discounts: Read to fix it.';
+export const PADDLE_COUNT_CAPPED_WARNING =
+  'Paddle counts subscriptions exactly only up to 100,000, so a count above that shows as 100,001.';
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export const paddleUnpricedItemsWarning = (items: number) =>
+  `${plural(items, 'subscription item has', 'subscription items have')} no price in ${items === 1 ? 'its' : 'their'} subscription’s currency, so ${items === 1 ? 'it counts' : 'they count'} as 0 in MRR.`;
+export const paddleDiscountsUnresolvedWarning = (discounts: number) =>
+  `${plural(discounts, 'discount', 'discounts')} couldn’t be read or applied, so MRR is shown before ${discounts === 1 ? 'it' : 'them'}.`;
+
 export const REJECTED_KEY_MESSAGE =
   'Paddle rejected this key. Check that you copied all of it and that it hasn’t expired or been revoked.';
 
@@ -392,7 +410,7 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
 // ---------- snapshot: counts ----------
 
 /** Subscriptions with `status` (comma-separated). Exact up to 100,000 (Paddle reports 100001 above that). */
-async function countSubscriptions(ctx: ProviderContext, key: ParsedKey, status: string): Promise<number> {
+async function countSubscriptions(ctx: ProviderContext, key: ParsedKey, status: string, warnings: Set<string>): Promise<number> {
   const page = asList(
     ctx,
     '/subscriptions',
@@ -400,7 +418,10 @@ async function countSubscriptions(ctx: ProviderContext, key: ParsedKey, status: 
   );
   if (!page.hasMore) return page.data.length;
   if (page.estimatedTotal !== null && page.estimatedTotal >= 0) {
-    if (page.estimatedTotal > 100_000) ctx.log('paddle_count_capped', { status });
+    if (page.estimatedTotal > 100_000) {
+      ctx.log('paddle_count_capped', { status });
+      warnings.add(PADDLE_COUNT_CAPPED_WARNING);
+    }
     return page.estimatedTotal;
   }
   // −1: Paddle couldn't count this time. Count by paging rather than guess.
@@ -417,7 +438,11 @@ async function countSubscriptions(ctx: ProviderContext, key: ParsedKey, status: 
  * Paddle's MRR for the newest day it has refreshed, or null when there is none to use. Points after
  * `data.updated_at` haven't been computed yet, so they are ignored rather than read as 0.
  */
-async function metricsMrr(ctx: ProviderContext, key: ParsedKey): Promise<{ mrr: MoneyMap; day: string } | null> {
+async function metricsMrr(
+  ctx: ProviderContext,
+  key: ParsedKey,
+  warnings: Set<string>,
+): Promise<{ mrr: MoneyMap; day: string } | null> {
   const today = dayKey(ctx.now());
   let body: unknown;
   try {
@@ -434,6 +459,7 @@ async function metricsMrr(ctx: ProviderContext, key: ParsedKey): Promise<{ mrr: 
     // forbidden (no metrics.read), not_available_in_sandbox, or a rejected date range: estimate instead.
     if (err.kind === 'permission' || err.kind === 'not_found' || err.status === 400) {
       ctx.log('paddle_metrics_unavailable', { reason: err.kind, status: err.status ?? null });
+      warnings.add(err.kind === 'permission' ? PADDLE_METRICS_PERMISSION_WARNING : PADDLE_METRICS_UNAVAILABLE_WARNING);
       return null;
     }
     throw err;
@@ -454,6 +480,7 @@ async function metricsMrr(ctx: ProviderContext, key: ParsedKey): Promise<{ mrr: 
   }
   if (!best || !currency) {
     ctx.log('paddle_metrics_unavailable', { reason: 'empty' });
+    warnings.add(PADDLE_METRICS_UNAVAILABLE_WARNING);
     return null;
   }
   const mrr: MoneyMap = {};
@@ -559,12 +586,17 @@ interface PaddleDiscount {
  */
 class DiscountResolver {
   private readonly cache = new Map<string, PaddleDiscount | null>();
-  private permissionMissing = false;
+  private missing = false;
 
   constructor(
     private readonly ctx: ProviderContext,
     private readonly key: ParsedKey,
   ) {}
+
+  /** True once a discounts request answered 403: the estimate is then before discounts. */
+  get permissionMissing(): boolean {
+    return this.missing;
+  }
 
   get(id: string): PaddleDiscount | null {
     return this.cache.get(id) ?? null;
@@ -572,11 +604,11 @@ class DiscountResolver {
 
   async load(ids: Iterable<string>): Promise<void> {
     const todo = [...new Set(ids)].filter((id) => DSC_ID.test(id) && !this.cache.has(id));
-    for (let i = 0; i < todo.length && !this.permissionMissing; i += DISCOUNT_BATCH) {
+    for (let i = 0; i < todo.length && !this.missing; i += DISCOUNT_BATCH) {
       const chunk = todo.slice(i, i + DISCOUNT_BATCH);
       const found = await this.fetch(chunk, null);
       const missing = chunk.filter((id) => !found.has(id));
-      if (missing.length > 0 && !this.permissionMissing) {
+      if (missing.length > 0 && !this.missing) {
         for (const [id, d] of await this.fetch(missing, 'custom')) found.set(id, d);
       }
       for (const id of chunk) this.cache.set(id, found.get(id) ?? null);
@@ -596,7 +628,7 @@ class DiscountResolver {
       );
     } catch (err) {
       if (err instanceof ProviderError && err.kind === 'permission') {
-        this.permissionMissing = true;
+        this.missing = true;
         this.ctx.log('paddle_discount_permission_missing', { effect: 'mrr_before_discounts' });
         return out;
       }
@@ -692,6 +724,7 @@ interface PendingSubscription {
 async function estimateFromSubscriptions(
   ctx: ProviderContext,
   key: ParsedKey,
+  warnings: Set<string>,
 ): Promise<{ mrr: MoneyMap; activeSubscriptions: number; stats: EstimateStats }> {
   const now = ctx.now();
   const stats: EstimateStats = { trialItems: 0, unpricedItems: 0, overridePrices: 0, unresolvedDiscounts: 0, zeroSubscriptions: 0 };
@@ -734,17 +767,23 @@ async function estimateFromSubscriptions(
     if (amount > 0 || p.unpriced > 0) activeSubscriptions += 1;
     else stats.zeroSubscriptions += 1;
   }
+  // Without Discounts: Read every discount is unresolved; the permission warning says it all.
+  if (discounts.permissionMissing) warnings.add(PADDLE_DISCOUNTS_WARNING);
+  else if (stats.unresolvedDiscounts > 0) warnings.add(paddleDiscountsUnresolvedWarning(stats.unresolvedDiscounts));
+  if (stats.unpricedItems > 0) warnings.add(paddleUnpricedItemsWarning(stats.unpricedItems));
   return { mrr, activeSubscriptions, stats };
 }
 
 async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Promise<MetricsSnapshot> {
   const key = requireKey(input);
+  const warnings = new Set<string>();
 
-  const metric = key.testMode ? null : await metricsMrr(ctx, key);
+  // Sandbox never has the metric, so the estimate there is the normal case and isn't warned about.
+  const metric = key.testMode ? null : await metricsMrr(ctx, key, warnings);
   if (metric) {
     // SPEC §6: active + past_due; trials are counted on their own.
-    const activeSubscriptions = await countSubscriptions(ctx, key, 'active,past_due');
-    const activeTrials = await countSubscriptions(ctx, key, 'trialing');
+    const activeSubscriptions = await countSubscriptions(ctx, key, 'active,past_due', warnings);
+    const activeTrials = await countSubscriptions(ctx, key, 'trialing', warnings);
     ctx.log('paddle_snapshot', {
       source: 'metrics',
       day: metric.day,
@@ -752,11 +791,11 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       trials: activeTrials,
       currencies: Object.keys(metric.mrr),
     });
-    return snapshotOf(metric.mrr, activeSubscriptions, activeTrials);
+    return snapshotOf(metric.mrr, activeSubscriptions, activeTrials, warnings);
   }
 
-  const estimate = await estimateFromSubscriptions(ctx, key);
-  const activeTrials = await countSubscriptions(ctx, key, 'trialing');
+  const estimate = await estimateFromSubscriptions(ctx, key, warnings);
+  const activeTrials = await countSubscriptions(ctx, key, 'trialing', warnings);
   ctx.log('paddle_mrr_estimate', { ...estimate.stats });
   ctx.log('paddle_snapshot', {
     source: 'subscriptions',
@@ -764,10 +803,10 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     trials: activeTrials,
     currencies: Object.keys(estimate.mrr),
   });
-  return snapshotOf(estimate.mrr, estimate.activeSubscriptions, activeTrials);
+  return snapshotOf(estimate.mrr, estimate.activeSubscriptions, activeTrials, warnings);
 }
 
-function snapshotOf(mrr: MoneyMap, activeSubscriptions: number, activeTrials: number): MetricsSnapshot {
+function snapshotOf(mrr: MoneyMap, activeSubscriptions: number, activeTrials: number, warnings: Set<string>): MetricsSnapshot {
   return {
     mrr,
     activeSubscriptions,
@@ -775,6 +814,7 @@ function snapshotOf(mrr: MoneyMap, activeSubscriptions: number, activeTrials: nu
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
   };
 }
 

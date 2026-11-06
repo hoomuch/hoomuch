@@ -201,6 +201,9 @@ references.
    - `verify`: a live, read-only check of the key, at most about 3 requests, with a clear error
      message and the form `field` it belongs to.
    - `fetchSnapshot`: MRR (normalised to monthly, trials excluded), active subscriptions and trials.
+     When a figure is incomplete or estimated (a missing optional permission, items without a price),
+     say so in `warnings`: one short sentence each, exported as a constant, with no customer data or
+     provider text. They show on the dashboard and the connection page until a sync stops reporting them.
    - `fetchRevenue`: charges and refunds since `req.since`. Check `hasBudget(ctx)` before each page:
      it turns false when the request budget runs out or the sync's deadline passes. Then return a
      `nextCursor`, so the next sync can resume.

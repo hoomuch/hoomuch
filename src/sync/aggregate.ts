@@ -10,6 +10,7 @@
 
 import { normalizeCurrency, type MoneyMap } from '../lib/money';
 import { DAY, addDays, dayKey, dayStart } from '../lib/time';
+import { sanitizeErrorText } from '../providers/http';
 import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent } from '../providers/types';
 
 /**
@@ -28,6 +29,9 @@ export const MAX_EXTERNAL_ID_LENGTH = 255;
 export const MAX_DESCRIPTION_LENGTH = 200;
 /** Products kept per snapshot split; MRR beyond them shows as "No product name". */
 export const MAX_SNAPSHOT_PRODUCTS = 500;
+/** Warnings kept per snapshot, and the length of each (`MetricsSnapshot.warnings`). */
+export const MAX_SNAPSHOT_WARNINGS = 5;
+export const MAX_WARNING_LENGTH = 200;
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -212,6 +216,32 @@ export function cleanProductMrr(input: unknown): { products: ProductMrr[]; dropp
 }
 
 /**
+ * A snapshot's warnings as stored: strings only, one line each, key-like text masked, capped in
+ * length and number, duplicates dropped. Null when nothing is left.
+ */
+export function cleanWarnings(input: unknown): string[] | null {
+  if (!Array.isArray(input)) return null;
+  const out: string[] = [];
+  for (const raw of input) {
+    if (typeof raw !== 'string') continue;
+    const w = sanitizeErrorText(raw, MAX_WARNING_LENGTH);
+    if (w && !out.includes(w)) out.push(w);
+    if (out.length === MAX_SNAPSHOT_WARNINGS) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
+/** A stored `snapshots.warnings` value (JSON list, or NULL) back as a list; [] when unreadable. */
+export function parseStoredWarnings(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    return cleanWarnings(JSON.parse(raw) as unknown) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Normalises a snapshot for storage. Throws when it can't be stored at all (no MRR map,
  * no subscription count): writing a zero there would put a false dip in the MRR trend.
  */
@@ -224,6 +254,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
   const period = input['revenuePeriod'] == null ? null : cleanMoneyMap(input['revenuePeriod']);
   const days = nonNegativeInt(input['revenuePeriodDays']);
   const byProduct = cleanProductMrr(input['mrrByProduct']);
+  const warnings = cleanWarnings(input['warnings']);
   return {
     snapshot: {
       mrr: mrr.map,
@@ -233,6 +264,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
       revenuePeriodDays: period && days ? days : null,
       newCustomers: nonNegativeInt(input['newCustomers']),
       mrrByProduct: byProduct ? byProduct.products : null,
+      ...(warnings ? { warnings } : {}),
     },
     dropped: mrr.dropped + (period?.dropped ?? 0) + (byProduct?.dropped ?? 0),
   };

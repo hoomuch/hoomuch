@@ -228,6 +228,12 @@ async function getOverview(ctx: ProviderContext, inp: RcInput): Promise<ParsedOv
   return { currency: currencyOf(body['currency']) ?? REQUEST_CURRENCY, metrics };
 }
 
+/**
+ * Snapshot warning (`MetricsSnapshot.warnings`). MRR and active subscriptions are required (the snapshot fails
+ * without them); a missing revenue or new-customers card isn't one of the snapshot's figures, so only logged.
+ */
+export const RC_TRIALS_MISSING_WARNING = 'Trials aren’t shown, because RevenueCat’s overview didn’t include active trials.';
+
 function toSnapshot(o: ParsedOverview, ctx: ProviderContext): MetricsSnapshot {
   const missing = OVERVIEW_METRIC_IDS.filter((id) => !o.metrics.has(id));
   if (missing.length > 0) ctx.log('revenuecat_overview_missing_metrics', { missing });
@@ -263,6 +269,7 @@ function toSnapshot(o: ParsedOverview, ctx: ProviderContext): MetricsSnapshot {
     revenuePeriod: money('revenue'),
     revenuePeriodDays: revenueDays,
     newCustomers: count('new_customers'),
+    ...(o.metrics.has('active_trials') ? {} : { warnings: [RC_TRIALS_MISSING_WARNING] }),
   };
 }
 

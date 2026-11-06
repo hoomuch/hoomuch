@@ -278,6 +278,24 @@ describe('syncConnection — snapshot history hook', () => {
   });
 });
 
+describe('syncConnection — snapshot warnings', () => {
+  it('stores the snapshot’s warnings with it, and a later clean snapshot clears them', async () => {
+    const c = ctx();
+    await seedStripe(c, 'st-1');
+    vi.spyOn(stripeAdapter, 'fetchRevenue').mockResolvedValue(page([]));
+    const snap = vi.spyOn(stripeAdapter, 'fetchSnapshot').mockResolvedValue({ ...SNAP, warnings: ['MRR is before discounts.', 'MRR is before discounts.'] });
+    const stored = () => c.t.rows<{ warnings: string | null }>('SELECT warnings FROM snapshots WHERE connection_id = ?', 'st-1')[0]!.warnings;
+
+    await syncConnection(c.env, 'st-1', 'initial');
+    expect(stored()).toBe('["MRR is before discounts."]');
+
+    snap.mockResolvedValue(SNAP);
+    vi.setSystemTime(NOW + HOUR);
+    await syncConnection(c.env, 'st-1', 'cron');
+    expect(stored()).toBeNull();
+  });
+});
+
 describe('syncConnection — revenue cursor', () => {
   it('stores a cursor, resumes with the same since, then clears it and advances the high-water mark', async () => {
     const c = ctx();

@@ -3,6 +3,11 @@ import {
   DATA_PERMISSION_WARNING,
   RESTRICTED_PROJECTS_WARNING,
   REVENUE_SQL,
+  SW_MRR_CHART_PARTIAL_WARNING,
+  SW_RESTRICTED_PROJECTS_WARNING,
+  SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING,
+  SW_TRIALS_PERMISSION_WARNING,
+  SW_TRIALS_SKIPPED_WARNING,
   TRIALS_SQL,
   superwallAdapter,
 } from '../../src/providers/superwall';
@@ -363,6 +368,7 @@ describe('superwall fetchSnapshot', () => {
     expect(snap.activeTrials).toBeNull();
     expect(snap.mrr).toEqual({ USD: 407189 });
     expect(calls).toHaveLength(3);
+    expect(snap.warnings).toEqual([SW_TRIALS_PERMISSION_WARNING]);
   });
 
   it('reports trials as unknown (null) when the query API refuses, and still returns the snapshot', async () => {
@@ -376,6 +382,37 @@ describe('superwall fetchSnapshot', () => {
     expect(snap.activeTrials).toBeNull();
     expect(snap.activeSubscriptions).toBe(409);
     expect(logEvents(ctx)).toContain('superwall_trials_unavailable');
+    expect(snap.warnings).toEqual([SW_TRIALS_PERMISSION_WARNING]);
+    expectClean(ctx);
+  });
+
+  it('says trials are skipped this time when the trials query fails for another reason', async () => {
+    const { fetch } = fakeFetch([
+      route(DEFS, { json: definitionsFixture }),
+      route(DATA, chartData(), { method: 'POST' }),
+      route(QUERY, { status: 400, body: 'Code: 62. DB::Exception: Syntax error' }),
+    ]);
+    const snap = await superwallAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.activeTrials).toBeNull();
+    expect(snap.warnings).toEqual([SW_TRIALS_SKIPPED_WARNING]);
+    expect(JSON.stringify(snap.warnings)).not.toMatch(/DB::Exception/); // never Superwall's raw answer
+  });
+
+  it('warns about restricted project access and partial chart coverage in fixed words, never Superwall’s reason', async () => {
+    const defs = clone(definitionsFixture) as unknown as { chart_types: Json[]; scope: Json };
+    defs.scope['all_projects'] = false;
+    for (const c of defs.chart_types) {
+      if (c['name'] === 'MRR') c['availability'] = { status: 'partial', application_ids: [456], reason: 'Web apps have no MRR yet' };
+      if (c['name'] === 'Active Subscriptions') c['availability'] = { status: 'unavailable', reason: 'Not yet' };
+    }
+    const { fetch } = fakeFetch([route(DEFS, { json: defs }), route(DATA, chartData(), { method: 'POST' }), route(QUERY, queryData())]);
+    const snap = await superwallAdapter.fetchSnapshot(input(), makeCtx(fetch));
+    expect(snap.warnings).toEqual([SW_RESTRICTED_PROJECTS_WARNING, SW_MRR_CHART_PARTIAL_WARNING, SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING]);
+    expect(JSON.stringify(snap.warnings)).not.toMatch(/Web apps|Not yet/);
+    for (const w of [SW_RESTRICTED_PROJECTS_WARNING, SW_MRR_CHART_PARTIAL_WARNING, SW_SUBSCRIPTIONS_CHART_PARTIAL_WARNING, SW_TRIALS_PERMISSION_WARNING, SW_TRIALS_SKIPPED_WARNING]) {
+      expect(w.length).toBeLessThanOrEqual(200);
+      expect(w).toMatch(/\.$/);
+    }
   });
 
   it('reports trials as unknown when Superwall has no store or RevenueCat events at all', async () => {
@@ -383,6 +420,7 @@ describe('superwall fetchSnapshot', () => {
     const { fetch } = fakeFetch(okRoutes({ trials: noData }));
     const snap = await superwallAdapter.fetchSnapshot(input(), makeCtx(fetch));
     expect(snap.activeTrials).toBeNull();
+    expect(snap.warnings).toBeUndefined(); // nothing in hoomuch changes it
   });
 
   it('keeps yesterday’s value when today’s point hasn’t been computed yet (no false drop to zero)', async () => {
@@ -400,6 +438,7 @@ describe('superwall fetchSnapshot', () => {
     expect(snap.mrr).toEqual({ USD: 406620 });
     expect(snap.activeSubscriptions).toBe(408);
     expect(logEvents(ctx).filter((e) => e === 'superwall_chart_used_last_complete_day')).toHaveLength(2);
+    expect(snap.warnings).toBeUndefined(); // normal until Superwall computes today's point
   });
 
   it('adds up series if Superwall answers with a breakdown, and ignores future points', async () => {
@@ -427,6 +466,7 @@ describe('superwall fetchSnapshot', () => {
     expect(snap.mrr).toEqual({ USD: 0 });
     expect(snap.activeSubscriptions).toBe(0);
     expect(logEvents(ctx)).toContain('superwall_chart_empty');
+    expect(snap.warnings).toBeUndefined();
   });
 
   it('fails (keeping the previous snapshot) on a chart it can’t read', async () => {
@@ -488,6 +528,7 @@ describe('superwall fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      warnings: [SW_TRIALS_SKIPPED_WARNING],
     });
     expect(calls.map((c) => new URL(c.url).pathname)).toEqual([DEFS, DATA, DATA]);
   });

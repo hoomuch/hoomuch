@@ -158,6 +158,13 @@ export interface MetricsSnapshot {
    * provider doesn't split it or couldn't this time (e.g. the key can't read product names).
    */
   mrrByProduct?: ProductMrr[] | null;
+  /**
+   * What this sync couldn't count, in a short sentence each, shown on the dashboard and the
+   * connection page until a later sync no longer reports it. E.g. "MRR is before discounts: the
+   * key can't read Coupons." Only for data the user can act on or should know is incomplete; never
+   * customer PII, keys or raw provider bodies. The engine keeps at most 5, each ≤ 200 characters.
+   */
+  warnings?: string[];
 }
 
 export interface SnapshotHistoryRequest {

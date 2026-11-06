@@ -996,6 +996,16 @@ describe('connection page', () => {
     expect(out).toContain('Last sync failed');
   });
 
+  it('shows what the last sync couldn’t count, one sentence plain, several as a list', async () => {
+    const one = await render('connection-warning', page({ ...fixtureConnectionDetail(0), warnings: ['MRR is before discounts.'] }));
+    expect(one).toContain('One thing the last sync couldn’t count');
+    expect(one).toContain('MRR is before discounts.');
+    const two = await render('connection-warnings', page({ ...fixtureConnectionDetail(0), warnings: ['First.', 'Second.'] }));
+    expect(two).toContain('What the last sync couldn’t count');
+    expect(two).toMatch(/<li>First\.<\/li><li>Second\.<\/li>/);
+    expect(await render('connection-no-warnings', page(fixtureConnectionDetail(0)))).not.toContain('couldn’t count');
+  });
+
   it('removes demo data from the header in one click, with no Manage section or checkbox', async () => {
     const demo = { ...fixtureConnectionDetail(0), provider: 'demo' as const, name: 'Demo data', keyHint: null };
     const out = await render('connection-demo', page(demo));

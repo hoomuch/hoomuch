@@ -12,7 +12,8 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, DAY, dayKey, dayRange, dayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { BACKFILL_DAYS, cleanProductMrr } from '../sync/aggregate';
+import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
+import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
 import { toSummary } from './connections';
 import type {
@@ -38,6 +39,8 @@ interface SnapRow {
   revenue_period_days?: number | null;
   /** Latest snapshots only: ProductMrr[] JSON, or null. */
   mrr_by_product?: string | null;
+  /** Latest snapshots only: string[] JSON, or null (`MetricsSnapshot.warnings`). */
+  warnings?: string | null;
 }
 
 interface RevRow {
@@ -86,7 +89,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
       .bind(user.id, start),
     db
       .prepare(
-        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product FROM snapshots s
+        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product, s.warnings FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
           WHERE c.user_id = ? AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id)`,
       )
@@ -165,8 +168,16 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
     timeline.set(s.connection_id, list);
   }
 
-  /** Notices the structured fields below can't express. None today; see DashboardData.warnings. */
+  /**
+   * What each connection's latest sync couldn't count, named by connection. The Products: Read
+   * warning is left to the By product card, which already names those connections.
+   */
   const warnings: string[] = [];
+  for (const c of conns) {
+    for (const w of parseStoredWarnings(latestBy.get(c.id)?.warnings)) {
+      if (w !== STRIPE_PRODUCTS_WARNING) warnings.push(`${c.name}: ${w}`);
+    }
+  }
   const breakdown: BreakdownRow[] = [];
   let mrr = 0;
   let subs = 0;
@@ -411,7 +422,9 @@ export function productMrrBreakdown(
     const parts = parseProductMrr(snap.mrr_by_product);
     if (!parts) {
       unnamed += connMrr;
-      if (connMrr > 0 && meta.mrrByProduct) needsPermission.push(conn.name);
+      // Named only when the sync said why (its key can't read products); a split that's missing
+      // for another reason (a budget skip, a report without products) is just unnamed MRR.
+      if (connMrr > 0 && parseStoredWarnings(snap.warnings).includes(STRIPE_PRODUCTS_WARNING)) needsPermission.push(conn.name);
       else if (connMrr > 0) byProvider.set(conn.provider, (byProvider.get(conn.provider) ?? 0) + connMrr);
       continue;
     }

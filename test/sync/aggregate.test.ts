@@ -13,6 +13,9 @@ import {
   cleanEvents,
   cleanSnapshot,
   cleanSnapshotHistory,
+  cleanWarnings,
+  parseStoredWarnings,
+  MAX_SNAPSHOT_WARNINGS,
   dailyFromEvents,
   decodeBackfill,
   encodeBackfill,
@@ -151,6 +154,30 @@ describe('cleanDailyPoints', () => {
     ]);
     expect(points).toEqual([{ day: '2026-11-01', currency: 'USD', gross: 1100, refunds: 10, count: 4 }]);
     expect(skipped).toEqual({ duplicate: 1, day: 1, amount: 3, currency: 1, shape: 1 });
+  });
+});
+
+describe('cleanWarnings / parseStoredWarnings', () => {
+  it('keeps strings, one line each, masked, capped in length and number, without duplicates', () => {
+    const long = 'x'.repeat(500);
+    const out = cleanWarnings(['  MRR is\n before discounts. ', 'MRR is before discounts.', 7, 'key sk_live_abcdefghijklmnop1234 leaked', long, 'a', 'b', 'c'])!;
+    expect(out).toHaveLength(MAX_SNAPSHOT_WARNINGS);
+    expect(out[0]).toBe('MRR is before discounts.');
+    expect(out[1]).not.toContain('sk_live_abcdefghijklmnop1234');
+    expect(out[2]!.length).toBeLessThanOrEqual(200);
+    expect(cleanWarnings([])).toBeNull();
+    expect(cleanWarnings('nope')).toBeNull();
+  });
+
+  it('reads stored JSON back, and anything unreadable as none', () => {
+    expect(parseStoredWarnings('["One.","Two."]')).toEqual(['One.', 'Two.']);
+    expect(parseStoredWarnings(null)).toEqual([]);
+    expect(parseStoredWarnings('{oops')).toEqual([]);
+  });
+
+  it('cleanSnapshot keeps them, and leaves the key out when there are none', () => {
+    expect(cleanSnapshot({ mrr: {}, activeSubscriptions: 0, warnings: ['Heads up.'] }).snapshot.warnings).toEqual(['Heads up.']);
+    expect('warnings' in cleanSnapshot({ mrr: {}, activeSubscriptions: 0, warnings: [] }).snapshot).toBe(false);
   });
 });
 

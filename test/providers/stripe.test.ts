@@ -8,8 +8,14 @@ import {
   SECRET_KEY_WARNING,
   splitRounded,
   STRIPE_API_VERSION,
+  STRIPE_COUPONS_WARNING,
+  STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING,
+  STRIPE_PRODUCTS_WARNING,
   stripeAdapter,
   stripeDigits,
+  stripeDiscountsUnresolvedWarning,
+  stripeInclusiveTaxWarning,
+  stripeUnpricedItemsWarning,
 } from '../../src/providers/stripe';
 import { ProviderError, type MetricsSnapshot } from '../../src/providers/types';
 import {
@@ -1005,6 +1011,118 @@ describe('stripe fetchSnapshot: MRR by product', () => {
     const { snap, calls } = await snapshot({ active: [simple(0)], trialing: [simple(1000, { status: 'trialing' })] });
     expect(snap.mrrByProduct).toEqual([]);
     expect(calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(0);
+  });
+});
+
+describe('stripe fetchSnapshot: warnings', () => {
+  it('has no warnings for a healthy snapshot with discounts, tax rates and product names', async () => {
+    const { snap } = await snapshot({
+      coupons: [coupon('PCT25', { percent_off: 25 })],
+      active: [simple(4000, { discounts: [discount('PCT25')] }), simple(1200, { defaultTaxRates: [taxRate(20, true)] })],
+      trialing: [simple(1000, { status: 'trialing' })],
+    });
+    expect(snap.mrr).toEqual({ USD: 3000 + 1000 });
+    expect(snap.warnings).toBeUndefined();
+  });
+
+  it('says MRR is before discounts when the key lacks Coupons: Read, once and without a count', async () => {
+    const forbidden = clone(errorPermissionFx);
+    forbidden.error.message = forbidden.error.message.replace('rak_subscription_read', 'rak_coupon_read');
+    const { snap, ctx } = await snapshot({
+      extra: [route(/^\/v1\/coupons\//, { status: 403, json: forbidden })],
+      active: [simple(4000, { discounts: [discount('PCT25')] }), simple(5000, { discounts: [discount('PCT20')] })],
+    });
+    expect(snap.warnings).toEqual([STRIPE_COUPONS_WARNING]);
+    expect(STRIPE_COUPONS_WARNING).toBe(COUPONS_PERMISSION_WARNING); // same words as verify's
+    expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
+  });
+
+  it('counts the discounts it couldn’t apply (deleted coupon, bare ID, amount_off in another currency)', async () => {
+    const { snap } = await snapshot({
+      coupons: [coupon('OFF5USD', { amount_off: 500, currency: 'usd' })],
+      extra: [route('/v1/coupons/GONE', { status: 404, json: { error: { message: 'No such coupon', type: 'invalid_request_error' } } })],
+      active: [
+        simple(4000, { discounts: [discount('GONE')] }),
+        simple(3000, { discounts: ['di_FakeNotExpanded' as unknown as Json] }),
+        simple(2000, { currency: 'eur', discounts: [discount('OFF5USD')] }),
+      ],
+    });
+    expect(snap.warnings).toEqual([stripeDiscountsUnresolvedWarning(3)]);
+    expect(snap.warnings![0]).toBe('3 discounts couldn’t be read or applied, so MRR is shown before them.');
+  });
+
+  it('counts the items it couldn’t price (tiers it can’t read, an unknown interval)', async () => {
+    const noTiers = price({ id: 'price_FakeNoTiersW', tiered: 'graduated' });
+    const { snap } = await snapshot({
+      prices: [{ ...tieredFull(noTiers, [tier(null, 100)]), tiers: null }],
+      active: [sub([item(noTiers, { quantity: 3 }), item(price({ amount: 500 }))]), simple(700, { interval: 'fortnight' })],
+    });
+    expect(snap.mrr).toEqual({ USD: 500 });
+    expect(snap.warnings).toEqual([stripeUnpricedItemsWarning(2)]);
+    expect(snap.warnings![0]).toBe('2 subscription items have prices hoomuch can’t read, so they count as 0 in MRR.');
+  });
+
+  it('says MRR includes tax for tax-inclusive prices under Stripe Tax', async () => {
+    const { snap } = await snapshot({
+      active: [
+        sub([item(price({ amount: 1200, taxBehavior: 'inclusive' }))], { automaticTax: true }),
+        sub([item(price({ amount: 1200, taxBehavior: 'exclusive' }))], { automaticTax: true }),
+      ],
+    });
+    expect(snap.warnings).toEqual([stripeInclusiveTaxWarning(1)]);
+    expect(snap.warnings![0]).toBe(
+      'MRR includes tax on 1 subscription item: its price is tax-inclusive under Stripe Tax, which doesn’t say the rate.',
+    );
+  });
+
+  it('names the missing Products: Read with STRIPE_PRODUCTS_WARNING', async () => {
+    const forbidden = clone(errorPermissionFx);
+    forbidden.error.message = forbidden.error.message.replace('rak_subscription_read', 'rak_product_read');
+    const { snap, ctx } = await snapshot({ extra: [route('/v1/products', { status: 403, json: forbidden })], active: [simple(4000)] });
+    expect(snap.mrrByProduct).toBeNull();
+    expect(snap.warnings).toEqual([STRIPE_PRODUCTS_WARNING]);
+    expect(STRIPE_PRODUCTS_WARNING).toBe(PRODUCTS_PERMISSION_WARNING);
+    expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
+  });
+
+  it('says the split was skipped this time when the budget is spent or Stripe fails', async () => {
+    const spent = await snapshot({ active: [simple(4000)], budget: 3 });
+    expect(spent.snap.warnings).toEqual([STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING]);
+    const down = await snapshot({ active: [simple(4000)], extra: [route('/v1/products', { status: 503, json: { error: { message: 'down' } } })] });
+    expect(down.snap.warnings).toEqual([STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING]);
+  });
+
+  it('lists several problems in one snapshot, each once', async () => {
+    const forbidden = clone(errorPermissionFx);
+    forbidden.error.message = forbidden.error.message.replace('rak_subscription_read', 'rak_coupon_read');
+    const { snap } = await snapshot({
+      extra: [
+        route(/^\/v1\/coupons\//, { status: 403, json: forbidden }),
+        route('/v1/products', { status: 403, json: { ...forbidden, error: { ...forbidden.error, message: 'rak_product_read' } } }),
+      ],
+      active: [
+        simple(4000, { discounts: [discount('PCT25')] }),
+        simple(5000, { discounts: [discount('PCT20')] }),
+        simple(700, { interval: 'fortnight' }),
+      ],
+    });
+    expect(snap.warnings).toEqual([STRIPE_COUPONS_WARNING, stripeUnpricedItemsWarning(1), STRIPE_PRODUCTS_WARNING]);
+  });
+
+  it('keeps every sentence short, calm and free of IDs', () => {
+    const all = [
+      STRIPE_COUPONS_WARNING,
+      STRIPE_PRODUCTS_WARNING,
+      STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING,
+      ...[1, 2, 100_000].flatMap((n) => [stripeUnpricedItemsWarning(n), stripeDiscountsUnresolvedWarning(n), stripeInclusiveTaxWarning(n)]),
+    ];
+    for (const w of all) {
+      expect(w.length).toBeLessThanOrEqual(200);
+      expect(w).toMatch(/\.$/);
+      expect(w).not.toMatch(/https?:|rk_|sk_|prod_|price_|sub_/);
+    }
+    expect(stripeUnpricedItemsWarning(1)).toBe('1 subscription item has a price hoomuch can’t read, so it counts as 0 in MRR.');
+    expect(stripeDiscountsUnresolvedWarning(1)).toBe('1 discount couldn’t be read or applied, so MRR is shown before it.');
   });
 });
 

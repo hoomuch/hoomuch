@@ -15,7 +15,9 @@ import currencySource from '../../migrations/0002_currency_source.sql?raw';
 import providerIds from '../../migrations/0003_provider_ids.sql?raw';
 import emailVerification from '../../migrations/0004_email_verification.sql?raw';
 import mrrByProduct from '../../migrations/0005_snapshot_mrr_by_product.sql?raw';
+import snapshotWarnings from '../../migrations/0006_snapshot_warnings.sql?raw';
 import type { Bindings } from '../../src/env';
+import type { ProviderId } from '../../src/providers/types';
 
 type Bindable = null | number | bigint | string | Uint8Array;
 
@@ -100,6 +102,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(providerIds);
   sqlite.exec(emailVerification);
   sqlite.exec(mrrByProduct);
+  sqlite.exec(snapshotWarnings);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {
@@ -194,7 +197,7 @@ export function seedConnection(
   c: {
     id: string;
     userId: string;
-    provider: 'stripe' | 'lemonsqueezy' | 'revenuecat' | 'demo';
+    provider: ProviderId;
     name?: string;
     credentialsEnc?: string;
     config?: Record<string, string>;

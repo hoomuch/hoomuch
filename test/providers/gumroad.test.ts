@@ -10,6 +10,10 @@ import {
   decodeCursor,
   encodeCursor,
   gumroadAdapter,
+  gumroadGuessedPriceWarning,
+  gumroadListPriceWarning,
+  gumroadUnknownStatusWarning,
+  gumroadUnpricedWarning,
   refundFloor,
 } from '../../src/providers/gumroad';
 import { ProviderError, type RevenuePage } from '../../src/providers/types';
@@ -646,6 +650,66 @@ describe('gumroad fetchSnapshot', () => {
     const err = await catchErr(gumroadAdapter.fetchSnapshot(input('Bearer x'), makeCtx(fetch)));
     expect(err).toMatchObject({ kind: 'invalid_input', field: 'apiKey' });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('gumroad fetchSnapshot: warnings', () => {
+  it('has none when every subscriber is priced from a charge or an exact list price', async () => {
+    const p = product({
+      tiers: [
+        { name: 'Basic', prices: { monthly: 500 } },
+        { name: 'Pro', prices: { monthly: 2000 } },
+      ],
+    });
+    const { snap } = await snapshot(oneProduct([{ sale: { price: 1000 } }, { sale: { price: 777, upgrade: true, tier: 'Pro' } }], p));
+    expect(snap.mrr).toEqual({ USD: 1000 + 2000 });
+    expect(snap.warnings).toBeUndefined();
+  });
+
+  it('counts subscribers it can’t price at all, who are left out', async () => {
+    const p = product({ tiers: [{ name: 'Only', prices: { monthly: 800 } }] });
+    // Yearly, but the product only sells monthly now, and there's no charge to read.
+    const { snap, ctx } = await snapshot(oneProduct([{ sale: { price: 1000 } }, { sub: { recurrence: 'yearly', purchaseIds: [] }, sale: null }], p));
+    expect(snap.activeSubscriptions).toBe(1);
+    expect(snap.warnings).toEqual([gumroadUnpricedWarning(1)]);
+    expect(snap.warnings![0]).toBe('1 subscriber has no price hoomuch can find, so they’re left out of MRR and active subscriptions.');
+    expectNoPii(ctx, snap);
+  });
+
+  it('says MRR may be low when it had to guess the cheapest tier or a pay-what-you-want minimum', async () => {
+    const p = product({
+      tiers: [
+        { name: 'Basic', prices: { monthly: 500 } },
+        { name: 'Pro', prices: { monthly: 2000 } },
+      ],
+    });
+    const { snap } = await snapshot(oneProduct([{}, {}], p), 2);
+    expect(snap.warnings).toEqual([gumroadGuessedPriceWarning(2)]);
+
+    const pwyw = product({ tiers: [{ name: 'PWYW', prices: { monthly: 300 }, pwyw: true }] });
+    expect((await snapshot(oneProduct([{}], pwyw), 2)).snap.warnings).toEqual([gumroadGuessedPriceWarning(1)]);
+  });
+
+  it('counts subscribers priced at an exact list price only because the lookups ran out', async () => {
+    const p = product({ tiers: [{ name: 'Only', prices: { monthly: 800, yearly: 8000 } }] });
+    const { snap } = await snapshot(oneProduct([{}, { sub: { recurrence: 'yearly' } }], p), 2);
+    expect(snap.mrr).toEqual({ USD: 800 + 667 });
+    expect(snap.warnings).toEqual([gumroadListPriceWarning(2)]);
+    expect(snap.warnings![0]).toBe('2 subscribers are priced at list price, before discounts, because there were too many to look up in one sync.');
+  });
+
+  it('counts subscribers with a status it doesn’t know', async () => {
+    const { snap } = await snapshot(oneProduct([{ sale: { price: 1000 } }, { sub: { status: 'something_new' } }]));
+    expect(snap.warnings).toEqual([gumroadUnknownStatusWarning(1)]);
+  });
+
+  it('keeps every sentence short', () => {
+    for (const n of [1, 2, 100_000]) {
+      for (const w of [gumroadUnpricedWarning(n), gumroadGuessedPriceWarning(n), gumroadListPriceWarning(n), gumroadUnknownStatusWarning(n)]) {
+        expect(w.length).toBeLessThanOrEqual(200);
+        expect(w).toMatch(/\.$/);
+      }
+    }
   });
 });
 

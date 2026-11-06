@@ -3,7 +3,10 @@ import {
   applyDiscount,
   classifySubscription,
   decodeCursor,
+  LS_DISCOUNTS_BUDGET_WARNING,
+  LS_DISCOUNTS_UNAVAILABLE_WARNING,
   lemonSqueezyAdapter as ls,
+  lsUnpricedWarning,
   pageShift,
   parsePrice,
   priceAmountMinor,
@@ -566,6 +569,58 @@ describe('lemonsqueezy fetchSnapshot', () => {
     await expect(ls.fetchSnapshot(input(), ctx)).rejects.toBeInstanceOf(RateLimitedError);
     expect(server.calls).toHaveLength(1);
     expect(ctx.pageBudget).toBe(0);
+  });
+});
+
+describe('lemonsqueezy fetchSnapshot: warnings', () => {
+  async function snapWith(o: ServerOpts, budget = 30, routes: ReturnType<typeof route>[] = []) {
+    const server = lsServer(o);
+    server.routes.unshift(...routes);
+    const ctx = makeCtx(server.fetch, { pageBudget: budget });
+    return { s: await ls.fetchSnapshot(input(), ctx), ctx };
+  }
+
+  it('has none for the full fixture account (discounts applied, usage-based and trials as usual)', async () => {
+    const { s } = await snapWith({});
+    expect(s.mrr).toEqual({ EUR: 9550, USD: 3000 });
+    expect(s.warnings).toBeUndefined();
+  });
+
+  it('counts the paying subscriptions it can’t price', async () => {
+    const gone = [1, 2].map((n) => {
+      const sub = clone(subsById(1)[0]!);
+      sub.id = String(7000 + n);
+      (sub.attributes['first_subscription_item'] as Record<string, unknown>)['price_id'] = 9990 + n; // GET /prices/{id} → 404
+      return sub;
+    });
+    const { s, ctx } = await snapWith({ subscriptions: [...subsById(1), ...gone] });
+    expect(s).toMatchObject({ mrr: { EUR: 900 }, activeSubscriptions: 3 });
+    expect(s.warnings).toEqual([lsUnpricedWarning(2)]);
+    expect(s.warnings![0]).toBe('2 subscriptions have no price hoomuch can read, so they count as 0 in MRR.');
+    expectClean(ctx, s);
+  });
+
+  it('says MRR is before discounts this time when the discount lookups don’t fit in the budget', async () => {
+    const { s } = await snapWith({}, 10);
+    expect(s.mrr).toEqual({ EUR: 10100, USD: 3000 });
+    expect(s.warnings).toEqual([LS_DISCOUNTS_BUDGET_WARNING]);
+  });
+
+  it.each([
+    [403, { errors: [{ status: '403', title: 'Forbidden', detail: 'Forbidden' }] }],
+    [404, error404],
+  ])('says MRR is before discounts when the discount endpoints answer %i', async (status, json) => {
+    const { s, ctx } = await snapWith({ subscriptions: subsById(17) }, 30, [route('/v1/discounts', { status, json })]);
+    expect(s.warnings).toEqual([LS_DISCOUNTS_UNAVAILABLE_WARNING]);
+    expectNoSecretsInLogs(ctx, [KEY]);
+  });
+
+  it('keeps every sentence short', () => {
+    for (const w of [LS_DISCOUNTS_BUDGET_WARNING, LS_DISCOUNTS_UNAVAILABLE_WARNING, lsUnpricedWarning(1), lsUnpricedWarning(100_000)]) {
+      expect(w.length).toBeLessThanOrEqual(200);
+      expect(w).toMatch(/\.$/);
+    }
+    expect(lsUnpricedWarning(1)).toBe('1 subscription has no price hoomuch can read, so it counts as 0 in MRR.');
   });
 });
 
