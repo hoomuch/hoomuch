@@ -38,6 +38,10 @@ export interface ConnectionRow {
   revenue_synced_until: number | null;
   /** A sync is on the queue and hasn't started (migration 0007). */
   queued_at: number | null;
+  /** Webhooks are on when set; part of the webhook URL's HMAC input (migration 0008). */
+  webhook_nonce: string | null;
+  /** Last valid webhook call (migration 0008). */
+  webhook_last_at: number | null;
   created_at: number;
   updated_at: number;
 }

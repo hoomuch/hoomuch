@@ -8,6 +8,7 @@
  */
 
 import { ChevronDown } from 'lucide-react';
+import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard } from '@/components/ui/card';
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -34,7 +35,9 @@ import {
   TextLink,
 } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { Fragment } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import type { ProviderWebhookSetup } from '../../providers/types';
+import type { WebhookAction } from '../../services/webhooks';
 import { BackLink, describeConfig, formatDay, formatDuration, SyncNotice, type SyncState } from './shared';
 
 /** A sync the user started from this page: still running (the page refreshes), or finished. */
@@ -55,12 +58,15 @@ export interface ConnectionDetailPageProps {
   rotate?: { error?: string | null; fieldErrors?: Record<string, string>; values?: Record<string, string> };
   /** Clock for relative times (fixtures pin it). */
   now?: number;
+  /** Origin the page was served from, for the webhook URL (e.g. "https://hoomuch.example.com"). */
+  origin?: string;
 }
 
 const RUN_KIND: Record<SyncRunRow['kind'], string> = {
   cron: 'Scheduled',
   manual: 'Manual',
   initial: 'Initial',
+  webhook: 'Webhook',
 };
 
 function runResult(run: SyncRunRow) {
@@ -253,6 +259,17 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
           )}
         </Card>
 
+        {d.webhook && meta.webhook ? (
+          <RealtimeCard
+            base={base}
+            providerName={meta.name}
+            setup={meta.webhook}
+            webhook={d.webhook}
+            origin={props.origin ?? ''}
+            now={props.now}
+          />
+        ) : null}
+
         {isDemo ? null : (
           // A coss Collapsible: open by default when it's needed (a form in it failed, or the key does).
           <Collapsible defaultOpen={manageOpen} render={<CossCard id="manage" render={<section aria-labelledby="manage-title" />} />}>
@@ -311,6 +328,120 @@ export function ConnectionDetailPage(props: ConnectionDetailPageProps) {
         )}
       </div>
     </Layout>
+  );
+}
+
+/**
+ * Real-time updates (SPEC F-17): off, a sentence and Turn on; on, the URL to paste into the
+ * provider, where to paste it, and whether a call has arrived yet. Every action is a plain form.
+ */
+function RealtimeCard(props: {
+  base: string;
+  providerName: string;
+  setup: ProviderWebhookSetup;
+  webhook: NonNullable<ConnectionDetail['webhook']>;
+  origin: string;
+  now?: number;
+}) {
+  const { providerName: name, setup, webhook } = props;
+  const action = (value: WebhookAction, label: string, variant: 'secondary' | 'ghost') => (
+    <form method="post" action={`${props.base}/webhook`}>
+      <input type="hidden" name="action" value={value} />
+      <Button variant={variant} small={value !== 'on'}>
+        {label}
+      </Button>
+    </form>
+  );
+  if (!webhook.path) {
+    return (
+      <Card title="Real-time updates" id="realtime">
+        <p className="max-w-prose text-body text-muted-foreground">
+          Sync about a minute after something changes in {name}, instead of at the next scheduled sync. You add a
+          hoomuch URL as a webhook in {name}; a call to it only starts a sync, and hoomuch never reads what’s in it.
+        </p>
+        <div className="mt-4">{action('on', 'Turn on', 'secondary')}</div>
+      </Card>
+    );
+  }
+  const url = `${props.origin}${webhook.path}`;
+  return (
+    <Card
+      title="Real-time updates"
+      id="realtime"
+      description={
+        webhook.lastCallAt === null ? (
+          <>Waiting for the first call from {name}.</>
+        ) : (
+          <>
+            Last call from {name} <RelativeTime ms={webhook.lastCallAt} now={props.now} />.
+          </>
+        )
+      }
+    >
+      <div className="grid max-w-prose gap-4 text-body">
+        <WebhookUrl url={url} />
+        <ol className="grid list-decimal gap-1 pl-5">
+          {setup.steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+        {setup.events.length > 0 ? (
+          <div>
+            <p className="text-muted-foreground">Events to select:</p>
+            <ul className="mt-1 flex flex-wrap gap-1.5">
+              {setup.events.map((e) => (
+                <li key={e}>
+                  <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">{e}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {setup.note ? <p className="text-muted-foreground">{setup.note}</p> : null}
+        <p className="text-muted-foreground">
+          Keep the URL to yourself: anyone who has it can make hoomuch sync this connection, at most once every 5 minutes.
+          If it leaks, get a new one.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {action('rotate', 'New URL', 'secondary')}
+          {action('off', 'Turn off', 'ghost')}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** The webhook URL, selectable as text without JavaScript; a Copy button appears once hydrated. */
+function WebhookUrl(props: { url: string }) {
+  const [canCopy, setCanCopy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setCanCopy(typeof navigator !== 'undefined' && Boolean(navigator.clipboard)), []);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor="webhook-url" className="sr-only">
+        Webhook URL
+      </label>
+      <input
+        id="webhook-url"
+        readOnly
+        value={props.url}
+        spellCheck={false}
+        onFocus={(e) => e.currentTarget.select()}
+        className="h-8.5 min-w-0 flex-1 rounded-lg border bg-muted/40 px-3 font-mono text-sm sm:h-7.5"
+      />
+      {canCopy ? (
+        <CossButton
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void navigator.clipboard.writeText(props.url).then(() => setCopied(true));
+          }}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </CossButton>
+      ) : null}
+    </div>
   );
 }
 

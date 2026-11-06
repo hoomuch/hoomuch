@@ -24,6 +24,8 @@ export interface Bindings {
    */
   RL_REQUESTS?: RateLimit;
   RL_AUTH?: RateLimit;
+  /** Provider webhook calls, per connection (routes/webhooks.ts). Optional like the two above. */
+  RL_WEBHOOKS?: RateLimit;
   /** Public Turnstile site key. With TURNSTILE_SECRET_KEY set too, log in and sign up require it. */
   TURNSTILE_SITE_KEY?: string;
   /** Secret. Turnstile secret key for Siteverify. */

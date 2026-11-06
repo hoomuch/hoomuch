@@ -6,7 +6,8 @@
  * (`max_batch_size: 1`), so each sync gets its own subrequest budget and 15 minutes of wall time
  * instead of sharing the cron's or a request's `waitUntil` (30 s). Producers:
  *   - the cron, for the connections that are due (`runScheduledSync`),
- *   - creating a connection, replacing its key and "Sync now" (services/connections.ts).
+ *   - creating a connection, replacing its key and "Sync now" (services/connections.ts),
+ *   - provider webhooks, delayed a minute so a burst is one sync (services/webhooks.ts).
  *
  * `connections.queued_at` marks a connection with a message on its way, so the cron and
  * "Sync now" don't stack a second one; taking the sync lock clears it. Queues have no
@@ -30,7 +31,7 @@ export interface SyncMessage {
 export const QUEUED_STALE_MS = 15 * MINUTE;
 /** Messages per `sendBatch` call (the Queues limit). */
 export const SEND_BATCH_MAX = 100;
-export const SYNC_KINDS: readonly SyncKind[] = ['cron', 'manual', 'initial'];
+export const SYNC_KINDS: readonly SyncKind[] = ['cron', 'manual', 'initial', 'webhook'];
 
 export function message(connectionId: string, kind: SyncKind, at: number): SyncMessage {
   return { v: 1, connectionId, kind, at };

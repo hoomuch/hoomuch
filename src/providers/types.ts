@@ -92,6 +92,21 @@ export interface ProviderMeta {
    * reading product names. The dashboard's "By product" card shows that split.
    */
   mrrByProduct: boolean;
+  /**
+   * How to point the provider's webhooks at hoomuch (SPEC F-17), for providers whose API shows a
+   * change within minutes. A call only queues a sync; the payload is never read. Absent: the
+   * connection page doesn't offer real-time updates.
+   */
+  webhook?: ProviderWebhookSetup;
+}
+
+export interface ProviderWebhookSetup {
+  /** Short, ordered steps in the provider's dashboard, ending with pasting the URL. */
+  steps: string[];
+  /** Event names to select, exactly as the provider lists them; empty when there's no choice. */
+  events: string[];
+  /** One caveat worth knowing before saving, e.g. "Gumroad has one Ping URL per account." */
+  note?: string;
 }
 
 // ---------- runtime ----------

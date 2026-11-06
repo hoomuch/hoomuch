@@ -216,7 +216,9 @@ references.
 4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
    `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.
-   List the exact read permissions the key needs.
+   List the exact read permissions the key needs. If the provider's API shows a change within
+   minutes and its dashboard lets anyone add a webhook URL by hand, add `webhook` (steps, event names)
+   so the connection page offers real-time updates. hoomuch never registers webhooks through an API.
 5. **Tests.** Put real response shapes under `test/fixtures/<id>/` (taken from the provider's API docs,
    with any personal data removed) and write `test/providers/<id>.test.ts`. Cover MRR maths, paging and
    cursors, error mapping (401, 403, 404, 429, 5xx), and use `expectNoSecretsInLogs`.

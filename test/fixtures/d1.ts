@@ -17,6 +17,7 @@ import emailVerification from '../../migrations/0004_email_verification.sql?raw'
 import mrrByProduct from '../../migrations/0005_snapshot_mrr_by_product.sql?raw';
 import snapshotWarnings from '../../migrations/0006_snapshot_warnings.sql?raw';
 import syncQueue from '../../migrations/0007_sync_queue.sql?raw';
+import webhooks from '../../migrations/0008_webhooks.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
 import { FakeQueue } from './queue';
@@ -106,6 +107,7 @@ export function createTestD1(): TestD1 {
   sqlite.exec(mrrByProduct);
   sqlite.exec(snapshotWarnings);
   sqlite.exec(syncQueue);
+  sqlite.exec(webhooks);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {

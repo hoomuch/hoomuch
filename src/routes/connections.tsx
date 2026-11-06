@@ -8,6 +8,7 @@ import { currentUser, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { getProviderMeta } from '../providers/registry';
 import { isProviderId, type ProviderMeta } from '../providers/types';
+import { setWebhook } from '../services/webhooks';
 import {
   createConnection,
   deleteConnection,
@@ -93,6 +94,7 @@ function renderDetail(
       manual,
       manageOpen: c.req.query('manage') === 'open',
       rotate: opts.rotate,
+      origin: new URL(c.req.url).origin,
     }, opts.status ?? 200);
 }
 
@@ -213,6 +215,25 @@ export function registerConnectionRoutes(app: Hono<AppEnv>): void {
     // The page's sync notice says "Key replaced." and follows the sync; a flash only for caveats.
     const to = `${back}?sync=${requestedAt}&why=key`;
     return result.warnings.length > 0 ? redirectWithFlash(c, to, 'info', result.warnings.join(' ')) : c.redirect(to, 303);
+  });
+
+  app.post('/connections/:id/webhook', requireUser, formLimit, async (c) => {
+    const id = c.req.param('id');
+    if (!isUuid(id)) return c.notFound();
+    const user = currentUser(c);
+    const action = (await readForm(c)).text('action', 8);
+    if (action !== 'on' && action !== 'rotate' && action !== 'off') return c.notFound();
+    const row = await getConnectionDetail(c.env, user, id);
+    if (!row?.webhook) return c.notFound();
+    if (!(await setWebhook(c.env, user.id, id, action))) return c.notFound();
+    const name = getProviderMeta(row.provider).name;
+    const message =
+      action === 'on'
+        ? `Real-time updates are on. Add the URL below as a webhook in ${name}.`
+        : action === 'rotate'
+          ? `New URL ready. Replace the old one in ${name}: it no longer works.`
+          : `Real-time updates are off. Remove the webhook from ${name} too.`;
+    return redirectWithFlash(c, `/connections/${id}#realtime`, 'success', message);
   });
 
   app.post('/connections/:id/delete', requireUser, formLimit, async (c) => {

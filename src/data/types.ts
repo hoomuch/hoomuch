@@ -267,7 +267,7 @@ export interface SnapshotRow {
 }
 
 export interface SyncRunRow {
-  kind: 'cron' | 'manual' | 'initial';
+  kind: 'cron' | 'manual' | 'initial' | 'webhook';
   startedAt: number;
   finishedAt: number | null;
   ok: boolean | null;
@@ -288,4 +288,10 @@ export interface ConnectionDetail extends ConnectionSummary {
   recentRuns: SyncRunRow[];
   /** What the latest snapshot couldn't count (`MetricsSnapshot.warnings`); [] when nothing. */
   warnings: string[];
+  /**
+   * Real-time updates (SPEC F-17), for providers with webhook setup (`ProviderMeta.webhook`); null
+   * for the others. `path` is the webhook URL without its origin (the page adds the one it was
+   * served from), null while webhooks are off.
+   */
+  webhook: { path: string | null; lastCallAt: number | null } | null;
 }

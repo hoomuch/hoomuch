@@ -75,7 +75,7 @@ import {
   type ConnectionFinish,
 } from './repo';
 
-export type SyncKind = 'cron' | 'manual' | 'initial';
+export type SyncKind = 'cron' | 'manual' | 'initial' | 'webhook';
 
 export interface SyncResult {
   ok: boolean;

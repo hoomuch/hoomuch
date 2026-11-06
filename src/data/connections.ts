@@ -6,6 +6,7 @@ import type { Bindings, SessionUser } from '../env';
 import { listConnections, parseConfig, type ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { getProviderMeta } from '../providers/registry';
+import { webhookPath } from '../services/webhooks';
 import { parseStoredWarnings } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, rowToFx } from '../sync/fx';
 import type { ConnectionDetail, ConnectionSummary, SnapshotRow, SyncRunRow } from './types';
@@ -111,5 +112,11 @@ export async function getConnectionDetail(
     snapshots,
     recentRuns,
     warnings: parseStoredWarnings(((snapR!.results ?? []) as unknown as SnapRow[])[0]?.warnings),
+    webhook: getProviderMeta(row.provider).webhook
+      ? {
+          path: row.webhook_nonce ? await webhookPath(env, row.id, row.webhook_nonce) : null,
+          lastCallAt: row.webhook_last_at,
+        }
+      : null,
   };
 }

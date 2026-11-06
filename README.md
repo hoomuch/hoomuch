@@ -152,6 +152,24 @@ Keys are checked live before they're saved. The first sync backfills 90 days of 
 each connection syncs every `SYNC_INTERVAL_MINUTES` (an hour by default), and **Sync now** runs one
 straight away.
 
+### Real-time updates
+
+Stripe, Paddle, Lemon Squeezy, Polar, Chargebee, Dodo Payments and Gumroad can tell hoomuch when
+something changes, so a new subscription or refund shows up about a minute later instead of at the
+next scheduled sync. On the connection's page, under **Real-time updates**, click **Turn on**, then
+add the URL it shows as a webhook in the provider's dashboard. The page lists where to paste it and
+which events to pick.
+
+- **A call is only a signal.** hoomuch never reads what a webhook sends, which can include your
+  customers' details, and doesn't check the provider's signature. It syncs that connection through
+  its read-only key, as a scheduled sync would. A burst of events becomes one sync, and webhook syncs
+  of one connection start at least 5 minutes apart.
+- **Keep the URL private.** It carries a secret token, and anyone who has it can make hoomuch sync
+  that connection (at that same rate at most). **New URL** replaces it, and the old one stops working.
+- **Not offered** for App Store Connect and Google Play (their reports arrive a day later), Adapty
+  (one webhook URL per environment, which apps already use), and RevenueCat and Superwall (their
+  charts refresh on their own schedule).
+
 ## Updating
 
 Pull the latest changes from this repository into your copy and deploy (with the button, pushing to
@@ -216,7 +234,6 @@ wasn't. The ones you'd notice:
 - **Creem** isn't supported yet: its API has no date filter on transactions and no dated refunds
   (SPEC §6.9).
 - **Everywhere:** past revenue is converted at today's FX rate, and day boundaries are UTC.
-- Provider webhooks are planned for v1.1 (SPEC §12.1).
 
 ## How it's built
 

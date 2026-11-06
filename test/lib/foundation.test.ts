@@ -24,6 +24,7 @@ import {
 import { addDays, dayRange, lastNDays } from '../../src/lib/time';
 import { safeNext } from '../../src/lib/auth';
 import { splitInput, getProviderMeta } from '../../src/providers/registry';
+import { PROVIDER_IDS } from '../../src/providers/types';
 
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i)));
 
@@ -266,5 +267,16 @@ describe('registry', () => {
       errors: {},
     });
     expect(Object.keys(splitInput(rc, { apiKey: '' }).errors)).toEqual(['apiKey', 'projectId']);
+  });
+
+  it('offers webhook setup only for providers whose API shows a change within minutes', () => {
+    const withWebhook = PROVIDER_IDS.filter((id) => getProviderMeta(id).webhook);
+    expect(withWebhook).toEqual(['stripe', 'paddle', 'lemonsqueezy', 'polar', 'chargebee', 'dodo', 'gumroad']);
+    for (const id of withWebhook) {
+      const w = getProviderMeta(id).webhook!;
+      expect(w.steps.length, id).toBeGreaterThan(0);
+      expect(w.steps.some((step) => /this URL/.test(step)), id).toBe(true);
+      expect(w.events.length, id).toBeLessThanOrEqual(6);
+    }
   });
 });

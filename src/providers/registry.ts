@@ -54,6 +54,22 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     // read customer data (SPEC §6.1). The product split comes from subscriptions instead (mrrByProduct).
     productNames: false,
     mrrByProduct: true,
+    webhook: {
+      steps: [
+        'In Stripe, open Workbench → Webhooks and click Create an event destination.',
+        'Choose Your account and the Snapshot payload format, tick the events below, then pick Webhook endpoint.',
+        'Paste this URL as the Endpoint URL and save. You can ignore the whsec_ signing secret.',
+      ],
+      events: [
+        'customer.subscription.created',
+        'customer.subscription.updated',
+        'customer.subscription.deleted',
+        'invoice.paid',
+        'charge.succeeded',
+        'charge.refunded',
+      ],
+      note: 'Live mode and each sandbox have their own destinations: create it where this key belongs.',
+    },
   },
   {
     id: 'paddle',
@@ -93,6 +109,22 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'transactions',
     productNames: true,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In Paddle, open Events → Notifications and click New destination.',
+        'Set Notification type to URL, paste this URL, set Usage type to Platform only and tick the events below.',
+        'Click Save destination. hoomuch doesn’t need the secret key Paddle shows.',
+      ],
+      events: [
+        'subscription.created',
+        'subscription.updated',
+        'subscription.canceled',
+        'transaction.completed',
+        'adjustment.created',
+        'adjustment.updated',
+      ],
+      note: 'Sandbox and live are separate accounts: add it in the one this key belongs to.',
+    },
   },
   {
     id: 'lemonsqueezy',
@@ -134,6 +166,22 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'transactions',
     productNames: true,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In Lemon Squeezy, open Settings » Webhooks and click the plus icon.',
+        'Paste this URL as the Callback URL. The Signing secret is required, but hoomuch doesn’t check it: type any 6 to 40 characters.',
+        'Tick the events below and save.',
+      ],
+      events: [
+        'order_created',
+        'order_refunded',
+        'subscription_created',
+        'subscription_updated',
+        'subscription_payment_success',
+        'subscription_payment_refunded',
+      ],
+      note: 'Test-mode webhooks only fire for test data: add it in the mode this key belongs to.',
+    },
   },
   {
     id: 'polar',
@@ -166,6 +214,15 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'transactions',
     productNames: true,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In your Polar organization, open Settings → Webhooks and click Add Endpoint.',
+        'Paste this URL and choose Raw as the format. Any secret works: hoomuch doesn’t check it.',
+        'Tick the events below and save.',
+      ],
+      events: ['subscription.created', 'subscription.updated', 'order.paid', 'order.refunded'],
+      note: 'Sandbox is a separate environment: add it in the organization this token belongs to.',
+    },
   },
   {
     id: 'revenuecat',
@@ -243,6 +300,22 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'transactions',
     productNames: false,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In Chargebee, open Settings → Configure Chargebee → API Keys and Webhooks, then the Webhooks tab, and click Add Webhook.',
+        'Name it, paste this URL as the Webhook URL and leave basic authentication off.',
+        'Under Events to Send, pick the events below instead of All Events, and click Create.',
+      ],
+      events: [
+        'subscription_created',
+        'subscription_changed',
+        'subscription_cancelled',
+        'subscription_reactivated',
+        'payment_succeeded',
+        'payment_refunded',
+      ],
+      note: 'A site has at most 5 webhooks, and test and live are separate sites.',
+    },
   },
   {
     id: 'dodo',
@@ -272,6 +345,21 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'daily',
     productNames: false,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In Dodo Payments, open Developer → Webhooks and click Add endpoint.',
+        'Paste this URL, select the events below and click Create endpoint. You can ignore the signing secret.',
+      ],
+      events: [
+        'subscription.active',
+        'subscription.updated',
+        'subscription.cancelled',
+        'subscription.renewed',
+        'payment.succeeded',
+        'refund.succeeded',
+      ],
+      note: 'With no events selected Dodo sends every event, which works but is noisier. Test and live mode have their own webhooks.',
+    },
   },
   {
     id: 'gumroad',
@@ -305,6 +393,14 @@ export const PROVIDERS: readonly ProviderMeta[] = [
     revenueHistory: 'transactions',
     productNames: true,
     mrrByProduct: false,
+    webhook: {
+      steps: [
+        'In Gumroad, open Settings → Advanced and find the Ping section.',
+        'Paste this URL as the Ping endpoint and save. Send test ping to URL checks it arrives.',
+      ],
+      events: [],
+      note: 'Gumroad has one Ping URL per account, so this replaces any you use elsewhere (Zapier, for example). Pings cover sales; refunds and cancellations still arrive with the next scheduled sync.',
+    },
   },
   {
     id: 'adapty',
