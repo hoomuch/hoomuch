@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BudgetExhaustedError,
   buildUrl,
+  fetchBytes,
   fetchJson,
   hasBudget,
   MAX_RETRY_WAIT_MS,
@@ -225,6 +226,15 @@ describe('fetchJson', () => {
   });
 });
 
+describe('sanitizeErrorText private keys and Google tokens', () => {
+  it('masks PEM keys, whole or cut short, and ya29 access tokens', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49\n-----END PRIVATE KEY-----';
+    expect(sanitizeErrorText(`bad key ${pem} here`)).toBe('bad key [private key] here');
+    expect(sanitizeErrorText('-----BEGIN PRIVATE KEY----- MIGTAgEAMBMGBy')).toBe('[private key]');
+    expect(sanitizeErrorText('token ya29.c.b0AXv0zTOabc-def_ghi rejected')).toBe('token ya29.*** rejected');
+  });
+});
+
 describe('sanitizeErrorText', () => {
   it('masks keys, tokens, bearer headers and e-mails, and truncates', () => {
     const s = sanitizeErrorText(
@@ -280,6 +290,49 @@ describe('fetchJson readQuery', () => {
     expect(calls[1]).toMatchObject({ method: 'GET' });
     expect(calls[1]!.body).toBeUndefined();
     expect(calls[1]!.headers['content-type']).toBeUndefined();
+  });
+});
+
+describe('fetchJson tokenForm', () => {
+  it('POSTs a form-encoded OAuth token request', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/things', { json: { access_token: 'ya29.x' } }, { method: 'POST' })]);
+    const ctx = makeCtx(fetch);
+    await expect(fetchJson(ctx, spec({ tokenForm: { grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: 'a.b.c' } }))).resolves.toEqual({
+      access_token: 'ya29.x',
+    });
+    expect(calls[0]!.method).toBe('POST');
+    expect(calls[0]!.headers['content-type']).toBe('application/x-www-form-urlencoded');
+    expect(calls[0]!.body).toBe('grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=a.b.c');
+  });
+});
+
+describe('fetchBytes', () => {
+  const bytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0xff, 0x00]);
+
+  it('returns the raw body and spends one unit of budget', async () => {
+    const { fetch, calls } = fakeFetch([route('/v1/things', { bytes })]);
+    const ctx = makeCtx(fetch, { pageBudget: 2 });
+    expect(await fetchBytes(ctx, spec())).toEqual(bytes);
+    expect(ctx.pageBudget).toBe(1);
+    expect(calls[0]!.headers['accept']).toBe('*/*');
+  });
+
+  it('retries 5xx and maps error bodies like fetchJson', async () => {
+    const { fetch } = fakeFetch([
+      route('/v1/things', [{ status: 503, body: 'busy' }, { bytes }]),
+      route('/v1/other', { status: 404, json: { errors: [{ detail: 'There were no sales for the date specified.' }] } }),
+    ]);
+    const ctx = makeCtx(fetch, { pageBudget: 5 });
+    expect(await fetchBytes(ctx, spec())).toEqual(bytes);
+    const err = await catchErr(fetchBytes(ctx, spec({ url: 'https://api.example.com/v1/other', notFoundMessage: 'No report.' })));
+    expect(err).toMatchObject({ kind: 'not_found', message: 'No report.' });
+  });
+
+  it('gives up on a report larger than maxBytes, naming the limit', async () => {
+    const { fetch } = fakeFetch([route('/v1/things', { bytes: new Uint8Array(3 * 1024 * 1024) })]);
+    const err = await catchErr(fetchBytes(makeCtx(fetch), { ...spec(), maxBytes: 2 * 1024 * 1024 }));
+    expect(err.kind).toBe('upstream');
+    expect(err.message).toMatch(/too large to read \(over 2 MB\)/);
   });
 });
 

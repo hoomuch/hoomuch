@@ -1,0 +1,10 @@
+Provider	Provider Country	SKU	Developer	Title	Version	Product Type Identifier	Units	Developer Proceeds	Begin Date	End Date	Customer Currency	Country Code	Currency of Proceeds	Apple Identifier	Customer Price	Promo Code	Parent Identifier	Subscription	Period	Category	CMB	Device	Supported Platforms	Proceeds Reason	Preserved Pricing	Client	Order Type
+APPLE	US	acme.app	Acme Labs	Acme App	2.1	1F	3	.70	11/03/2026	11/03/2026	USD	US	USD	1234567890	.99					Productivity		iPhone	iOS				
+APPLE	US	acme.coins	Acme Labs	acme.coins.100	2.1	IA1	2	2.79	11/03/2026	11/03/2026	USD	US	USD	1234567890	3.99		acme.app			Productivity		iPhone	iOS				
+APPLE	US	acme.pro.monthly	Acme Labs	acme.pro.monthly	2.1	IAY	4	6.99	11/03/2026	11/03/2026	EUR	DE	EUR	1234567890	9.99		acme.app	Renewal	1 Month	Productivity		iPhone	iOS				
+APPLE	US	acme.pro.monthly	Acme Labs	acme.pro.monthly	2.1	IAY	-1	6.99	11/03/2026	11/03/2026	EUR	DE	EUR	1234567890	9.99		acme.app	Renewal	1 Month	Productivity		iPhone	iOS				
+APPLE	US	acme.app	Acme Labs	Acme App	2.1	1F	50	0	11/03/2026	11/03/2026	USD	US	USD	1234567890	0					Productivity		iPhone	iOS				
+APPLE	US	acme.app	Acme Labs	Acme App	2.1	7F	20	0	11/03/2026	11/03/2026	GBP	GB	GBP	1234567890	0					Productivity		iPhone	iOS				
+APPLE	US	acme.coins	Acme Labs	acme.coins.100	2.1	IA1	1	336	11/03/2026	11/03/2026	JPY	JP	JPY	1234567890	480		acme.app			Productivity		iPhone	iOS				
+APPLE	US	acme.app	Acme Labs	Acme App	2.1	1F	1	.70	11/03/2026	11/03/2026	USD	US	USD	1234567890	-.99					Productivity		iPhone	iOS				
+APPLE	US	acme.coins	Acme Labs	acme.coins.100	2.1	IA1	0	2.79	11/03/2026	11/03/2026	USD	US	USD	1234567890	-3.99		acme.app			Productivity		iPhone	iOS				

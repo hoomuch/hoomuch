@@ -33,8 +33,8 @@ down by connection.
   <img src=".github/assets/dashboard-light.png" alt="The hoomuch dashboard with demo data: MRR of $5,168 with a 30-day chart, active subscriptions, trials, revenue, and a breakdown by connection">
 </picture>
 
-- **Ten providers.** Stripe, Paddle, Lemon Squeezy, Polar, RevenueCat, Chargebee, Dodo Payments,
-  Gumroad, Adapty and Superwall.
+- **Twelve providers.** Stripe, Paddle, Lemon Squeezy, Polar, RevenueCat, Chargebee, Dodo Payments,
+  Gumroad, Adapty, Superwall, App Store Connect and Google Play.
 - **Read-only.** hoomuch never writes to a provider, and asks for read-only keys wherever the provider
   offers them.
 - **Your keys stay on your account.** It runs on your own Cloudflare account, and provider keys are
@@ -136,6 +136,8 @@ own domain, though, not on `*.workers.dev`. For a public instance, add a custom 
 | Gumroad | Access token from your own Gumroad application (can't be scoped, so it has full access) | — |
 | Adapty | Secret API key `secret_live_…` (can't be scoped) | — |
 | Superwall | Organization API key + Organization ID | `charts:read`; `data:read` is optional and enables daily revenue, refunds and trials |
+| App Store Connect | Team API key (`.p8` file) + Issuer ID, Key ID and vendor number | Sales role (Finance or Admin also work, but can do more). Individual keys can't read sales reports |
+| Google Play | Service account JSON key + the reports bucket's Cloud Storage URI | Play Console: View app information and download bulk reports; View financial data. The Google Play Android Developer API turned on in the service account's project |
 
 Keys are checked live before they're saved. The first sync backfills 90 days of revenue. After that,
 each connection syncs every `SYNC_INTERVAL_MINUTES` (an hour by default), and **Sync now** runs one
@@ -188,6 +190,17 @@ wasn't. The ones you'd notice:
   and store fees included), and test mode can't be detected.
 - **Dodo Payments:** revenue comes from the balance ledger, so it's daily totals with no transaction
   list.
+- **App Store Connect:** numbers come from Apple's Sales and Trends reports, so they run a day behind
+  (Apple publishes each Pacific Time day the next morning). MRR counts standard-price subscriptions;
+  subscribers on a paid introductory or promotional price count as active but not in MRR, because the
+  report doesn't say what they pay. Revenue is the customer price, tax included, before Apple's
+  commission, in each buyer's currency.
+- **Google Play:** Google has no revenue API, so hoomuch reads the reports Play Console exports. MRR
+  is Google's active-subscription count priced at each base plan's current price in that country, a
+  few days behind; subscribers in a free trial, on an offer or on an older price are counted at that
+  price, and trials show as unknown. Revenue comes per order from the estimated sales report (tax
+  included, before Google's fee). A newly invited service account can take up to a day to see the
+  reports.
 - **Gumroad:** MRR is an estimate. The API doesn't say what each subscriber pays, so hoomuch prices
   them at their latest charge, or the tier's list price when it can't find one. Refunds land on the
   sale's day, because Gumroad doesn't date them.

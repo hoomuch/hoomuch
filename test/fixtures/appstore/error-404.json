@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "id": "6b9d7c2e-0000-4000-8000-000000000004",
+      "status": "404",
+      "code": "NOT_FOUND",
+      "title": "The specified resource does not exist",
+      "detail": "There were no sales for the date specified."
+    }
+  ]
+}

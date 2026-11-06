@@ -22,6 +22,8 @@ export interface FakeResponse {
   json?: unknown;
   /** Raw body (wins over `json`). */
   body?: string;
+  /** Binary body, e.g. a gzip or zip report (wins over `body` and `json`). */
+  bytes?: Uint8Array;
   headers?: Record<string, string>;
   /** Never resolves until the request is aborted (timeout tests). */
   hang?: boolean;
@@ -100,6 +102,12 @@ export function fakeFetch(routes: Route[]): { fetch: typeof fetch; calls: Record
         if (!signal) return;
         if (signal.aborted) reject(new DOMException('Aborted', 'AbortError'));
         signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    }
+    if (spec.bytes) {
+      return new Response(spec.bytes.slice(), {
+        status: spec.status ?? 200,
+        headers: { 'content-type': 'application/octet-stream', ...spec.headers },
       });
     }
     const body = spec.body ?? (spec.json === undefined ? '' : JSON.stringify(spec.json));

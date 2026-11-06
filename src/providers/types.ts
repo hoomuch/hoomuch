@@ -22,6 +22,8 @@ export type ProviderId =
   | 'gumroad'
   | 'adapty'
   | 'superwall'
+  | 'appstore'
+  | 'googleplay'
   | 'demo';
 
 /** Every id the app accepts. The database no longer checks this (migration 0003): this list is the guard. */
@@ -36,6 +38,8 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   'gumroad',
   'adapty',
   'superwall',
+  'appstore',
+  'googleplay',
   'demo',
 ];
 
@@ -70,6 +74,8 @@ export interface ProviderMeta {
   keySteps: string[];
   /** Deep link to where the key is created, if any. */
   keyUrl: string | null;
+  /** Link text when `keyUrl` isn't the provider's own dashboard (default "Open <name>"). */
+  keyUrlLabel?: string;
   /** Read permissions the key needs, shown as a checklist. */
   permissions: string[];
   /** Shown prominently on the form, e.g. "Lemon Squeezy keys have full account access." */

@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": 403,
+    "message": "hoomuch@acme-123.iam.gserviceaccount.com does not have storage.objects.list access to the Google Cloud Storage bucket. Permission 'storage.objects.list' denied on resource (or it may not exist).",
+    "errors": [
+      {
+        "message": "hoomuch@acme-123.iam.gserviceaccount.com does not have storage.objects.list access to the Google Cloud Storage bucket. Permission 'storage.objects.list' denied on resource (or it may not exist).",
+        "domain": "global",
+        "reason": "forbidden"
+      }
+    ]
+  }
+}

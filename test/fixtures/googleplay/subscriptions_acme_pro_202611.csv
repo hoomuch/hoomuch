@@ -1,0 +1,8 @@
+Date,Package Name,Product ID,Country,New Subscriptions,Canceled Subscriptions,Active Subscriptions,Base Plan ID,Offer ID
+2026-11-03,com.acme.app,acme_pro,US,2,1,49,monthly,
+2026-11-03,com.acme.app,acme_pro,DE,0,0,19,yearly,
+2026-11-04,com.acme.app,acme_pro,US,1,0,50,monthly,
+2026-11-04,com.acme.app,acme_pro,US,3,0,10,monthly,trial-7d
+2026-11-04,com.acme.app,acme_pro,DE,1,0,20,yearly,
+2026-11-04,com.acme.app,acme_pro,JP,0,0,5,monthly,
+2026-11-04,com.acme.app,acme_pro,BR,0,0,3,monthly,

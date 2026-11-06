@@ -1,0 +1,11 @@
+{
+  "errors": [
+    {
+      "id": "6b9d7c2e-0000-4000-8000-000000000005",
+      "status": "429",
+      "code": "RATE_LIMIT_EXCEEDED",
+      "title": "The request rate limit has been reached.",
+      "detail": "We've received too many requests for this API. Please wait and try again or slow down your request rate."
+    }
+  ]
+}

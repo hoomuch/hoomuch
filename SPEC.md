@@ -9,7 +9,7 @@
 ## 1. Özet
 
 Indie geliştiriciler gelirlerini birden fazla platformdan alır: web ürünü Stripe, Paddle, Lemon Squeezy,
-Polar, Chargebee, Dodo Payments veya Gumroad ile, mobil uygulama RevenueCat, Adapty veya Superwall ile satılır. Her platformun paneli, para birimi ve metrik tanımı farklıdır;
+Polar, Chargebee, Dodo Payments veya Gumroad ile, mobil uygulama RevenueCat, Adapty veya Superwall ile ya da doğrudan App Store ve Google Play'de satılır. Her platformun paneli, para birimi ve metrik tanımı farklıdır;
 "bu ay toplam ne kazanıyorum?" sorusunun cevabı bir hesap tablosunda kaybolur.
 
 **hoomuch** bu hesapları **salt-okunur API anahtarlarıyla** bağlar, verileri düzenli olarak çeker ve
@@ -41,7 +41,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | ID | İhtiyaç | Öncelik |
 |----|---------|---------|
 | F-01 | E-posta + parola ile kayıt, giriş, çıkış. `ALLOW_SIGNUP=false` iken kayıt kapalı | P0 |
-| F-02 | Bağlantı ekleme: **Stripe** (restricted key), **Paddle** (izinli API key), **Lemon Squeezy** (API key, opsiyonel Store ID), **Polar** (organization access token), **RevenueCat** (v2 secret key + Project ID), **Chargebee** (read-only key + site), **Dodo Payments** (read izinli API key), **Gumroad** (access token), **Adapty** (secret key), **Superwall** (organization API key + Organization ID) | P0 |
+| F-02 | Bağlantı ekleme: **Stripe** (restricted key), **Paddle** (izinli API key), **Lemon Squeezy** (API key, opsiyonel Store ID), **Polar** (organization access token), **RevenueCat** (v2 secret key + Project ID), **Chargebee** (read-only key + site), **Dodo Payments** (read izinli API key), **Gumroad** (access token), **Adapty** (secret key), **Superwall** (organization API key + Organization ID), **App Store Connect** (team API key .p8 + Issuer ID + Key ID + vendor number), **Google Play** (service account JSON key + rapor bucket'ı) | P0 |
 | F-03 | Kaydetmeden önce anahtarı canlı doğrulama; anlaşılır hata mesajı (yetki eksik, geçersiz anahtar, vb.) | P0 |
 | F-04 | Bağlantıları listeleme, yeniden adlandırma, anahtar yenileme, silme (onaylı; demo veri onaysız silinir ve flash'ta "Geri ekle" sunulur) | P0 |
 | F-05 | **Demo bağlantısı**: anahtarsız, deterministik örnek veri (çoklu para birimi, 90 gün geçmiş). İlk gerçek bağlantı demo veriyi kaldırır, böylece toplamlar gerçek paradır | P0 |
@@ -57,7 +57,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-15 | Ayarlar: para birimi, parola değiştirme, hesabı tüm verisiyle silme | P1 |
 | F-16 | Günlük gelir CSV dışa aktarma | P2 |
 | F-17 | Webhook ile gerçek zamanlı güncelleme | v1.1 |
-| F-18 | Ürün bazında kırılım ("By product" kartı), iki tablo: **MRR** — bağlantının son snapshot'ındaki MRR, ürüne göre (yalnızca Stripe böler; `ProviderMeta.mrrByProduct`); bölmeyen bağlantılar ve adsız ürünler "No product name" satırında, tablo MRR KPI'ına eşittir. **Gelir** — seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına); ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall) ve adsız işlemler "No product name" satırında, tablo gelir KPI'ına eşittir. Bölünecek bir şeyi olmayan tablo gösterilmez; neden gösterilmediği notta söylenir. MRR'ı bölebilecekken bölemeyen (anahtarında Products: Read olmayan) Stripe bağlantıları notta adıyla anılır | P1 |
+| F-18 | Ürün bazında kırılım ("By product" kartı), iki tablo: **MRR** — bağlantının son snapshot'ındaki MRR, ürüne göre (Stripe, App Store Connect ve Google Play böler; `ProviderMeta.mrrByProduct`); bölmeyen bağlantılar ve adsız ürünler "No product name" satırında, tablo MRR KPI'ına eşittir. **Gelir** — seçili penceredeki net gelir, işlemdeki ürün/plan adına göre (bağlantı başına); ürün adı vermeyen sağlayıcıların geliri (Stripe, Chargebee, günlük toplam veren RevenueCat, Dodo Payments, Adapty, Superwall, App Store Connect) ve adsız işlemler "No product name" satırında, tablo gelir KPI'ına eşittir. Bölünecek bir şeyi olmayan tablo gösterilmez; neden gösterilmediği notta söylenir. MRR'ı bölebilecekken bölemeyen (anahtarında Products: Read olmayan) Stripe bağlantıları notta adıyla anılır | P1 |
 
 ### 3.2 Fonksiyonel olmayan ihtiyaçlar
 
@@ -101,6 +101,8 @@ Tarayıcı ──HTTPS──▶ Cloudflare Worker  (tek deploy)
                                                    ├──▶ Gumroad API
                                                    ├──▶ Adapty Export Analytics API
                                                    ├──▶ Superwall API (charts + query)
+                                                   ├──▶ App Store Connect API (Sales and Trends raporları)
+                                                   ├──▶ Google Cloud Storage (Play Console raporları) + Android Publisher API
                                                    └──▶ frankfurter.dev (ECB kurları)
 ```
 
@@ -198,7 +200,7 @@ yalnızca bugünün snapshot'ını ve son 2 günü yeniler; geçmişi düzeltmek
 | **ARR** | MRR × 12 |
 | **Aktif abonelik** | Ücretli aktif abonelik sayısı (past_due dahil, deneme hariç) |
 | **Aktif deneme** | Deneme süresindeki abonelik sayısı |
-| **Dönem geliri** | Seçili pencerede `daily_revenue` toplamı: brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
+| **Dönem geliri** | Seçili pencerede `daily_revenue` toplamı: brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall, App Store Connect, Google Play) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
 | **Değişim %** | MRR/abonelik/deneme: pencerenin başındaki en yakın snapshot'a göre. Gelir: bir önceki eşit uzunluktaki pencereye göre. Veri yoksa `null` (UI'da "—"). |
 
 **Aylığa normalize:** `day → ×365/12`, `week → ×52/12`, `month → ×1`, `year → ×1/12`; hepsi `interval_count`'a bölünür.
@@ -514,6 +516,99 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   ([superwall/skills](https://github.com/superwall/skills)) alındı. Uygulamanın "revenue provider" seçimi API'de yok;
   mağaza ile RevenueCat aynı `transactionId`'yi taşımıyorsa çift sayım olabilir. Test modu yok (sandbox hariç tutulur).
 
+### 6.13 App Store Connect
+
+- **Taban:** `GET https://api.appstoreconnect.apple.com/v1/salesReports` (Sales and Trends). Yanıt gzip'li, sekmeyle
+  ayrılmış metindir (`application/a-gzip`); o gün için rapor yoksa 404 döner. JSON değil, bu yüzden `fetchBytes` ile
+  indirilir, akış hâlinde açılıp satır satır okunur (`src/providers/reports.ts`).
+- **Kimlik:** Her istek ES256 imzalı bir JWT taşır: başlıkta `kid` (Key ID), gövdede `iss` (Issuer ID), `iat`, `exp`
+  (en çok 20 dk; hoomuch 10 dk kullanır), `aud: appstoreconnect-v1`. Token, kullanıcının yapıştırdığı **team** API
+  anahtarının `.p8` dosyasıyla WebCrypto'da imzalanır; `.p8` şifreli saklanır, Issuer ID / Key ID / vendor number
+  düz config'tedir. Individual key'ler Sales and Finance'e erişemediği için kabul edilmez. Rol: **Sales** (Finance ya da
+  Admin de çalışır ama daha fazlasını yapabilir); Apple'da yalnızca rapor okuyan anahtar yoktur, formda uyarı gösterilir.
+  Limit: anahtar başına saatlik kayan kota (`X-Rate-Limit`), aşılınca 429.
+- **Doğrulama:** iki gün önceki `SALES / SUMMARY / DAILY` raporu (1 istek). 200 ya da 404 anahtarın, rolün ve vendor
+  number'ın kabul edildiğini gösterir; 404'te "o gün satış yoksa normal" notu çıkar. 401 → anahtar alanı, 403 → rol,
+  vendor geçen 400/403 → vendor number alanı.
+- **Snapshot:** `SUBSCRIPTION / SUMMARY / DAILY / 1_3` raporu; dünden geriye 4 güne kadar ilk yayımlanmış gün kullanılır.
+  Hiçbirinde rapor yoksa abonelik yok sayılır (Apple, aktif abonelik oldukça her gün rapor yayımlar). **MRR** = standart
+  fiyatlı aboneliklerin (`Active Standard Price Subscriptions`) `Customer Price` × adet, `Standard Subscription Duration`
+  ile aylığa normalize (7 gün → hafta). **Aktif abonelik** = standart + ücretli teklifteki (introductory, promotional,
+  offer code, win-back; pay up front ve pay as you go) abonelikler; bunlar MRR'a **girmez**, çünkü rapor dönem başına ne
+  ödediklerini söylemez. **Aktif deneme** = free trial sütunlarının toplamı. Billing retry ve grace period sayılmaz.
+  `mrrByProduct` abonelik adına göre bölünür.
+- **Gelir geçmişi:** günde bir `SALES / SUMMARY / DAILY` raporu (`filter[version]` gönderilmez; Apple güncel sürümü
+  verir, sabitlenen sürüm geçmişte reddedildi) → `daily_revenue` (`source='provider'`), müşteri para birimi başına bir
+  nokta. Tutar `|Units| × |Customer Price|`; `Units` ya da fiyat negatifse iade. Fiyatı 0 olan satırlar (ücretsiz
+  indirme, güncelleme) ve 0 adetli kısmi iade satırları atlanır; `count` = ücretli birim sayısı. Her senkron son 3 günü
+  yeniden okur (rapor ertesi sabah, PT, yayımlanır); 404 günü boş geçilir. Geçmiş en çok 364 gün (Apple günlük raporları
+  bir yıl tutar). Bütçe ya da 429 bitince gün imleci döner.
+- **Para birimi / gün / test modu:** Tutar müşterinin ödediği fiyattır (vergi dahil, Apple komisyonu düşülmeden),
+  müşterinin para biriminde; RevenueCat, Adapty ve Superwall ile aynı taban. Günler Apple'ın Pacific Time günleridir,
+  UTC gün anahtarına aynen yazılır. Sandbox satın almaları Sales and Trends'e girmez: test modu yok.
+- **Kişisel veri:** Abonelik raporundaki `State` (müşterinin serbest metin eyaleti) ve ülke okunmaz, saklanmaz.
+- ✅ **Doğrulandı:** uç nokta, filtre değerleri ve rapor türü/sürüm tablosu, JWT alanları ve 20 dk sınırı, individual
+  key kısıtı, rapor sütunları (Summary Sales, Subscription 1_3), yayımlanma zamanı ve bir yıllık saklama
+  ([salesReports](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-salesreports),
+  [tokens](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests),
+  [subscription report](https://developer.apple.com/help/app-store-connect/reference/reporting/subscription-report),
+  [availability](https://developer.apple.com/help/app-store-connect/reference/reporting/sales-and-trends-reports-availability)).
+  ⚠️ **Doğrulanmadı:** canlı denenmedi. Hangi rollerin raporu API'den indirebildiği Apple'ın rol tablosundan çıkarıldı
+  (Sales ve Finance Sales and Trends'i görür); hatalı vendor number'ın 400 mü 403 mü döndüğü belgelenmemiştir (ikisi de
+  vendor alanına eşlenir). İade satırlarında `Customer Price`'ın işareti belgede iki yerde farklı anlatılır: ikisi de
+  iade sayılır. Hata gövdeleri Apple'ın `ErrorResponse` şeklindeki örnek değerlerdir.
+
+### 6.14 Google Play
+
+- **Taban:** Google Play'in gelir API'si yoktur. Play Console raporları geliştirici hesabına ait özel bir Cloud Storage
+  bucket'ına (`gs://pubsite_prod_rev_…`) aktarır; hoomuch onları Cloud Storage JSON API ile okur:
+  `GET https://storage.googleapis.com/storage/v1/b/{bucket}/o` (liste) ve `…/o/{nesne}?alt=media` (indirme).
+  Taban planların fatura dönemi ve fiyatı Android Publisher API'den gelir:
+  `GET https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{paket}/subscriptions`.
+- **Kimlik:** Kullanıcı bir service account oluşturur, JSON anahtarını yapıştırır (şifreli saklanır) ve service
+  account'u Play Console'da **View app information and download bulk reports** ve **View financial data** izinleriyle
+  davet eder. hoomuch RS256 imzalı bir JWT assertion'ı `https://oauth2.googleapis.com/token`'a form POST'uyla verir
+  (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, `tokenForm`) ve bir saatlik access token alır; token
+  saklanmaz, loglanmaz. JSON'daki `token_uri` yok sayılır, assertion yalnızca Google'a gider. Scope: bucket için
+  `devstorage.read_only`; snapshot'ın katalog okuması için `androidpublisher` (salt-okunur türü yoktur; yetkiyi Play
+  Console izinleri sınırlar). Google Play Android Developer API, service account'un projesinde açık olmalıdır.
+  Yeni verilen erişimin bucket'a yansıması bir güne kadar sürebilir.
+- **Doğrulama:** token + `sales/` listesi (finansal izin) + `financial-stats/subscriptions/` listesi + bir istatistik
+  dosyası + o uygulamanın kataloğu (≈ 5 istek). Bucket 403 → service account e-postası ve gereken izinlerle mesaj
+  (Google yanlış bucket'ta da 403 verir), Publisher 403 → API kapalı ya da uygulama izni yok. İstatistik yoksa
+  "MRR birkaç gün 0 görünür" notuyla bağlanır.
+- **Snapshot:** bu ayın (ayın başında geçen ayın) `financial-stats/subscriptions/subscriptions_*_YYYYMM_country.csv`
+  dosyaları (`matchGlob`); her dosyanın en yeni günü, en yeni günden 3 günden fazla geride kalan dosya bayat sayılıp
+  atlanır. **Aktif abonelik** = Google'ın `Active Subscriptions` toplamı. **MRR** = her satır × taban planın o ülkedeki
+  güncel fiyatı (`regionalConfigs`), `billingPeriodDuration` ile aylığa normalize (installments dahil). Prepaid planlar
+  aktif sayılır ama MRR'a girmez; fiyatı bulunmayan ülke/plan satırları aktif sayılır, MRR'a girmez (logda `unpriced`).
+  Google hangi abonenin denemede ya da teklif fiyatında olduğunu söylemediği için **aktif deneme `null`**'dır ve bu
+  aboneler taban plan fiyatından sayılır; eski fiyattaki (grandfathered) aboneler bugünkü fiyattan sayılır (§6'dan
+  farklı). Veri Google'ın aktarımına göre birkaç gün geridedir. `mrrByProduct` aboneliğin listing başlığına göre
+  (en-US, yoksa ilk dil) bölünür.
+- **Gelir geçmişi:** `sales/salesreport_YYYYMM.zip` (estimated sales; zip içinde tek CSV, sipariş başına satır) →
+  `transactions`. `Financial Status` "Charged" → charge; "Refund", "Partial refund" (ve chargeback) → negatif refund;
+  diğerleri (ör. iptal) atlanır. Tutar `Charged Amount` (alıcının ödediği, vergi dahil, Google komisyonu düşülmeden),
+  `Currency of Sale` biriminde; zaman `Order Charged Timestamp`. `externalId` = sipariş no + tür + saniye (aynı saniyede
+  ikinci satır `:1`). Açıklama SKU ID (+ taban plan). `since`'ten bu aya kadar her ay bir dosya; 404 ayı boş. Bir sayfa
+  en çok 5.000 olay taşır; dolarsa imleç `{ay, son (zaman, id)}` olur ve sonraki senkron aynı dosyayı yeniden okuyup
+  oradan devam eder (satır sırasına bağlı değildir).
+- **Dosya biçimi:** İstatistik CSV'leri genellikle BOM'lu UTF-16'dır; kodlama BOM'dan (yoksa NUL desenden) anlaşılır,
+  UTF-16 elle çözülür. Zip merkezi dizinden okunur (ZIP64 ve şifreli arşivler reddedilir), açılan veri 512 MB'ta kesilir.
+  İndirilen dosya en çok 32 MB'tır (`MAX_REPORT_BYTES`).
+- **Kişisel veri:** Satış raporundaki alıcı şehri, eyaleti, posta kodu, ülkesi ve cihaz modeli okunmaz; olaylara ve
+  loglara girmez (testle denetlenir).
+- **Test modu:** Lisans test kullanıcılarının satın almaları finansal raporlara girmez: test modu yok.
+- ✅ **Doğrulandı:** dosya yolları ve adları, satış raporu ve abonelik istatistiği sütunları, UTF-16 notu, service account
+  akışı ve izin adları ([Play Console raporları](https://support.google.com/googleplay/android-developer/answer/6135870)),
+  JWT bearer akışı ve hata kodları ([service account](https://developers.google.com/identity/protocols/oauth2/service-account)),
+  `monetization.subscriptions.list`, `BasePlan`, `RegionalBasePlanConfig`, `Money` şemaları ve Cloud Storage
+  `objects.list` (`matchGlob`) / `objects.get` (`alt=media`) parametreleri (iki API'nin discovery belgeleri).
+  ⚠️ **Doğrulanmadı:** canlı denenmedi. İade satırlarının tutar işareti belgelenmemiştir (mutlak değer alınır);
+  `Active Subscriptions`'ın denemeleri içerdiği üçüncü taraf kaynaklara dayanır; satış raporu zip'inin içindeki CSV'nin
+  kodlaması belgelenmemiştir (BOM'dan anlaşılır). Aynı aya ait dosya gün içinde yeniden yazılır; satır sırası değişse de
+  imleç doğru çalışır.
+
 ---
 
 ## 7. Arayüz (UX/UI)
@@ -523,7 +618,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 1. **Cevap önce:** Dashboard'ın ilk satırı toplam MRR. Süs yok.
 2. **Tek vurgu rengi** (marka mavisi), geri kalan nötr gri tonları. coss ui'nin ince gölgeleri ve 1px kenarlıkları, bol boşluk.
 3. **Geist Sans + Geist Mono**, aynı kökenden; sayılarda `tabular-nums`. Harici font isteği yok.
-4. Grafiklerde ve listelerde sağlayıcılar küçük renkli nokta ile ayrılır (veri renkleri `design/system.md` §3.1): Stripe `#635BFF`, Paddle `#2F80ED`, Lemon Squeezy `#AD7D00`, Polar `#0E9384`, RevenueCat `#F2545B`, Chargebee `#E8590C`, Dodo Payments `#4E9418`, Gumroad `#DB2777`, Adapty `#0A86B4`, Superwall `#858A00`, Demo nötr. Bağlantılar bölümünde (sağlayıcı seçimi, liste, form ve bağlantı başlığı) sağlayıcının kendi kare logosu gösterilir (`provider-logos.tsx`, kaynaklar dosyada).
+4. Grafiklerde ve listelerde sağlayıcılar küçük renkli nokta ile ayrılır (veri renkleri `design/system.md` §3.1): Stripe `#635BFF`, Paddle `#2F80ED`, Lemon Squeezy `#AD7D00`, Polar `#0E9384`, RevenueCat `#F2545B`, Chargebee `#E8590C`, Dodo Payments `#4E9418`, Gumroad `#DB2777`, Adapty `#0A86B4`, Superwall `#858A00`, App Store Connect `#007AFF`, Google Play `#1E8E3E`, Demo nötr. Bağlantılar bölümünde (sağlayıcı seçimi, liste, form ve bağlantı başlığı) sağlayıcının kendi kare logosu gösterilir (`provider-logos.tsx`, kaynaklar dosyada).
 5. Açık/koyu tema `prefers-color-scheme` ile otomatik (coss token'ları, hoomuch'un AA ölçülmüş paleti; `src/styles/app.css`).
 6. **Formlar hydrate olmadan da çalışır:** Post/Redirect/Get, flash mesajlar çerezle. Hydrate olduktan sonra gönderilen formun butonunda spinner ve çift gönderim engeli, flash ve ilk-sayı şeridi Motion ile kapanır.
 7. **Grafikler shadcn Charts / Recharts** ile tarayıcıda çizilir; sunucu HTML'inde metin açıklaması ve "Show data" altında veri tablosu bulunur.
