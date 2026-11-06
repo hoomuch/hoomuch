@@ -392,6 +392,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 - **Taban:** `https://api.polar.sh/v1` (production) ve `https://sandbox-api.polar.sh/v1` (sandbox), `Authorization: Bearer polar_oat_…`. Yollar `/` ile biter.
 - **Sürüm:** `Polar-Version: 2026-10` sabitlenir. Polar her çeyrek (Ocak/Nisan/Temmuz/Ekim'in ilk haftası) yeni sürüm çıkarır ve "Deprecated" sürümü kaldırır;
   2026-10 Nisan 2027'nin ilk haftasında kalkar. Kaldırılmış sürüm 404 döner ve "hoomuch'u güncelleyin" hatası gösterilir; sabit sürüm o tarihten önce yükseltilmelidir.
+  Bunu bir test zorunlu kılar: `test/providers/polar.test.ts`, sürümün "Deprecated" olduğu ayın 15'inden (2026-10 için 15 Ocak 2027) itibaren sürüm yükseltilene kadar başarısız olur.
 - **Kimlik:** Organization Access Token (`polar_oat_…`), tek organizasyona bağlıdır. Token sandbox/production ayrımını göstermez: doğrulama önce production'ı,
   401 alırsa sandbox'ı dener ve sonucu `config.environment`'a yazar; sandbox test modu olarak etiketlenir. Kişisel token (`polar_pat_…`) reddedilir.
 - **Gerekli izinler (scope):** `metrics:read`, `subscriptions:read`, `orders:read`, `refunds:read`. Eksik scope 403 `insufficient_scope` döner; hata scope adıyla gösterilir.

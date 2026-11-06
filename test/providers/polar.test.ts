@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { dayKey } from '../../src/lib/time';
 import { BudgetExhaustedError } from '../../src/providers/http';
 import {
   CONFIG_ENVIRONMENT,
@@ -737,5 +738,99 @@ describe('polar cursor helpers', () => {
     expect(decodeCursor('{"v":1,"since":1,"until":2,"phase":"invoices","page":1,"total":null}')).toBeNull();
     expect(decodeCursor('{"v":1,"since":1,"until":2,"phase":"orders","page":0,"total":null}')).toBeNull();
     expect(decodeCursor('{"v":1,"since":1,"until":2,"phase":"orders","page":1,"total":-1}')).toBeNull();
+  });
+});
+
+// ---------- API version deadline ----------
+
+// Polar keeps three versions, Next, Current and Deprecated, and ships a new one in the first week of January, April,
+// July and October (polar.sh/docs/api-reference/versioning). A version named YYYY-MM becomes Current that month
+// (polar.sh/docs/changelog/api), turns Deprecated three months later and is removed three months after that; from
+// then on every request pinning it answers 404 and every Polar connection stops syncing. The guard below fails from
+// the 15th of the Deprecated month, about two and a half months before removal. If Polar skips a release (there was
+// no 2026-07), the version lives longer than this and the guard fires early, which is the safe side.
+
+interface VersionDeadline {
+  /** YYYY-MM: the version turns Deprecated in the first week of this month. */
+  deprecated: string;
+  /** YYYY-MM-DD, UTC: the guard fails from this day on. */
+  failFrom: string;
+  /** YYYY-MM: Polar removes the version in the first week of this month. */
+  removed: string;
+}
+
+function polarVersionDeadline(version: string): VersionDeadline {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(version);
+  if (!m) throw new Error(`Polar API versions look like YYYY-MM, got "${version}"`);
+  // Date.UTC carries a month past December into the next year.
+  const day = (months: number, date: number) => dayKey(Date.UTC(Number(m[1]), Number(m[2]) - 1 + months, date));
+  return { deprecated: day(3, 1).slice(0, 7), failFrom: day(3, 15), removed: day(6, 1).slice(0, 7) };
+}
+
+/** Whether a sync at `now` (ms) is inside the window where `version` has to be bumped. */
+function polarVersionDue(version: string, now: number): boolean {
+  return dayKey(now) >= polarVersionDeadline(version).failFrom;
+}
+
+/** The machine's clock. vi.useFakeTimers() and vi.setSystemTime() replace Date.now, but not this. */
+const realNow = (): number => vi.getRealSystemTime();
+
+describe('polar API version deadline', () => {
+  it('derives Deprecated, the guard day and removal from the version month, across year ends', () => {
+    expect(polarVersionDeadline('2026-10')).toEqual({ deprecated: '2027-01', failFrom: '2027-01-15', removed: '2027-04' });
+    expect(polarVersionDeadline('2027-01')).toEqual({ deprecated: '2027-04', failFrom: '2027-04-15', removed: '2027-07' });
+    expect(polarVersionDeadline('2027-07')).toEqual({ deprecated: '2027-10', failFrom: '2027-10-15', removed: '2028-01' });
+    expect(polarVersionDeadline('2027-10')).toEqual({ deprecated: '2028-01', failFrom: '2028-01-15', removed: '2028-04' });
+  });
+
+  it('is due from midnight UTC on the 15th of the Deprecated month', () => {
+    const dueAt = (iso: string) => polarVersionDue('2026-10', Date.parse(iso));
+    expect(dueAt('2026-11-06T12:00:00.000Z')).toBe(false);
+    expect(dueAt('2026-12-31T23:59:59.999Z')).toBe(false);
+    expect(dueAt('2027-01-01T00:00:00.000Z')).toBe(false); // Deprecated, but still served
+    expect(dueAt('2027-01-14T23:59:59.999Z')).toBe(false);
+    expect(dueAt('2027-01-15T00:00:00.000Z')).toBe(true);
+    expect(dueAt('2027-04-01T00:00:00.000Z')).toBe(true); // removed
+    expect(dueAt('2028-06-01T00:00:00.000Z')).toBe(true);
+    // The same rule for the next pin, which isn't a year end.
+    expect(polarVersionDue('2027-01', Date.parse('2027-04-14T23:59:59.999Z'))).toBe(false);
+    expect(polarVersionDue('2027-01', Date.parse('2027-04-15T00:00:00.000Z'))).toBe(true);
+  });
+
+  it('rejects a version that isn’t YYYY-MM', () => {
+    for (const v of ['', '2026-1', '2026-00', '2026-13', '2026-10-01', '2026.10']) {
+      expect(() => polarVersionDeadline(v)).toThrow('YYYY-MM');
+    }
+  });
+
+  it('reads the real clock, whatever the fake timers say', () => {
+    const faked = Date.UTC(2000, 0, 1);
+    try {
+      vi.setSystemTime(faked); // Date-only fake, as the sync engine suites use
+      expect(Date.now()).toBe(faked);
+      expect(realNow()).toBeGreaterThan(Date.UTC(2026, 10, 6)); // the day this guard was written
+      vi.useFakeTimers();
+      vi.setSystemTime(faked);
+      expect(Date.now()).toBe(faked);
+      expect(realNow()).toBeGreaterThan(Date.UTC(2026, 10, 6));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Fails on the real clock, so a weekly CI run (.github/workflows/ci.yml) catches it without a pull request.
+  it(`POLAR_API_VERSION (${POLAR_API_VERSION}) is bumped before Polar removes it`, () => {
+    const { deprecated, failFrom, removed } = polarVersionDeadline(POLAR_API_VERSION);
+    const today = dayKey(realNow());
+    expect(
+      today < failFrom,
+      `Today is ${today}. Polar API version ${POLAR_API_VERSION} turns Deprecated in the first week of ${deprecated} and ` +
+        `is removed in the first week of ${removed}; after that every Polar request answers 404 and every Polar ` +
+        `connection stops syncing. To fix it: (1) check Polar's API changelog (https://polar.sh/docs/changelog/api) for ` +
+        `the version that is Current now (never Next, which can still change) and for changes to the fields ` +
+        `src/providers/polar.ts reads; (2) set POLAR_API_VERSION in src/providers/polar.ts to that version and update ` +
+        `its header comment; (3) update the Polar version pin and its deadline in README.md (Known limitations) and ` +
+        `SPEC.md §6.6 (Sürüm).`,
+    ).toBe(true);
   });
 });
