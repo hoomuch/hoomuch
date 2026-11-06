@@ -3,8 +3,9 @@
  *
  * Called by providers, not browsers: no session, no CSRF (index.tsx skips it for this path) and the
  * per-network request limit doesn't apply (providers send from shared addresses). A per-connection
- * limit (`RL_WEBHOOKS`) applies instead. The body is never read. Every invalid URL gets the same
- * answer, so the endpoint doesn't say which connections exist.
+ * limit (`RL_WEBHOOKS`) applies instead, before the token check, so a flood costs no D1 read. The
+ * body is never read. Every invalid URL gets the same answer, so the endpoint doesn't say which
+ * connections exist.
  */
 
 import type { Hono } from 'hono';
@@ -32,9 +33,10 @@ export function registerWebhookRoutes(app: Hono<AppEnv>): void {
     let receipt;
     try {
       receipt = await receiveWebhook(c.env, id, c.req.param('token'), Date.now());
-    } catch {
-      // The queue refused the sync: a 5xx makes the provider try again later.
-      log('webhook_failed', { connectionId: id });
+    } catch (err) {
+      // D1, the key or the queue failed: a 5xx makes the provider try again later. The error's
+      // name only: a message can carry the path, and with it the token.
+      log('webhook_failed', { connectionId: id, message: err instanceof Error ? err.name : 'error' });
       return c.json({ ok: false }, 503);
     }
     if (!receipt) return notFound();

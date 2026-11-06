@@ -8,6 +8,7 @@ import worker from '../../src/index';
 import { authenticate, registerUser } from '../../src/lib/auth';
 import { sha256Hex } from '../../src/lib/crypto';
 import { DAY } from '../../src/lib/time';
+import { loggablePath } from '../../src/services/webhooks';
 import { createTestD1, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
@@ -27,6 +28,7 @@ beforeEach(async () => {
 afterEach(() => {
   t.sqlite.close();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function send(path: string, init: RequestInit = {}): Promise<Response> {
@@ -127,6 +129,36 @@ describe('CSRF', () => {
     const res = await postForm('/settings/currency', { currency: 'EUR' }, { ...session, origin: ORIGIN });
     expect(res.status).toBe(303);
     expect(t.sqlite.prepare("SELECT base_currency FROM users WHERE id = 'u1'").get()).toEqual({ base_currency: 'EUR' });
+  });
+});
+
+describe('error logs', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const secret = 'S3cr3tT0k3n'.padEnd(43, 'x');
+
+  it('cut a webhook URL’s token out of the path', () => {
+    expect(loggablePath(`/webhooks/${id}/${secret}`)).toBe(`/webhooks/${id}/…`);
+    expect(loggablePath(`/webhooks/${id}/${secret}/`)).toBe(`/webhooks/${id}/…`);
+    expect(loggablePath(`/webhooks/${id}`)).toBe(`/webhooks/${id}`);
+    expect(loggablePath(`/connections/${id}/webhook`)).toBe(`/connections/${id}/webhook`);
+  });
+
+  it('never carry the token of an error the webhook route didn’t catch', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => void logs.push(a.join(' ')));
+    // A session cookie makes the session lookup run before the route, and D1 is down.
+    const DB = {
+      ...t.db,
+      prepare: () => {
+        throw new Error('D1 down');
+      },
+    } as unknown as D1Database;
+    const req = new Request(`${ORIGIN}/webhooks/${id}/${secret}`, { method: 'POST', headers: { cookie: `__Host-hm_session=${TOKEN}` } });
+    const ctx = { waitUntil() {}, passThroughOnException() {} };
+    const res = (await worker.fetch!(req as never, testEnv(DB), ctx as never)) as Response;
+    expect(res.status).toBe(500);
+    expect(logs.map((l) => JSON.parse(l))).toEqual([{ event: 'unhandled_error', path: `/webhooks/${id}/…`, message: 'Error: D1 down' }]);
+    expect(logs.join('\n')).not.toContain(secret);
   });
 });
 

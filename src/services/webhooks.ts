@@ -19,6 +19,7 @@ import { MINUTE } from '../lib/time';
 import { QUEUED_STALE_MS, message } from '../sync/queue';
 import { clearQueued } from '../sync/repo';
 import { getProviderMeta } from '../providers/registry';
+import { isProviderId } from '../providers/types';
 
 const MAC_INFO = 'hoomuch webhook url v1';
 /** A burst of events within this long becomes one sync. */
@@ -36,6 +37,14 @@ export async function webhookToken(env: Pick<Bindings, 'ENCRYPTION_KEY'>, connec
 /** The path (no origin) of a connection's webhook URL. */
 export async function webhookPath(env: Pick<Bindings, 'ENCRYPTION_KEY'>, connectionId: string, nonce: string): Promise<string> {
   return `${WEBHOOK_PATH_PREFIX}${connectionId}/${await webhookToken(env, connectionId, nonce)}`;
+}
+
+/** A request path safe to log: a webhook URL's token is a secret, so everything after the id goes. */
+export function loggablePath(path: string): string {
+  const at = path.indexOf(WEBHOOK_PATH_PREFIX);
+  if (at === -1) return path;
+  const idEnd = path.indexOf('/', at + WEBHOOK_PATH_PREFIX.length);
+  return idEnd === -1 ? path : `${path.slice(0, idEnd)}/…`;
 }
 
 export type WebhookAction = 'on' | 'rotate' | 'off';
@@ -64,31 +73,37 @@ export interface WebhookReceipt {
 
 /**
  * A provider called a webhook URL. Null when the URL isn't valid (unknown connection, webhooks off,
- * wrong token): the route answers every such case the same way. Throws when the queue refused the
- * sync, so the route can answer 5xx and the provider retries.
+ * a provider without webhook setup, wrong token): the route answers every such case the same way.
+ * Throws when D1, the key or the queue fails, so the route can answer 5xx and the provider retries.
  */
 export async function receiveWebhook(env: Bindings, connectionId: string, token: string, now: number): Promise<WebhookReceipt | null> {
   if (!TOKEN_RE.test(token)) return null;
-  const row = await env.DB.prepare('SELECT webhook_nonce FROM connections WHERE id = ?')
+  const row = await env.DB.prepare('SELECT provider, webhook_nonce FROM connections WHERE id = ?')
     .bind(connectionId)
-    .first<{ webhook_nonce: string | null }>();
+    .first<{ provider: string; webhook_nonce: string | null }>();
   if (!row?.webhook_nonce) return null;
+  // setWebhook refuses these, but a nonce can outlive a provider's webhook setup.
+  if (!isProviderId(row.provider) || !getProviderMeta(row.provider).webhook) return null;
   const nonce = row.webhook_nonce;
   if (!timingSafeEqual(await webhookToken(env, connectionId, nonce), token)) return null;
 
-  // Record the call, and claim the queue slot unless a sync is already on its way. Matching the
-  // nonce again means a URL turned off or replaced since the read above schedules nothing.
-  const claimed = await env.DB.prepare(
-    `UPDATE connections
-        SET webhook_last_at = ?1,
-            queued_at = CASE WHEN queued_at IS NULL OR queued_at < ?2 THEN ?1 ELSE queued_at END
-      WHERE id = ?3 AND webhook_nonce = ?4
-      RETURNING queued_at, last_sync_started_at`,
-  )
-    .bind(now, now - QUEUED_STALE_MS, connectionId, nonce)
-    .first<{ queued_at: number | null; last_sync_started_at: number | null }>();
-  if (!claimed) return null;
-  if (claimed.queued_at !== now) return { scheduled: false };
+  // Record the call, then claim the queue slot unless a sync is already on its way. The claim
+  // writes queued_at only while it's free or stale, so of two calls in the same millisecond only
+  // one wins. Matching the nonce again means a URL turned off or replaced since the read above
+  // does neither.
+  const [seen, claim] = await env.DB.batch<{ last_sync_started_at: number | null }>([
+    env.DB.prepare('UPDATE connections SET webhook_last_at = ?1 WHERE id = ?2 AND webhook_nonce = ?3 RETURNING id')
+      .bind(now, connectionId, nonce),
+    env.DB.prepare(
+      `UPDATE connections SET queued_at = ?1
+        WHERE id = ?2 AND webhook_nonce = ?3 AND (queued_at IS NULL OR queued_at <= ?4)
+        RETURNING last_sync_started_at`,
+    )
+      .bind(now, connectionId, nonce, now - QUEUED_STALE_MS),
+  ]);
+  if (!seen?.results?.length) return null;
+  const claimed = claim?.results?.[0];
+  if (!claimed) return { scheduled: false };
 
   const sinceLast = claimed.last_sync_started_at === null ? Number.POSITIVE_INFINITY : now - claimed.last_sync_started_at;
   const gapSeconds = Math.ceil(Math.max(0, WEBHOOK_MIN_GAP_MS - sinceLast) / 1000);
