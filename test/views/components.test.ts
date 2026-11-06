@@ -684,6 +684,17 @@ describe('accessibility', () => {
     expect(tags(out, 'nav', 'aria-label="Pagination"')).toHaveLength(1);
     expect(tags(out, 'a', 'aria-label="Previous page"', 'href="/transactions?provider=all"')).toHaveLength(1);
     expect(tags(out, 'span', 'aria-current="page"')).toHaveLength(1);
+    // Past page 1, the links say where their page starts (the cursors), so deep pages stay fast.
+    const deep = await html(
+      h(TransactionsPage, {
+        chrome: { user, flash: null },
+        page: { ...fixtureTransactions(3, null), hasMore: true, prevCursor: '1~c1~first', nextCursor: '1~c1~last' },
+        hasConnections: true,
+        filterProviders: ['stripe'],
+      }),
+    );
+    expect(tags(deep, 'a', 'aria-label="Previous page"', 'href="/transactions?provider=all&amp;page=2&amp;after=1%7Ec1%7Efirst"')).toHaveLength(1);
+    expect(tags(deep, 'a', 'aria-label="Next page"', 'href="/transactions?provider=all&amp;page=4&amp;before=1%7Ec1%7Elast"')).toHaveLength(1);
     // The provider filter: a segmented control of links, the current one marked.
     expect(tags(out, 'a', 'href="/transactions?provider=all"', 'aria-current="page"', 'data-slot="segmented-control-item"')).toHaveLength(1);
   });

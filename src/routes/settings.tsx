@@ -1,7 +1,7 @@
 /** Settings: display currency, time zone, password change, account deletion. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
-import { deleteUser, getCurrencySource, getTimezoneSource, updateUserCurrency, updateUserTimezone } from '../db/queries';
+import { deleteUser, updateUserCurrency, updateUserTimezone } from '../db/queries';
 import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
@@ -15,13 +15,13 @@ const PASSWORD_INPUT_MAX = 1024;
 export function registerSettingsRoutes(app: Hono<AppEnv>): void {
   app.get('/settings', requireUser, async (c) => {
     const user = currentUser(c);
-    const [source, zoneSource] = await Promise.all([getCurrencySource(c.env.DB, user.id), getTimezoneSource(c.env.DB, user.id)]);
+    // Both sources came with the session (lib/auth.ts): no query of its own.
     return renderPage(c, 'settings', {
         chrome: chrome(c),
         currency: user.baseCurrency,
-        currencySource: source,
+        currencySource: c.get('currencySource'),
         timeZone: user.timeZone,
-        timeZoneSource: zoneSource,
+        timeZoneSource: c.get('timezoneSource'),
         timeZones: timeZoneOptions(),
       });
   });

@@ -3,7 +3,7 @@
  */
 
 import type { Bindings, SessionUser } from '../env';
-import { listConnections, parseConfig, type ConnectionRow } from '../db/queries';
+import { CONNECTION_VIEW_COLUMNS, listConnections, parseConfig, type ConnectionView } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
@@ -12,7 +12,7 @@ import { parseStoredWarnings } from '../sync/aggregate';
 import { FxConverter, LATEST_FX_SQL, latestFx } from '../sync/fx';
 import type { ConnectionDetail, ConnectionSummary, SnapshotRow, SyncRunRow } from './types';
 
-export function toSummary(row: ConnectionRow): ConnectionSummary {
+export function toSummary(row: ConnectionView): ConnectionSummary {
   const meta = getProviderMeta(row.provider);
   return {
     id: row.id,
@@ -32,7 +32,7 @@ export function toSummary(row: ConnectionRow): ConnectionSummary {
  * HTML, so a field the provider declares secret never goes there, even if an old row or an
  * adapter wrote one into config (secrets belong in the encrypted credentials).
  */
-function publicConfig(row: ConnectionRow): Record<string, string> {
+function publicConfig(row: ConnectionView): Record<string, string> {
   const secret = new Set(getProviderMeta(row.provider).fields.filter((f) => f.secret).map((f) => f.name));
   return Object.fromEntries(Object.entries(parseConfig(row.config)).filter(([k]) => !secret.has(k)));
 }
@@ -69,7 +69,7 @@ export async function getConnectionDetail(
   // Snapshot days are the owner's local days: after a move west, one can be keyed tomorrow.
   const today = zonedDayKey(Date.now(), user.timeZone || UTC);
   const [connR, snapR, runR, fxR] = await db.batch([
-    db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').bind(connectionId, user.id),
+    db.prepare(`SELECT ${CONNECTION_VIEW_COLUMNS} FROM connections WHERE id = ? AND user_id = ?`).bind(connectionId, user.id),
     db
       .prepare(
         `SELECT s.day, s.mrr, s.active_subscriptions, s.active_trials, s.warnings FROM snapshots s
@@ -87,7 +87,7 @@ export async function getConnectionDetail(
     db.prepare(LATEST_FX_SQL),
   ]);
 
-  const row = (connR!.results?.[0] ?? null) as ConnectionRow | null;
+  const row = (connR!.results?.[0] ?? null) as ConnectionView | null;
   if (!row) return null;
   const cv = new FxConverter(currency, latestFx(fxR!.results as { day: string; base: string; rates: string }[] | undefined));
 

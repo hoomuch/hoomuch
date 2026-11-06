@@ -8,27 +8,33 @@
  */
 
 import type { Bindings, SessionUser } from '../env';
-import type { ConnectionRow } from '../db/queries';
+import { connectionsStatement, type ConnectionView } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, dayRange, UTC, zonedDayKey } from '../lib/time';
+import { addDays, dayNumberToKeySql, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
 import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
-import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
+import type { FxTable } from '../lib/money';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx, type FxRow } from '../sync/fx';
+import { calendarQuery } from './calendar';
 import { toSummary } from './connections';
 import { localDays, revenueRowsStatement } from './days';
-import type {
-  BreakdownRow,
-  DashboardData,
-  Kpi,
-  MrrDay,
-  ProductBreakdown,
-  ProductMrrBreakdown,
-  ProductMrrRow,
-  ProductRow,
-  RangeDays,
-  RevenueDay,
+import {
+  rowsOf,
+  type BreakdownRow,
+  type CalendarMonth,
+  type ConnectionSummary,
+  type DashboardData,
+  type Kpi,
+  type MrrDay,
+  type ProductBreakdown,
+  type ProductMrrBreakdown,
+  type ProductMrrRow,
+  type ProductRow,
+  type RangeDays,
+  type ReadModelQuery,
+  type RevenueDay,
 } from './types';
 
 interface SnapRow {
@@ -49,6 +55,12 @@ interface RevRow {
   connection_id: string;
   day: string;
   currency: string;
+  gross: number;
+  refunds: number;
+}
+
+/** A product row of the dashboard's window, with the gross and refunds its revenue rows are summed from. */
+interface ProductDayRow extends ProductSumRow {
   gross: number;
   refunds: number;
 }
@@ -75,68 +87,167 @@ export function kpi(value: number, previous: number | null): Kpi {
 const daysBetween = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
 
 export async function getDashboardData(env: Bindings, user: SessionUser, rangeDays: RangeDays): Promise<DashboardData> {
+  const db = env.DB;
+  const q = dashboardQuery(db, user, rangeDays, Date.now());
+  const [connsR, fxR, ...results] = await db.batch([connectionsStatement(db, user.id), db.prepare(LATEST_FX_SQL), ...q.statements]);
+  return q.build(results, rowsOf<ConnectionView>(connsR), rowsOf<FxRow>(fxR));
+}
+
+/**
+ * Everything GET /dashboard shows, in one D1 round trip: the dashboard, the calendar month and the
+ * connection list, reading the connections and the latest rates once for all three.
+ */
+export async function getDashboardPage(
+  env: Bindings,
+  user: SessionUser,
+  rangeDays: RangeDays,
+  month: string,
+): Promise<{ data: DashboardData; calendar: CalendarMonth; connections: ConnectionSummary[] }> {
+  const db = env.DB;
   const now = Date.now();
+  const dashboard = dashboardQuery(db, user, rangeDays, now);
+  const calendar = calendarQuery(db, user, month, now);
+  const [connsR, fxR, ...results] = await db.batch([
+    connectionsStatement(db, user.id),
+    db.prepare(LATEST_FX_SQL),
+    ...dashboard.statements,
+    ...calendar.statements,
+  ]);
+  const conns = rowsOf<ConnectionView>(connsR);
+  const fxRows = rowsOf<FxRow>(fxR);
+  const split = dashboard.statements.length;
+  return {
+    data: dashboard.build(results.slice(0, split), conns, fxRows),
+    calendar: calendar.build(results.slice(split), conns, fxRows),
+    connections: conns.map(toSummary),
+  };
+}
+
+/** The dashboard as statements for a page's batch (ReadModelQuery); getDashboardData runs it alone. */
+export function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays, now: number): ReadModelQuery<DashboardData> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   // Days run midnight to midnight in the user's zone (SPEC §6).
   const tz = user.timeZone || UTC;
   const today = zonedDayKey(now, tz);
   const start = addDays(today, -(rangeDays - 1));
   const prevStart = addDays(start, -rangeDays);
-  const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
   const productDays = localDays('t.occurred_at', start, today, tz);
-  // Snapshots are keyed by the owner's local day, so after a move west the last zone's "tomorrow"
-  // can be on file: every snapshot read stops at today.
-  const [connsR, windowR, latestR, beforeR, revR, fxR, productR, histR] = await db.batch([
-    db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
-    db
-      .prepare(
-        `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
-      )
-      .bind(user.id, start, today),
-    db
-      .prepare(
-        `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product, s.warnings FROM snapshots s
-           JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ?
-            AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day <= ?)`,
-      )
-      .bind(user.id, today),
-    db
-      .prepare(
-        `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ?
-            AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day < ?)`,
-      )
-      .bind(user.id, start),
-    revenueRowsStatement(db, user.id, tz, prevStart, today),
-    db.prepare(LATEST_FX_SQL),
-    // Same window as the revenue rows above (local days start..today), per product, currency and
-    // day: each day converts at its own rate, like the revenue KPI.
-    db
-      .prepare(
-        `SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
-                ${productDays.day.sql} AS day,
-                SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges
-           FROM transactions t JOIN connections c ON c.id = t.connection_id
-          WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
-          GROUP BY t.connection_id, product, t.currency, day`,
-      )
-      .bind(...productDays.day.binds, user.id, productDays.lo, productDays.hi),
-    fxHistoryStatement(db, user.id, currency, prevStart, today),
-  ]);
+  return {
+    // Snapshots are keyed by the owner's local day, so after a move west the last zone's "tomorrow"
+    // can be on file: every snapshot read stops at today. "Latest" and "before" find each
+    // connection's day once (correlated on the connection, a seek in the primary key), so they cost
+    // the same with two years of history as with two days.
+    statements: [
+      db
+        .prepare(
+          `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
+            WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
+        )
+        .bind(user.id, start, today),
+      db
+        .prepare(
+          `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product, s.warnings FROM connections c
+             JOIN snapshots s ON s.connection_id = c.id
+                             AND s.day = (SELECT MAX(x.day) FROM snapshots x WHERE x.connection_id = c.id AND x.day <= ?2)
+            WHERE c.user_id = ?1`,
+        )
+        .bind(user.id, today),
+      db
+        .prepare(
+          `SELECT ${SNAP_COLS} FROM connections c
+             JOIN snapshots s ON s.connection_id = c.id
+                             AND s.day = (SELECT MAX(x.day) FROM snapshots x WHERE x.connection_id = c.id AND x.day < ?2)
+            WHERE c.user_id = ?1`,
+        )
+        .bind(user.id, start),
+      // Revenue for the comparison window, and the daily-total providers' revenue for both. The
+      // transaction providers' revenue in this window comes from the product rows below: those
+      // days' transactions are read once, not once for revenue and again for products.
+      revenueRowsStatement(db, user.id, tz, prevStart, today, addDays(start, -1)),
+      // This window (local days start..today), per product, currency and day: each day converts at
+      // its own rate, like the revenue KPI. Grouped on the day number and formatted once per group,
+      // like revenueRowsStatement.
+      db
+        .prepare(
+          `SELECT connection_id, product, currency, ${dayNumberToKeySql('dn')} AS day, net, charges, gross, refunds FROM (
+             SELECT t.connection_id, NULLIF(TRIM(t.description), '') AS product, t.currency,
+                    ${productDays.dayNumber.sql} AS dn,
+                    SUM(t.amount) AS net, SUM(CASE WHEN t.type = 'charge' THEN 1 ELSE 0 END) AS charges,
+                    COALESCE(SUM(CASE WHEN t.amount > 0 THEN t.amount END), 0) AS gross,
+                    COALESCE(-SUM(CASE WHEN t.amount < 0 THEN t.amount END), 0) AS refunds
+               FROM transactions t JOIN connections c ON c.id = t.connection_id
+              WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
+              GROUP BY t.connection_id, product, t.currency, dn)`,
+        )
+        .bind(...productDays.dayNumber.binds, user.id, productDays.lo, productDays.hi),
+      fxHistoryStatement(db, user.id, currency, prevStart, today),
+    ],
+    build: ([windowR, latestR, beforeR, revR, productR, histR], conns, fxRows) => {
+      const productRows = rowsOf<ProductDayRow>(productR);
+      const fx = latestFx(fxRows);
+      return buildDashboard({
+        now,
+        currency,
+        tz,
+        today,
+        start,
+        prevStart,
+        rangeDays,
+        conns,
+        windowSnaps: rowsOf<SnapRow>(windowR),
+        latestSnaps: rowsOf<SnapRow>(latestR),
+        beforeSnaps: rowsOf<SnapRow>(beforeR),
+        revRows: [...rowsOf<RevRow>(revR), ...revenueFromProducts(productRows, conns)],
+        productRows,
+        fx,
+        // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
+        cv: new FxConverter(currency, fx, new FxHistory(rowsOf<FxRow>(histR))),
+      });
+    },
+  };
+}
 
-  const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
-  const windowSnaps = (windowR!.results ?? []) as unknown as SnapRow[];
-  const latestSnaps = (latestR!.results ?? []) as unknown as SnapRow[];
-  const beforeSnaps = (beforeR!.results ?? []) as unknown as SnapRow[];
-  const revRows = (revR!.results ?? []) as unknown as RevRow[];
-  type FxRows = { day: string; base: string; rates: string }[] | undefined;
-  const fx = latestFx(fxR!.results as FxRows);
-  // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
-  const cv = new FxConverter(currency, fx, new FxHistory(histR!.results as FxRows));
+/**
+ * The transaction providers' revenue rows for the window, summed from its product rows (the same
+ * transactions, grouped by product too): what revenueRowsStatement would return for those days.
+ */
+function revenueFromProducts(rows: readonly ProductDayRow[], conns: readonly ConnectionView[]): RevRow[] {
+  const fromTransactions = new Set(conns.filter((c) => getProviderMeta(c.provider).revenueHistory === 'transactions').map((c) => c.id));
+  const out = new Map<string, RevRow>();
+  for (const r of rows) {
+    if (!fromTransactions.has(r.connection_id)) continue;
+    const key = `${r.connection_id}\u0000${r.day}\u0000${r.currency}`;
+    const row = out.get(key);
+    if (row) {
+      row.gross += r.gross;
+      row.refunds += r.refunds;
+    } else {
+      out.set(key, { connection_id: r.connection_id, day: r.day, currency: r.currency, gross: r.gross, refunds: r.refunds });
+    }
+  }
+  return [...out.values()];
+}
+
+function buildDashboard(p: {
+  now: number;
+  currency: string;
+  tz: string;
+  today: string;
+  start: string;
+  prevStart: string;
+  rangeDays: RangeDays;
+  conns: readonly ConnectionView[];
+  windowSnaps: SnapRow[];
+  latestSnaps: SnapRow[];
+  beforeSnaps: SnapRow[];
+  revRows: RevRow[];
+  productRows: ProductDayRow[];
+  fx: FxTable | null;
+  cv: FxConverter;
+}): DashboardData {
+  const { now, currency, tz, today, start, prevStart, rangeDays, conns, windowSnaps, latestSnaps, beforeSnaps, revRows, productRows, fx, cv } = p;
 
   const days = dayRange(start, today);
   const revenueSeries: RevenueDay[] = days.map((day) => ({ day, total: 0, byConnection: {} }));
@@ -276,7 +387,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
   });
 
   const products = productBreakdown(
-    (productR!.results ?? []) as unknown as ProductSumRow[],
+    productRows,
     conns,
     revenueByConn,
     cv,
@@ -312,7 +423,7 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
 }
 
 /** Providers among `conns` whose days aren't the user's, grouped by the zone they're in. */
-function otherDayZones(conns: readonly ConnectionRow[], tz: string): Array<{ label: string; providers: string[] }> {
+function otherDayZones(conns: readonly ConnectionView[], tz: string): Array<{ label: string; providers: string[] }> {
   const byZone = new Map<string, { label: string; providers: string[] }>();
   for (const c of conns) {
     const meta = getProviderMeta(c.provider);
@@ -331,7 +442,7 @@ function otherDayZones(conns: readonly ConnectionRow[], tz: string): Array<{ lab
  */
 export function productBreakdown(
   rows: readonly ProductSumRow[],
-  conns: readonly ConnectionRow[],
+  conns: readonly ConnectionView[],
   revenueByConn: ReadonlyMap<string, number>,
   cv: FxConverter,
 ): ProductBreakdown {
@@ -441,7 +552,7 @@ const ROUNDING = 0.5;
  */
 export function productMrrBreakdown(
   latest: readonly SnapRow[],
-  conns: readonly ConnectionRow[],
+  conns: readonly ConnectionView[],
   cv: FxConverter,
 ): ProductMrrBreakdown {
   const latestBy = new Map(latest.map((s) => [s.connection_id, s]));

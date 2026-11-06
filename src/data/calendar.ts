@@ -6,15 +6,15 @@
  * the latest; currencies without a rate are left out (the dashboard already says so next to the MRR).
  */
 
-import type { ConnectionRow } from '../db/queries';
+import { connectionsStatement, type ConnectionView } from '../db/queries';
 import type { Bindings, SessionUser } from '../env';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
-import { addDays, dayKey, dayRange, dayStart, UTC, zonedDayKey } from '../lib/time';
+import { addDays, dayKey, dayNumberToKeySql, dayRange, dayStart, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import { BACKFILL_DAYS } from '../sync/aggregate';
-import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx } from '../sync/fx';
+import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx, type FxRow } from '../sync/fx';
 import { localDays, revenueRowsStatement } from './days';
-import type { CalendarDay, CalendarMonth } from './types';
+import { rowsOf, type CalendarDay, type CalendarMonth, type ReadModelQuery } from './types';
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,59 +95,94 @@ interface Point {
 }
 
 export async function getCalendarMonth(env: Bindings, user: SessionUser, month: string): Promise<CalendarMonth> {
-  const now = Date.now();
+  const db = env.DB;
+  const q = calendarQuery(db, user, month, Date.now());
+  const [connsR, fxR, ...results] = await db.batch([connectionsStatement(db, user.id), db.prepare(LATEST_FX_SQL), ...q.statements]);
+  return q.build(results, rowsOf<ConnectionView>(connsR), rowsOf<FxRow>(fxR));
+}
+
+/** The calendar month as statements for a page's batch (ReadModelQuery); getCalendarMonth runs it alone. */
+export function calendarQuery(db: D1Database, user: SessionUser, month: string, now: number): ReadModelQuery<CalendarMonth> {
   const tz = user.timeZone || UTC;
   const today = zonedDayKey(now, tz);
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   const { first, last } = monthBounds(month);
   const monthDays = localDays('t.occurred_at', first, last, tz);
-  const db = env.DB;
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
-  const [connsR, beforeR, snapsR, revR, countR, oldestR, fxR, histR] = await db.batch([
-    db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
-    // Each connection's last snapshot before the 1st: carried into the month, and the 1st's change.
-    db
-      .prepare(
-        `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ?
-            AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day < ?)`,
-      )
-      .bind(user.id, first),
-    db
-      .prepare(
-        `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
-      )
-      .bind(user.id, first, last),
-    revenueRowsStatement(db, user.id, tz, first, last),
-    // Charges and refunds per local day, the same days the revenue above is grouped on.
-    db
-      .prepare(
-        `SELECT ${monthDays.day.sql} AS day, t.type, COUNT(*) AS n
-           FROM transactions t JOIN connections c ON c.id = t.connection_id
-          WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
-          GROUP BY day, t.type`,
-      )
-      .bind(...monthDays.day.binds, user.id, monthDays.lo, monthDays.hi),
-    db
-      .prepare(
-        `SELECT MIN(s.day) AS day FROM snapshots s JOIN connections c ON c.id = s.connection_id WHERE c.user_id = ?`,
-      )
-      .bind(user.id),
-    db.prepare(LATEST_FX_SQL),
-    fxHistoryStatement(db, user.id, currency, first, last),
-  ]);
+  return {
+    statements: [
+      // Each connection's last snapshot before the 1st: carried into the month, and the 1st's change.
+      // Correlated on the connection: one primary-key seek each, however long the history.
+      db
+        .prepare(
+          `SELECT ${SNAP_COLS} FROM connections c
+             JOIN snapshots s ON s.connection_id = c.id
+                             AND s.day = (SELECT MAX(x.day) FROM snapshots x WHERE x.connection_id = c.id AND x.day < ?2)
+            WHERE c.user_id = ?1`,
+        )
+        .bind(user.id, first),
+      db
+        .prepare(
+          `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
+            WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
+        )
+        .bind(user.id, first, last),
+      revenueRowsStatement(db, user.id, tz, first, last),
+      // Charges and refunds per local day, the same days the revenue above is grouped on.
+      db
+        .prepare(
+          `SELECT ${dayNumberToKeySql('dn')} AS day, type, n FROM (
+             SELECT ${monthDays.dayNumber.sql} AS dn, t.type, COUNT(*) AS n
+               FROM transactions t JOIN connections c ON c.id = t.connection_id
+              WHERE c.user_id = ? AND t.occurred_at >= ? AND t.occurred_at < ?
+              GROUP BY dn, t.type)`,
+        )
+        .bind(...monthDays.dayNumber.binds, user.id, monthDays.lo, monthDays.hi),
+      // Per connection, so each MIN is one seek in the primary key rather than a scan of the history.
+      db
+        .prepare(
+          `SELECT MIN((SELECT MIN(s.day) FROM snapshots s WHERE s.connection_id = c.id)) AS day FROM connections c WHERE c.user_id = ?`,
+        )
+        .bind(user.id),
+      fxHistoryStatement(db, user.id, currency, first, last),
+    ],
+    build: ([beforeR, snapsR, revR, countR, oldestR, histR], conns, fxRows) =>
+      buildCalendar({
+        month,
+        currency,
+        today,
+        tz,
+        first,
+        last,
+        conns,
+        before: rowsOf<SnapRow>(beforeR),
+        snaps: rowsOf<SnapRow>(snapsR),
+        revRows: rowsOf<RevRow>(revR),
+        counts: rowsOf<CountRow>(countR),
+        oldestSnapshot: rowsOf<{ day: string | null }>(oldestR)[0]?.day ?? null,
+        // Revenue at each day's rate, end-of-day MRR at the latest (SPEC §6).
+        cv: new FxConverter(currency, latestFx(fxRows), new FxHistory(rowsOf<FxRow>(histR))),
+      }),
+  };
+}
 
-  const conns = (connsR!.results ?? []) as unknown as ConnectionRow[];
-  const before = (beforeR!.results ?? []) as unknown as SnapRow[];
-  const snaps = (snapsR!.results ?? []) as unknown as SnapRow[];
-  const revRows = (revR!.results ?? []) as unknown as RevRow[];
-  const counts = (countR!.results ?? []) as unknown as CountRow[];
-  const oldestSnapshot = ((oldestR!.results?.[0] ?? null) as { day: string | null } | null)?.day ?? null;
-  type FxRows = { day: string; base: string; rates: string }[] | undefined;
-  // Revenue at each day's rate, end-of-day MRR at the latest (SPEC §6).
-  const cv = new FxConverter(currency, latestFx(fxR!.results as FxRows), new FxHistory(histR!.results as FxRows));
+function buildCalendar(p: {
+  month: string;
+  currency: string;
+  today: string;
+  tz: string;
+  first: string;
+  last: string;
+  conns: readonly ConnectionView[];
+  before: SnapRow[];
+  snaps: SnapRow[];
+  revRows: RevRow[];
+  counts: CountRow[];
+  oldestSnapshot: string | null;
+  cv: FxConverter;
+}): CalendarMonth {
+  const { month, currency, today, tz, first, last, conns, before, snaps, revRows, counts, oldestSnapshot, cv } = p;
 
   // ---- where revenue history starts ----
   // A connection counts once a revenue sync has run (or rows exist), except a daily-totals provider

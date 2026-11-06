@@ -18,5 +18,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "test/**/*", "worker-configuration.d.ts", "vitest.config.ts"]
+  "include": ["src/**/*", "test/**/*", "bench/*.ts", "worker-configuration.d.ts", "vitest.config.ts"]
 }

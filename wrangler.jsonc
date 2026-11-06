@@ -4,6 +4,13 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-11-01",
 
+  // Run the Worker near D1 rather than near the visitor when that's faster. A page makes several
+  // D1 calls; from another continent each one is a long round trip, and this makes it one. Static
+  // assets are still served from the visitor's nearest location, and request.cf (the time zone
+  // new accounts start with) describes the visitor either way. Requests carry a `cf-placement`
+  // header saying where they ran. No effect on `wrangler dev`. See bench/README.md.
+  "placement": { "mode": "smart" },
+
   // Tailwind and the browser bundle (public/client) are built before every dev reload and deploy.
   "build": {
     "command": "npm run build",

@@ -372,6 +372,9 @@ export function fixtureTransactions(page = 1, provider: TransactionPage['provide
     page,
     pageSize,
     hasMore: filtered.length > start + pageSize,
+    // Fixtures page by number; the cursors only matter against D1.
+    nextCursor: null,
+    prevCursor: null,
   };
 }
 

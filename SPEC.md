@@ -225,7 +225,7 @@ Kaynak: [`migrations/`](migrations/) (`0001_init.sql`; `0002` para birimi kayna�
 | `login_attempts` | `key` = sha256(email\|ip) | giriş deneme sınırı |
 | `connections` | `id` (UUID) | sağlayıcı, ad, **şifreli** kimlik bilgisi, `config` (JSON), durum, cursor, `queued_at` (yolda bir senkronizasyon, 0007), `webhook_nonce` (`NULL` = webhook kapalı) ve `webhook_last_at` (0008) |
 | `snapshots` | (`connection_id`, `day`) | günlük metrik anlık görüntüsü; gün, sahibin yerel günü (v1.1; önceki satırlar UTC); MRR **MoneyMap JSON** (`{"USD":12300,"EUR":4500}`); `mrr_by_product` (migration 0005): MRR'ın ürüne göre dağılımı, `[{name, mrr, subscriptions}]` JSON, en fazla 500 ürün; bölmeyen sağlayıcılarda NULL; `warnings` (0006): o senkronizasyonun sayamadıkları, en fazla 5 cümle × 200 karakter |
-| `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok) |
+| `transactions` | (`connection_id`, `external_id`) | ödeme/iade olayları (PII yok). `idx_transactions_cover` (`connection_id`, `occurred_at`, `currency`, `amount`, `type`, `description`): okuma modellerinin zaman aralığı taramaları tabloya dönmeden indeksten okunur (migration 0010) |
 | `daily_revenue` | (`connection_id`, `day`, `currency`) | birleşik günlük gelir, **UTC** günü. İşlem bazlı sağlayıcılarda `transactions`'tan türetilir (okuma modelleri bunları yerel güne göre `transactions`'tan gruplar, §6 "Günler"); günlük toplam veren sağlayıcılarda (`source='provider'`) doğrudan okunur |
 | `fx_rates` | `day` | USD bazlı kurlar (JSON), her kur kendi tarihinde; `json_patch` ile birleşir (aynı güne yeni gelen kur eskisinin yerine geçer). Boş satır (`{}`) yalnızca geçmişin çekildiğini işaretler. `fetched_at` günlük çekimin satırı son yazdığı an (yalnızca geçmiş doldurmanın yazdığı günlerde 0); geçmiş doldurma günlük çekim yerine sayılmaz |
 | `sync_runs` | `id` | senkronizasyon geçmişi |
@@ -818,9 +818,9 @@ hoomuch/
 ### 9.1 Kontratlar (değiştirmek için Lead onayı gerekir)
 
 - `src/providers/types.ts` — `ProviderAdapter` (v1.1: isteğe bağlı `fetchSnapshotHistory`; isteği sahibin yerel `today`'ini taşır), `ProviderMeta` (v1.1: `webhook`, `dayZone`), `ProviderContext` (v1.1: `deadline`, `signal`), `MetricsSnapshot` (v1.1: `warnings`), `RevenueEvent`, `DailyRevenuePoint`, `RevenuePage`, `ProviderError`
-- `src/data/types.ts` — `DashboardData` (v1.1: `fx.daily`, `days`, dolu `warnings`), `CalendarMonth`, `CalendarDay`, `TransactionPage`, `ConnectionSummary`, `ConnectionDetail` (v1.1: `warnings`, `webhook`)
+- `src/data/types.ts` — `DashboardData` (v1.1: `fx.daily`, `days`, dolu `warnings`), `CalendarMonth`, `CalendarDay`, `TransactionPage` (sonraki sürüm: `nextCursor`, `prevCursor`), `ConnectionSummary`, `ConnectionDetail` (v1.1: `warnings`, `webhook`)
 - `src/services/connections.ts` — `createConnection`, `renameConnection`, `rotateCredentials`, `deleteConnection`, `triggerSync`, `startSync` (v1.1: senkronizasyonları kuyruğa koyar, `ExecutionContext` almaz); `src/services/webhooks.ts` — `setWebhook`, `receiveWebhook`
-- `src/data/*.ts` — `getDashboardData`, `getCalendarMonth`, `listTransactions`, `listConnectionSummaries`, `getConnectionDetail`
+- `src/data/*.ts` — `getDashboardData`, `getCalendarMonth`, `listTransactions` (sonraki sürüm: isteğe bağlı `before` / `after` imleci; sayfa OFFSET'siz okunur, `?page=` hâlâ çalışır), `listConnectionSummaries`, `getConnectionDetail`; sonraki sürüm: `getDashboardPage` (panel, takvim ve bağlantı listesi tek D1 turunda; bağlantılar `credentials_enc` olmadan okunur)
 - `src/sync/engine.ts` — `syncConnection`, `runScheduledSync`; `src/sync/queue.ts` — `SyncMessage`, `enqueueSync(s)`; `src/sync/consumer.ts` — `handleSyncBatch`
 
 ---

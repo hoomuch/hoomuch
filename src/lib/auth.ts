@@ -346,10 +346,15 @@ export async function endSession(c: Context<AppEnv>): Promise<void> {
   c.set('user', null);
 }
 
+/** A stored currency_source / timezone_source, anything unexpected read as 'default'. */
+const sourceOf = (v: string | null | undefined): 'default' | 'inferred' | 'chosen' => (v === 'inferred' || v === 'chosen' ? v : 'default');
+
 /** Populates c.var.user from the session cookie (null when signed out). Sliding expiry. */
 export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
   c.set('user', null);
   c.set('emailUnverified', false);
+  c.set('currencySource', 'default');
+  c.set('timezoneSource', 'default');
   const token = readSessionToken(c);
   if (token) {
     const sessionId = await sha256Hex(token);
@@ -357,14 +362,20 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
     const row = await getSessionWithUser(c.env.DB, sessionId, now, now - SESSION_ABSOLUTE_MAX_MS);
     if (row) {
       let timeZone = normalizeTimeZone(row.timezone) ?? UTC;
+      let timezoneSource = sourceOf(row.timezone_source);
       // Until the user picks one in Settings, start with the zone Cloudflare saw the request
       // come from (once). Days on every page run midnight to midnight there.
-      if (row.timezone_source === 'default') {
+      if (timezoneSource === 'default') {
         const seen = normalizeTimeZone((c.req.raw as { cf?: { timezone?: unknown } }).cf?.timezone);
-        if (seen && seen !== timeZone && (await setInferredTimezone(c.env.DB, row.user_id, seen))) timeZone = seen;
+        if (seen && seen !== timeZone && (await setInferredTimezone(c.env.DB, row.user_id, seen))) {
+          timeZone = seen;
+          timezoneSource = 'inferred';
+        }
       }
+      c.set('timezoneSource', timezoneSource);
       c.set('user', { id: row.user_id, email: row.email, baseCurrency: row.base_currency, timeZone });
       c.set('emailUnverified', row.email_verified_at === null);
+      c.set('currencySource', sourceOf(row.currency_source));
       if (row.expires_at - now < SESSION_REFRESH_BELOW_MS) {
         await extendSession(c.env.DB, sessionId, now + SESSION_TTL_MS);
         setSessionCookie(c, token);

@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCalendarMonth } from '../../src/data/calendar';
-import { getDashboardData, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
+import { getDashboardData, getDashboardPage, kpi, PRODUCT_ROWS } from '../../src/data/dashboard';
 import type { DashboardData } from '../../src/data/types';
 import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
 import { cleanSnapshot } from '../../src/sync/aggregate';
 import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/stripe';
-import { listTransactions } from '../../src/data/transactions';
+import { encodeCursor, listTransactions, parseCursor } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';
+import { CONNECTION_VIEW_COLUMNS } from '../../src/db/queries';
 import type { SessionUser } from '../../src/env';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
 
@@ -525,12 +526,78 @@ describe('listTransactions', () => {
     expect(p3.items).toEqual([]);
   });
 
+  it('reads cursors back as written, and ignores junk', () => {
+    const c = { at: NOW, connectionId: 'l', externalId: 'order:1~a~b' };
+    expect(parseCursor(encodeCursor(c))).toEqual(c);
+    for (const junk of [undefined, '', 'x', '12~l', '-1~l~x', `${NOW}~~x`, `1e3~l~x`, `${'9'.repeat(17)}~l~x`, `${NOW}~l~${'x'.repeat(513)}`]) {
+      expect(parseCursor(junk), String(junk)).toBeNull();
+    }
+  });
+
   it('clamps bad paging input', async () => {
     const p = await listTransactions(testEnv(t.db), user, { provider: null, page: -4, pageSize: 10_000 });
     expect(p.page).toBe(1);
     expect(p.pageSize).toBe(200);
     const q = await listTransactions(testEnv(t.db), user, { provider: null, page: Number.NaN });
     expect(q.page).toBe(1);
+  });
+
+  it('pages through every connection merged newest first, ties across page edges included', async () => {
+    // Each connection only sorts its newest (offset + pageSize + 1) rows: check that no page loses
+    // or repeats a row against one sort of everything, with many shared instants (ties at every
+    // page edge and at every connection's cutoff), on both sides of midnight.
+    seedConnection(t, { id: 'p', userId: 'u1', provider: 'paddle', name: 'Paddle' });
+    type Row = { conn: string; id: string; at: number };
+    const rows: Row[] = [
+      { conn: 's', id: 'txn_1', at: NOW - 1000 },
+      { conn: 's', id: 'txn_2', at: NOW - 2000 },
+      { conn: 'l', id: 'order:1', at: NOW - 3000 },
+      { conn: 'l', id: 'order:2', at: NOW - 4000 },
+    ];
+    let n = 0;
+    for (const conn of ['s', 'l', 'p']) {
+      for (let i = 0; i < 30; i++) {
+        // 9 instants per connection, shared with the others; 13:00 to 12:20 the day before included.
+        const at = NOW - (i % 9) * 3 * 60 * 60_000 - (conn === 'p' ? 0 : (i % 2) * 60_000);
+        const id = `${conn}-${String((i * 7) % 30).padStart(2, '0')}-${n++}`;
+        tx(conn, id, at, 1_00);
+        rows.push({ conn, id, at });
+      }
+    }
+    const newestFirst = (a: Row, b: Row) => b.at - a.at || (a.conn < b.conn ? -1 : a.conn > b.conn ? 1 : 0) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+    async function expectPages(want: Row[], opts: { provider: 'stripe' | null; day?: string }) {
+      const ids = [...want].sort(newestFirst).map((r) => r.id);
+      const seen: string[] = [];
+      for (let page = 1; page <= Math.ceil(ids.length / 7) + 1; page++) {
+        const p = await listTransactions(testEnv(t.db), user, { ...opts, page, pageSize: 7 });
+        seen.push(...p.items.map((i) => i.externalId));
+        expect(p.hasMore, `page ${page}`).toBe(page * 7 < ids.length);
+      }
+      expect(seen).toEqual(ids);
+
+      // The same pages through the Next links' cursors, then back through the Previous links'.
+      const pages: string[][] = [];
+      let p = await listTransactions(testEnv(t.db), user, { ...opts, page: 1, pageSize: 7 });
+      pages.push(p.items.map((i) => i.externalId));
+      while (p.nextCursor) {
+        p = await listTransactions(testEnv(t.db), user, { ...opts, page: p.page + 1, pageSize: 7, before: parseCursor(p.nextCursor) });
+        pages.push(p.items.map((i) => i.externalId));
+      }
+      expect(pages.flat()).toEqual(ids);
+      expect(pages.length).toBe(Math.max(1, Math.ceil(ids.length / 7)));
+      for (let i = pages.length - 1; i > 0; i--) {
+        expect(p.prevCursor, `page ${p.page}`).not.toBeNull();
+        p = await listTransactions(testEnv(t.db), user, { ...opts, page: p.page - 1, pageSize: 7, after: parseCursor(p.prevCursor) });
+        expect(p.items.map((x) => x.externalId), `back to page ${p.page}`).toEqual(pages[i - 1]);
+        expect(p.hasMore).toBe(true);
+      }
+    }
+    const onDay = (day: string) => (r: Row) => new Date(r.at).toISOString().slice(0, 10) === day;
+    await expectPages(rows, { provider: null });
+    await expectPages(rows.filter((r) => r.conn === 's'), { provider: 'stripe' });
+    await expectPages(rows.filter(onDay(TODAY)), { provider: null, day: TODAY });
+    await expectPages(rows.filter(onDay('2026-11-04')), { provider: null, day: '2026-11-04' });
+    expect(rows.filter(onDay('2026-11-04')).length).toBeGreaterThan(7);
   });
 });
 
@@ -711,6 +778,17 @@ describe('which day’s rate each figure takes (SPEC §6)', () => {
     expect(await shown(jpy)).toEqual({ usd: 1_500, eur: 3_000 });
   });
 
+  it('a transaction older than every stored rate takes the oldest one, on a page of its own too', async () => {
+    fx({ EUR: 0.5 }, '2026-06-01'); // the oldest stored rates
+    fx({ EUR: 0.8 }, '2026-11-04');
+    await sales(['new', '2026-11-02T12:00:00Z', 100_00, 'EUR'], ['old', '2026-04-02T12:00:00Z', 100_00, 'EUR']);
+    // Page 2 holds only April's sale: no stored rate is near its day, and the oldest (0.5) applies,
+    // as FxHistory.rateOn says, not the latest (0.8).
+    const page2 = await listTransactions(testEnv(t.db), user, { provider: null, page: 2, pageSize: 1 });
+    expect(page2.items.map((i) => [i.externalId, i.displayAmount])).toEqual([['old', 200_00]]);
+    expect(await shown(user)).toEqual({ new: 200_00, old: 200_00 });
+  });
+
   it('a currency without rates in the range takes the latest as its day rate; the latest table’s date stays with MRR', async () => {
     fx({ EUR: 0.5 }, '2026-10-01'); // the only rates, from before the range's history
     await sales(['eur', '2026-11-02T12:00:00Z', 100_00, 'EUR']);
@@ -721,5 +799,62 @@ describe('which day’s rate each figure takes (SPEC §6)', () => {
     snap('st', TODAY, { EUR: 10_00 }, 1);
     d = await getDashboardData(testEnv(t.db), user, 7);
     expect(d.fx).toEqual({ asOf: '2026-10-01', daily: true, missing: [] });
+  });
+});
+
+describe('the dashboard page in one round trip', () => {
+  const at = (day: string, hour = 12) => Date.parse(`${day}T${String(hour).padStart(2, '0')}:00:00.000Z`);
+
+  beforeEach(async () => {
+    fx({ EUR: 0.8 }, '2026-10-01');
+    fx({ EUR: 0.5 }, '2026-11-04');
+    seedConnection(t, { id: 'st', userId: 'u1', provider: 'stripe', name: 'Acme', createdAt: at('2026-08-01') });
+    seedConnection(t, { id: 'rc', userId: 'u1', provider: 'revenuecat', name: 'App', config: { revenueHistory: 'daily' }, createdAt: at('2026-08-01') });
+    seedConnection(t, { id: 'x', userId: 'u2', provider: 'stripe', name: 'Theirs' });
+    // This window and the one before it, refunds and two currencies, on both sides of the edge.
+    for (const [id, day, amount, currency, product] of [
+      ['a', '2026-10-06', 50_00, 'USD', 'Pro'], ['b', '2026-10-06', -10_00, 'USD', 'Pro'], ['c', '2026-10-07', 40_00, 'EUR', 'Team'],
+      ['d', '2026-10-07', 30_00, 'EUR', null], ['e', '2026-11-01', 20_00, 'USD', 'Pro'], ['f', '2026-11-01', -5_00, 'EUR', 'Team'],
+      // Two products with refunds on one day and currency: their rows add up to one revenue row.
+      ['g', '2026-10-20', 30_00, 'USD', 'Pro'], ['h', '2026-10-20', -3_00, 'USD', 'Pro'],
+      ['i', '2026-10-20', 25_00, 'USD', 'Team'], ['j', '2026-10-20', -4_00, 'USD', 'Team'],
+    ] as const) tx('st', id, at(day), amount, currency, product);
+    await t.db.batch(recomputeDailyRevenue(t.db, 'st', { from: '2026-09-01', to: TODAY }));
+    rev('rc', '2026-10-06', 'USD', 7_00, 1_00, 'provider');
+    rev('rc', '2026-11-02', 'USD', 9_00, 0, 'provider');
+    tx('x', 'theirs', at('2026-11-01'), 99_00);
+    snap('st', '2026-10-01', { USD: 100_00 }, 10);
+    snap('st', TODAY, { USD: 120_00 }, 12);
+    snap('rc', TODAY, { USD: 30_00 }, 3, 1);
+  });
+
+  it('equals the dashboard, the calendar and the connection list read on their own', async () => {
+    const env = testEnv(t.db);
+    const before = t.roundTrips();
+    const page = await getDashboardPage(env, user, 30, '2026-10');
+    expect(t.roundTrips() - before).toBe(1);
+    expect(page.data).toEqual(await getDashboardData(env, user, 30));
+    expect(page.calendar).toEqual(await getCalendarMonth(env, user, '2026-10'));
+    expect(page.connections).toEqual(await listConnectionSummaries(env, 'u1'));
+  });
+
+  it('counts each window’s revenue once, this window’s from the product rows', async () => {
+    const d = await getDashboardData(testEnv(t.db), user, 30);
+    // This window (Oct 7 – Nov 5): 70 € on Oct 7 and −5 € on Nov 1, both at Oct 1's 0.8 (Nov 4's
+    // 0.5 comes after them), 55 $ − 7 $ on Oct 20, 20 $ on Nov 1, and RevenueCat's 9 $.
+    expect(d.kpis.revenue.value).toBe(87_50 - 6_25 + 48_00 + 20_00 + 9_00);
+    expect(d.revenueSeries.find((r) => r.day === '2026-10-20')!.total).toBe(48_00);
+    // The window before (Sep 7 – Oct 6): 50 $ − 10 $ and RevenueCat's 7 $ − 1 $.
+    expect(d.kpis.revenue.previous).toBe(40_00 + 6_00);
+    expect(d.breakdown.find((b) => b.id === 'st')!.revenue).toBe(87_50 - 6_25 + 48_00 + 20_00);
+    expect(d.products.rows.reduce((s, p) => s + p.revenue, 0) + d.products.unnamed.revenue).toBe(d.kpis.revenue.value);
+  });
+});
+
+describe('connection reads', () => {
+  it('select every column but the encrypted credentials', () => {
+    const columns = t.rows<{ name: string }>('PRAGMA table_info(connections)').map((c) => c.name);
+    expect(columns).toContain('credentials_enc');
+    expect(CONNECTION_VIEW_COLUMNS.split(',').map((c) => c.trim()).sort()).toEqual(columns.filter((c) => c !== 'credentials_enc').sort());
   });
 });

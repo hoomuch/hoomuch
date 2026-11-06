@@ -33,8 +33,11 @@ export const FX_MAX_AGE_MS = 20 * HOUR;
 export const FX_HISTORY_DAYS = 2 * BACKFILL_DAYS + 20;
 /** Days a failed ECB history is retried (one request a cron tick) before the blended rates alone stand. */
 export const ECB_HISTORY_RETRY_DAYS = 3;
-/** Days the "latest" table looks back for each currency (some sources publish weekly). */
-const LATEST_LOOKBACK_DAYS = 10;
+/**
+ * Days the "latest" table looks back for each currency (some sources publish weekly), and how far
+ * before its first day a rate history reaches, so the first days have a rate on or before them.
+ */
+export const LATEST_LOOKBACK_DAYS = 10;
 const FX_TIMEOUT_MS = 10_000;
 const FX_RATE_MIN = 1e-6;
 const FX_RATE_MAX = 1e7;
@@ -43,7 +46,7 @@ const FX_RANGE_MAX_BYTES = 4 * 1024 * 1024;
 const CODE_RE = /^[A-Z]{3}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-interface FxRow {
+export interface FxRow {
   day: string;
   base: string;
   rates: string;
@@ -104,24 +107,36 @@ export async function getLatestFx(db: D1Database): Promise<FxTable | null> {
 }
 
 /**
- * One user's rate history for days `from`..`to` (plus a lookback for the first days), slimmed in
- * SQL to the currencies their revenue is in and their display currency, so a dashboard never
- * parses every currency of every day. Pass its results to `new FxHistory`.
+ * SQL for one `fx_rates` row's rates (the column `rates`), slimmed to the currencies listed in
+ * `need`, a one-column (`cur`) table that must be MATERIALIZED (or it is re-evaluated for every
+ * row). One lookup per needed currency instead of expanding all ~170 with json_each.
  */
-export function fxHistoryStatement(db: D1Database, userId: string, displayCurrency: string, from: string | null, to: string): D1PreparedStatement {
+export function slimRatesSql(rates: string, need: string): string {
+  return `(SELECT json_group_object(n.cur, json_extract(${rates}, '$.' || n.cur)) FROM ${need} n
+            WHERE n.cur GLOB '[A-Z][A-Z][A-Z]' AND json_extract(${rates}, '$.' || n.cur) IS NOT NULL)`;
+}
+
+/**
+ * One user's rate history for days `from`..`to` (plus a lookback for the first days), slimmed in
+ * SQL to the currencies their revenue on those days is in and their display currency, so a
+ * dashboard never parses every currency of every day. Pass its results to `new FxHistory`.
+ */
+export function fxHistoryStatement(db: D1Database, userId: string, displayCurrency: string, from: string, to: string): D1PreparedStatement {
   return db
     .prepare(
-      `WITH need(cur) AS (
-         SELECT DISTINCT d.currency FROM daily_revenue d JOIN connections c ON c.id = d.connection_id WHERE c.user_id = ?1
+      // daily_revenue's days are UTC days (or the provider's own): a local day's revenue is in the
+      // rows of that day or the one either side, hence from - 1 to to + 1.
+      `WITH need(cur) AS MATERIALIZED (
+         SELECT DISTINCT d.currency FROM daily_revenue d JOIN connections c ON c.id = d.connection_id
+          WHERE c.user_id = ?1 AND d.day >= ?5 AND d.day <= ?6
          UNION SELECT ?2
        )
-       SELECT f.day, f.base,
-              (SELECT json_group_object(j.key, j.value) FROM json_each(f.rates) j WHERE j.key IN (SELECT cur FROM need)) AS rates
+       SELECT f.day, f.base, ${slimRatesSql('f.rates', 'need')} AS rates
          FROM fx_rates f
-        WHERE f.rates != '{}' AND (?3 IS NULL OR f.day >= ?3) AND f.day <= ?4
+        WHERE f.rates != '{}' AND f.day >= ?3 AND f.day <= ?4
         ORDER BY f.day`,
     )
-    .bind(userId, normalizeCurrency(displayCurrency), from === null ? null : addDays(from, -LATEST_LOOKBACK_DAYS), to);
+    .bind(userId, normalizeCurrency(displayCurrency), addDays(from, -LATEST_LOOKBACK_DAYS), to, addDays(from, -1), addDays(to, 1));
 }
 
 /** Rates by day, for converting each day's revenue at that day's rate. */

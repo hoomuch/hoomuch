@@ -37,11 +37,21 @@ export interface TransactionsPageProps {
  * "All" is explicit (?provider=all): a bare /transactions brings back the remembered filter.
  * `day` (one of the user's local days, from the dashboard calendar) is kept across filters and pages.
  */
-function href(base: string, provider: ProviderId | null, page: number, day: string | null = null): string {
+function href(
+  base: string,
+  provider: ProviderId | null,
+  page: number,
+  day: string | null = null,
+  cursor: { before?: string | null; after?: string | null } = {},
+): string {
   const q = new URLSearchParams();
   q.set('provider', provider ?? 'all');
   if (day) q.set('day', day);
   if (page > 1) q.set('page', String(page));
+  // Where the page starts, so a deep page reads as fast as the first (data/transactions.ts).
+  // Page 1 needs none.
+  if (page > 1 && cursor.before) q.set('before', cursor.before);
+  else if (page > 1 && cursor.after) q.set('after', cursor.after);
   const s = q.toString();
   return s ? `${base}?${s}` : base;
 }
@@ -198,7 +208,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
           <PaginationContent>
             {p.page > 1 ? (
               <PaginationItem>
-                <PaginationPrevious href={href(base, p.provider, p.page - 1, day)} aria-label="Previous page" />
+                <PaginationPrevious href={href(base, p.provider, p.page - 1, day, { after: p.prevCursor })} aria-label="Previous page" />
               </PaginationItem>
             ) : null}
             <PaginationItem>
@@ -208,7 +218,7 @@ export function TransactionsPage(props: TransactionsPageProps) {
             </PaginationItem>
             {p.hasMore ? (
               <PaginationItem>
-                <PaginationNext href={href(base, p.provider, p.page + 1, day)} aria-label="Next page" />
+                <PaginationNext href={href(base, p.provider, p.page + 1, day, { before: p.nextCursor })} aria-label="Next page" />
               </PaginationItem>
             ) : null}
           </PaginationContent>

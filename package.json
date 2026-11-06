@@ -31,6 +31,11 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && npm run build",
     "security": "node scripts/security.mjs",
+    "bench:seed": "node bench/seed.mjs --fresh --db bench/.state/bench.sqlite --migrate --users-out bench/.state/users.json",
+    "bench:readmodels": "vitest run --config bench/vitest.config.ts",
+    "bench:ab": "node bench/ab.mjs",
+    "bench:compare": "node bench/compare.mjs",
+    "bench:e2e": "node bench/serve.mjs",
     "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "cloudflare": {

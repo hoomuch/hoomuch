@@ -1,12 +1,11 @@
 /** GET /dashboard?range=7|30|90&month=YYYY-MM&day=YYYY-MM-DD. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
-import { getCalendarMonth, parseCalendarQuery } from '../data/calendar';
-import { listConnectionSummaries } from '../data/connections';
+import { parseCalendarQuery } from '../data/calendar';
 import { dominantMrrCurrency } from '../data/currency';
-import { getDashboardData } from '../data/dashboard';
+import { getDashboardPage } from '../data/dashboard';
 import { parseRange } from '../data/types';
-import { getCurrencySource, setInferredCurrency } from '../db/queries';
+import { setInferredCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { syncCadence, syncIntervalMinutes } from '../views/pages/shared';
@@ -18,9 +17,10 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
   app.get('/dashboard', requireUser, async (c) => {
     let user = currentUser(c);
     // Until the user picks a display currency, start with the one most of their real MRR is in
-    // (once, at the first dashboard load with numbers). Settings can change it any time.
+    // (once, at the first dashboard load with numbers). Settings can change it any time. The source
+    // came with the session (lib/auth.ts); setInferredCurrency re-checks it in its own UPDATE.
     let currencyInferred: string | null = null;
-    if ((await getCurrencySource(c.env.DB, user.id)) === 'default') {
+    if (c.get('currencySource') === 'default') {
       const dominant = await dominantMrrCurrency(c.env, user.id);
       if (dominant && (await setInferredCurrency(c.env.DB, user.id, dominant)) && dominant !== user.baseCurrency) {
         user = { ...user, baseCurrency: dominant };
@@ -33,11 +33,8 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
     // The calendar's month and picked day (?month=, ?day=). Not remembered: a bare link is this month.
     const cal = parseCalendarQuery(c.req.query('month'), c.req.query('day'), Date.now(), user.timeZone);
 
-    const [data, connections, calendar] = await Promise.all([
-      getDashboardData(c.env, user, range),
-      listConnectionSummaries(c.env, user.id),
-      getCalendarMonth(c.env, user, cal.month),
-    ]);
+    // One D1 round trip for the dashboard, the calendar and the connection list.
+    const { data, connections, calendar } = await getDashboardPage(c.env, user, range, cal.month);
 
     // The first real connection just replaced demo data: say so in the notice or the strip, and
     // keep saying it across the auto-refreshes until one of them shows.

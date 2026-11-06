@@ -2,8 +2,10 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import {
+  DAY,
   HOUR,
   MINUTE,
+  dayNumberToKeySql,
   localDaySql,
   normalizeTimeZone,
   timeZoneOptions,
@@ -157,6 +159,23 @@ describe('localDays in SQL', () => {
   /** The calendar day on a wall clock `offsetHours` from UTC: read off the shifted ISO string. */
   const wallDay = (ms: number, offsetHours: number) => new Date(ms + offsetHours * HOUR).toISOString().slice(0, 10);
   const every = (from: number, to: number, step: number) => Array.from({ length: Math.ceil((to - from) / step) }, (_, i) => from + i * step);
+
+  it('the day number names the same day as the day key, as an integer, in every kind of zone', () => {
+    // node:sqlite binds JS numbers as REAL, as D1 does: the number must still be a whole day.
+    const zones = [LA, KOLKATA, AUCKLAND, SANTIAGO, LORD_HOWE, 'Asia/Kathmandu', 'Pacific/Chatham', 'America/St_Johns', 'UTC'];
+    for (const tz of zones) {
+      const { lo, hi, day, dayNumber } = localDays('p.at', '2026-03-25', '2026-04-10', tz);
+      db.exec('DELETE FROM probes');
+      const insert = db.prepare('INSERT INTO probes (at) VALUES (?)');
+      for (const ms of every(lo, hi, 15 * MINUTE)) insert.run(ms);
+      const rows = db
+        .prepare(`SELECT ${day.sql} AS d, ${dayNumberToKeySql(`(${dayNumber.sql})`)} AS k, typeof(${dayNumber.sql}) AS ty FROM probes p`)
+        .all(...day.binds, ...dayNumber.binds, ...dayNumber.binds) as { d: string; k: string; ty: string }[];
+      expect(rows.length).toBe(Math.ceil((hi - lo) / (15 * MINUTE)));
+      for (const r of rows) expect([tz, r.k, r.ty]).toEqual([tz, r.d, 'integer']);
+    }
+    expect(DAY).toBe(86_400_000);
+  });
 
   it('Santiago: the hour after DST ends is still the day before', () => {
     // Chile leaves DST at 03:00 UTC on Sunday 2026-04-05: midnight (-03) becomes 23:00 on the 4th (-04).

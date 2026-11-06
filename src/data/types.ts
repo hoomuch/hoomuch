@@ -7,10 +7,25 @@
  * user's time zone (`SessionUser.timeZone`), except provider-reported daily totals (`ProviderMeta.dayZone`).
  */
 
-import type { ConnectionStatus } from '../db/queries';
+import type { ConnectionStatus, ConnectionView } from '../db/queries';
+import type { FxRow } from '../sync/fx';
 import type { ProviderId } from '../providers/types';
 
 export type RangeDays = 7 | 30 | 90;
+
+/**
+ * A read model as statements for a `db.batch` plus the function that builds it from their results,
+ * so a page can put several read models in one D1 round trip. The connections
+ * (`connectionsStatement`) and the latest rates (`LATEST_FX_SQL`) are read once for all of them and
+ * passed to each `build`.
+ */
+export interface ReadModelQuery<T> {
+  statements: D1PreparedStatement[];
+  build(results: readonly D1Result[], conns: readonly ConnectionView[], fxRows: readonly FxRow[]): T;
+}
+
+/** A batch result's rows. */
+export const rowsOf = <T,>(r: D1Result | undefined): T[] => (r?.results ?? []) as unknown as T[];
 export const RANGE_OPTIONS: readonly RangeDays[] = [7, 30, 90];
 
 export function parseRange(v: string | undefined | null): RangeDays {
@@ -264,6 +279,10 @@ export interface TransactionPage {
   page: number;
   pageSize: number;
   hasMore: boolean;
+  /** Where the next (older) page starts: `?before=` (data/transactions.ts). Null without one. */
+  nextCursor: string | null;
+  /** Where the previous (newer) page ends: `?after=`. Null on page 1. */
+  prevCursor: string | null;
 }
 
 export interface SnapshotRow {
