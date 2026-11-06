@@ -156,13 +156,30 @@ bayatlayınca (10 dk) yeniden dener; böylece webhook mesajı da `max_retries` i
 5. `status='ok'|'error'`, `last_error`, `last_synced_at`, `sync_runs` kapanır.
 
 **Cron:** Her 30 dakikada bir: önce FX (günde bir; kur geçmişi kurulumdan/yükseltmeden sonra bir kez doldurulur),
-sonra vadesi gelen **en fazla 100 bağlantı** (kiracı başına sıralı, `queued_at`'i taze olanlar hariç) tek `sendBatch`
-ile kuyruğa konur. Her senkronizasyonda sayfa bütçesi gelir için 20, snapshot için 400 istek; dakikalık limiti düşük
-sağlayıcıların adaptörü snapshot'ınkini düşürür (`capBudget`: Lemon Squeezy 200, Paddle ve Dodo Payments 160, Chargebee 90;
-§6), böylece gelirin 20'siyle bir senkronizasyon limitin 3/4'ünü geçmez. Son tarih 4 dk (`ProviderContext.deadline`:
-snapshot payı %75, yani 3 dk, kalan gelire), son tarihten 5 sn sonra `ProviderContext.signal` uçuştaki istekleri keser.
-Snapshot devam ettirilemez: bütçe ya da süre yetmezse o senkronizasyonda MRR yazılmaz. Kilit 10 dk sonra bayat sayılır;
-canlı bir senkronizasyon (en çok 4 dk + 5 sn + D1 yazımları) bu süreye yaklaşmaz, yani başkası devralmaz.
+sonra vadesi gelen bağlantılar **100'lük turlarla** kuyruğa konur: her tur sıradaki en fazla 100 bağlantıyı seçer
+(kiracı başına sıralı), işaretlerini alır ve tek `sendBatch` ile gönderir. `queued_at`'i taze olan (yolda bir
+senkronizasyonu olan) bağlantı seçilmez ama kiracısının sırasını kullanmış sayılır; böylece bir tick'in turları tek bir
+seçimin vereceği sırayı verir, her tur kiracıların sırasını baştan başlatmaz. Turlar vadesi gelen kalmayınca, bir tur
+hiçbir şeyi kuyruğa koyamayınca (bütün işaretleri başka bir üretici aldıysa; aynı bağlantıları yeniden seçmemek için),
+**10 turda** (tick başına en fazla 1.000, saatte 2.000 senkronizasyon; varsayılan saatlik aralıkta ≈ 2.000 bağlantı) ya
+da çağrı başladıktan 2 dk sonra durur; ilk tur her zaman çalışır. Cron çağrısının sınırı 15 dk duvar saati ve Workers
+Paid'de (bir saatten kısa aralıkta) 30 sn CPU'dur; FX en çok ≈ 40 sn, bir tur normalde bir saniyenin altında sürer. Tick
+başına sınır tüketiciye göre seçildi: 10 eşzamanlı çağrı 15 dk'da 9.000 çağrı-saniye eder, yani ortalama senkronizasyon
+≤ 9 sn ise 1.000'inin hepsi işaretleri tazeyken, ≤ 18 sn ise bir sonraki tick'ten önce başlar (küçük bir hesabın
+senkronizasyonu birkaç saniye sürer). Daha yavaşsa sonraki tick hâlâ bekleyen mesajı yeniden kuyruğa koyar (tick başına
+en çok bir kez); ilk mesaj senkronize edince kopyası tek bir D1 okumasıyla ack'lenir. Bu yüzden `QUEUED_STALE_MS` (15 dk)
+ve `max_concurrency` (10) değişmedi: 15 dk "Sync now"ın ve webhook'un "yolda" dediği süre ve kaybolan mesajın ne zaman
+yeniden kuyruğa konacağıdır; daha çok eşzamanlı çağrı sağlıklı bir kurulumu hızlandırmaz, D1'in tek yazıcısına ve IP
+başına limitli sağlayıcılara (Paddle) aynı anda daha çok senkronizasyon yükler. `cron_sync` logu `due` (tick başında
+vadesi gelen), `queued`, `rounds`, `stop` (`done`, `cap`, `deadline`, `unclaimed`, `error`), `left` (durduğunda hâlâ
+vadesi gelen) ve `requeued`'u (önceki mesajı 15 dk içinde başlamamış olanlar) yazar; `cap`, `deadline` ya da
+`requeued > 0` olan tick `warn` seviyesinde loglanır.
+Her senkronizasyonda sayfa bütçesi gelir için 20, snapshot için 400 istek; dakikalık limiti düşük sağlayıcıların
+adaptörü snapshot'ınkini düşürür (`capBudget`: Lemon Squeezy 200, Paddle ve Dodo Payments 160, Chargebee 90; §6),
+böylece gelirin 20'siyle bir senkronizasyon limitin 3/4'ünü geçmez. Son tarih 4 dk (`ProviderContext.deadline`: snapshot
+payı %75, yani 3 dk, kalan gelire), son tarihten 5 sn sonra `ProviderContext.signal` uçuştaki istekleri keser. Snapshot
+devam ettirilemez: bütçe ya da süre yetmezse o senkronizasyonda MRR yazılmaz. Kilit 10 dk sonra bayat sayılır; canlı bir
+senkronizasyon (en çok 4 dk + 5 sn + D1 yazımları) bu süreye yaklaşmaz, yani başkası devralmaz.
 
 **Elle senkronizasyon:** Aynı bağlantı için 60 saniyede bir; yolda bir senkronizasyon varsa ikincisi eklenmez. Kuyruğa
 konur; istek hemen döner (`?sync=<istek anı>`), sayfa meta refresh ile çalışmayı izler ve bitince sonucu gösterir.
@@ -186,6 +203,11 @@ URL) ve RevenueCat, Superwall (grafikler kendi takviminde yenilenir) için sunul
 ### 4.2 Limitler ve ölçeklenme
 
 - PBKDF2 100k iterasyon ve senkronizasyon, Free plan'ın 10 ms CPU limitini aşabilir → **Workers Paid önerilir**.
+- Cron saatte en fazla 2.000 senkronizasyon kuyruğa koyar (§4.1): varsayılan saatlik aralıkta ≈ 2.000 bağlantı. Daha
+  fazlasında her bağlantı daha seyrek senkronize olur (en gecikmiş önce) ve `cron_sync` logu `stop: "cap"` ile uyarır.
+  Tick'ten sonraki 5 dk içinde (zamanlama payı) başlayan senkronizasyon saatlik kalır; daha geç başlayanın vadesi bir
+  saat sonraki tick'te henüz gelmediğinden 90 dk'da bir döner (10 eşzamanlı çağrı ve 5 sn'lik senkronizasyonlarla bir
+  tick'in ilk ≈ 600'ü saatlik kalır).
 - Queues Free plan'da da var: günde 10.000 işlem; bir senkronizasyon ≈ 3 işlem, yani günde ≈ 3.300 senkronizasyon
   (varsayılan saatlik aralıkta ≈ 130 bağlantı). Paid'de ayda 1M işlem dahildir.
 

@@ -33,6 +33,10 @@
   // Every sync runs in this queue's consumer (src/sync/consumer.ts), one connection per invocation,
   // so each gets its own request budget and time. The cron, new connections and "Sync now" send to
   // it. `wrangler deploy` creates the queue the first time if it doesn't exist yet.
+  // max_concurrency 10 clears the cron's 1,000 syncs a tick within 15 minutes at up to 9 s a sync
+  // (CRON_MAX_ROUNDS in src/sync/engine.ts). More slots wouldn't speed up a healthy instance, but
+  // would put more syncs on D1's single writer at once, and more on providers that rate-limit per
+  // IP across Cloudflare's shared egress (Paddle: 240 a minute, of which one sync may use 180).
   "queues": {
     "producers": [{ "binding": "SYNC_QUEUE", "queue": "hoomuch-sync" }],
     "consumers": [

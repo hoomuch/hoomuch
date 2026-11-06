@@ -95,7 +95,9 @@ interval.
 | `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
 The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
-are due on the queue.
+are due on the queue, up to 1,000 of them, enough for about 2,000 connections on the hourly interval.
+Past that, each connection syncs less often, the most overdue first, and the tick's `cron_sync` log
+line is a warning with `"stop":"cap"`.
 
 ### Protecting a public instance
 

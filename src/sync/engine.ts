@@ -111,10 +111,40 @@ export const REVENUE_PAGE_BUDGET = 20;
  */
 export const SYNC_LOCK_STALE_MS = 10 * MINUTE;
 /**
- * Connections the cron queues per tick (SPEC §4.1): one `sendBatch`. Due times only move forward
- * and the order is per-tenant round robin, so anything left over goes first on the next tick.
+ * Connections the cron queues per round (SPEC §4.1): one selection, one claim and one `sendBatch`,
+ * whose limit is 100 messages. A tick runs rounds until nothing more is due, up to CRON_MAX_ROUNDS.
+ * Due times only move forward and the order is per-tenant round robin, so anything a tick leaves
+ * over goes first on the next.
  */
 export const CRON_QUEUE_LIMIT = 100;
+/**
+ * Rounds per tick: at most 1,000 syncs a tick, 2,000 an hour on the 30-minute cron, enough for
+ * about 2,000 healthy connections on the default hourly interval (each is due every other tick).
+ * One round a tick capped the cron at 200 an hour, so past about 180 connections every one fell
+ * behind. (A sync that starts more than MAX_SCHEDULE_GRACE_MS after its tick isn't due again by the
+ * tick an hour later, so on a big instance the last syncs of a tick come round every 90 minutes.)
+ *
+ * The cap is what the consumer can drain (wrangler.jsonc: `max_concurrency` 10, one sync per
+ * invocation). Ten slots over QUEUED_STALE_MS (15 min) are 9,000 slot-seconds, so all 1,000 syncs
+ * start while their queued marks are still fresh if the average sync takes up to 9 s, and before
+ * the next tick if it takes up to 18 s; a small account's sync takes a few seconds. Slower than
+ * that, the consumer is the bottleneck, not the cron: a message still waiting at the next tick is
+ * queued again (`requeued` in the log), at most once a tick, and the copy is acked as superseded
+ * after one D1 read once the first has synced, so the copies stay at about what a tick queued minus
+ * what the consumer drained, rather than growing tick after tick. When every sync runs into
+ * SYNC_DEADLINE_MS the consumer drains about 73 a tick, below even one round.
+ */
+export const CRON_MAX_ROUNDS = 10;
+/**
+ * No round after the first starts later than this after the cron invocation began, FX included.
+ * A Cron Trigger invocation may run for 15 minutes of wall time, with 30 s of CPU on Workers Paid
+ * for a schedule under an hour (developers.cloudflare.com/workers/platform/limits/). FX takes at
+ * most about 40 s (four requests with a 10-s timeout) and a round three round trips (select, claim,
+ * sendBatch), normally well under a second, so this only cuts a tick short while D1 or Queues is
+ * struggling, and even then the invocation ends minutes inside its limits. The first round always
+ * runs, so a slow FX never stops syncs from being queued.
+ */
+export const CRON_QUEUE_DEADLINE_MS = 2 * MINUTE;
 export const DEFAULT_SYNC_INTERVAL_MINUTES = 60;
 /** A connection in 'error' is retried after this many intervals since its last attempt. */
 export const ERROR_BACKOFF_INTERVALS = 3;
@@ -485,12 +515,29 @@ function syncIntervalMs(env: Bindings): number {
 }
 
 /**
- * Cron entry point (SPEC §4.1): refresh FX daily, then put the most overdue connections on the sync
- * queue. The syncs themselves run in the queue consumer (sync/consumer.ts), one per invocation.
+ * Why a tick stopped queueing (`stop` in the `cron_sync` log):
+ *   done       nothing more is due (a round found fewer than CRON_QUEUE_LIMIT, or all that were);
+ *   cap        CRON_MAX_ROUNDS ran and more are due: the instance has more due than a tick queues;
+ *   deadline   CRON_QUEUE_DEADLINE_MS passed with more due;
+ *   unclaimed  a round queued nothing, every claim lost to another producer: stop rather than spin;
+ *   error      D1 or the queue failed.
+ */
+export type CronStop = 'done' | 'cap' | 'deadline' | 'unclaimed' | 'error';
+
+/**
+ * Cron entry point (SPEC §4.1): refresh FX daily, then put the due connections on the sync queue,
+ * most overdue first, in rounds of CRON_QUEUE_LIMIT. The syncs themselves run in the queue consumer
+ * (sync/consumer.ts), one per invocation.
+ *
+ * Each round's claim marks the connections it queued, so the next round's selection skips them
+ * (`queuedBefore`) while still counting them in their tenant's turns. The `cron_sync` summary says
+ * how far behind the instance is: `due` when the tick began, `left` still due when it stopped,
+ * `rounds`, `stop`, and `requeued`, the connections whose previous message hadn't started after
+ * QUEUED_STALE_MS. A tick the cap or the deadline cut short, or that requeued any, logs a warning.
  */
 export async function runScheduledSync(env: Bindings, now: number = Date.now()): Promise<void> {
   const wallStart = Date.now();
-  const summary: Record<string, unknown> = { due: 0, queued: 0 };
+  const summary: Record<string, unknown> = { due: 0, queued: 0, rounds: 0 };
 
   // Settled before any sync is queued, so a dashboard never renders a fresh install's numbers
   // without rates (cron syncs skip ensureFx). refreshFxIfStale never throws (catch is belt and braces).
@@ -498,10 +545,15 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
   // Past days' rates, fetched once after an install or upgrade (usually one D1 read and done).
   summary['fxHistory'] = await ensureFxHistory(env.DB, globalFetch, now).catch(() => 'failed');
 
+  let stop: CronStop = 'done';
+  let rounds = 0;
+  let queued = 0;
+  let requeued = 0;
+  let left = 0;
   try {
     const intervalMs = syncIntervalMs(env);
     const grace = Math.min(MAX_SCHEDULE_GRACE_MS, Math.floor(intervalMs / 10));
-    const ids = await selectDueConnections(env.DB, {
+    const query = {
       now,
       okWaitMs: intervalMs - grace,
       errorWaitMs: ERROR_BACKOFF_INTERVALS * intervalMs - grace,
@@ -510,15 +562,38 @@ export async function runScheduledSync(env: Bindings, now: number = Date.now()):
       staleBefore: now - SYNC_LOCK_STALE_MS,
       queuedBefore: now - QUEUED_STALE_MS,
       limit: CRON_QUEUE_LIMIT,
-    });
-    summary['due'] = ids.length;
-    // Fewer than due when a Sync now or a webhook queued one of them since the query.
-    summary['queued'] = (await enqueueSyncs(env, ids, 'cron', now)).length;
+    };
+    for (;;) {
+      if (rounds === CRON_MAX_ROUNDS) {
+        stop = 'cap';
+        break;
+      }
+      if (rounds > 0 && Date.now() - wallStart >= CRON_QUEUE_DEADLINE_MS) {
+        stop = 'deadline';
+        break;
+      }
+      const { rows, due } = await selectDueConnections(env.DB, query);
+      rounds++;
+      if (rounds === 1) summary['due'] = due;
+      left = due; // until they're on the queue
+      const sent = await enqueueSyncs(env, rows.map((r) => r.id), 'cron', now);
+      // Fewer than selected when a Sync now or a webhook queued some of them since the selection.
+      queued += sent.length;
+      const stale = new Set(rows.filter((r) => r.requeued).map((r) => r.id));
+      requeued += sent.filter((id) => stale.has(id)).length;
+      left = due - rows.length;
+      if (rows.length < CRON_QUEUE_LIMIT || left <= 0) break; // 'done'
+      if (sent.length === 0) {
+        stop = 'unclaimed';
+        break;
+      }
+    }
   } catch (err) {
+    stop = 'error';
     summary['error'] = errorLogFields(err);
   }
 
-  summary['fx'] = fx;
-  summary['durationMs'] = Date.now() - wallStart;
-  emit(summary['error'] ? 'error' : 'log', 'cron_sync', summary);
+  Object.assign(summary, { queued, rounds, stop, left: Math.max(0, left), requeued, fx, durationMs: Date.now() - wallStart });
+  const behind = stop === 'cap' || stop === 'deadline' || requeued > 0;
+  emit(summary['error'] ? 'error' : behind ? 'warn' : 'log', 'cron_sync', summary);
 }

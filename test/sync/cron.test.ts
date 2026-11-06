@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { stripeAdapter } from '../../src/providers/stripe';
 import { HOUR, MINUTE } from '../../src/lib/time';
 import { startSync } from '../../src/services/connections';
-import { CRON_QUEUE_LIMIT, runScheduledSync } from '../../src/sync/engine';
+import { CRON_MAX_ROUNDS, CRON_QUEUE_DEADLINE_MS, CRON_QUEUE_LIMIT, runScheduledSync } from '../../src/sync/engine';
 import { QUEUED_STALE_MS, SEND_BATCH_MAX, enqueueSyncs } from '../../src/sync/queue';
 import { FX_BODY, NOW, SECRET, SNAP, conn, encryptedCreds, page, runs, setup, teardown, type Ctx } from './helpers';
 import { seedConnection, seedUser } from '../fixtures/d1';
@@ -60,6 +60,51 @@ function summary(c: Ctx): Record<string, unknown> {
   return JSON.parse(lines[0]!) as Record<string, unknown>;
 }
 
+/** The console method the `cron_sync` summary went to. */
+function summaryLevel(): string | undefined {
+  return (['log', 'warn', 'error'] as const).find((level) =>
+    vi.mocked(console[level]).mock.calls.some((args) => String(args[0]).includes('"cron_sync"')),
+  );
+}
+
+/** The connections sent so far, in order (and forgets them). */
+const sentIds = (c: Ctx) => queueOf(c.env).take().map((m) => (m.body as { connectionId: string }).connectionId);
+
+/** Records the size of every `sendBatch` call from now on. */
+function batchSizes(c: Ctx): number[] {
+  const q = queueOf(c.env);
+  const send = q.sendBatch.bind(q);
+  const sizes: number[] = [];
+  q.sendBatch = async (messages, options) => {
+    const list = [...messages];
+    sizes.push(list.length);
+    return send(list, options);
+  };
+  return sizes;
+}
+
+const pad = (i: number, width = 4) => String(i).padStart(width, '0');
+
+/** `n` of the default tenant's connections, all due, most overdue first: c0000, c0001, … */
+async function seedDue(c: Ctx, n: number): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < n; i++) {
+    ids.push(`c${pad(i)}`);
+    await seed(c, ids[i]!, { lastSyncedAt: NOW - 5 * HOUR + i * 1_000 });
+  }
+  return ids;
+}
+
+/** A D1 whose `prepare` runs `hook` on each statement's SQL first; `hook` may return a stand-in. */
+function interceptDb(db: D1Database, hook: (sql: string) => unknown): D1Database {
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop !== 'prepare') return Reflect.get(target, prop, receiver);
+      return (sql: string) => hook(sql) ?? target.prepare(sql);
+    },
+  });
+}
+
 describe('runScheduledSync — selection', () => {
   it('queues every due connection, most overdue first, and the consumer syncs them', async () => {
     const c = ctx();
@@ -74,26 +119,24 @@ describe('runScheduledSync — selection', () => {
     expect(queueOf(c.env).sent.map((m) => m.body)).toEqual(due.map((connectionId) => ({ v: 1, connectionId, kind: 'cron', at: NOW })));
     expect(conn(c.t, 'h02')).toMatchObject({ status: 'ok', last_synced_at: NOW - 2 * HOUR }); // queued, not synced yet
     expect(c.t.rows<{ id: string }>('SELECT id FROM connections WHERE queued_at = ? ORDER BY id', NOW)).toHaveLength(12);
-    expect(summary(c)).toMatchObject({ event: 'cron_sync', due: 12, queued: 12, fx: 'refreshed' });
+    expect(summary(c)).toMatchObject({
+      event: 'cron_sync',
+      due: 12,
+      queued: 12,
+      rounds: 1,
+      stop: 'done',
+      left: 0,
+      requeued: 0,
+      fx: 'refreshed',
+      fxHistory: expect.any(String),
+      durationMs: expect.any(Number),
+    });
+    expect(summaryLevel()).toBe('log');
 
     expect((await drainQueue(c.env)).every((d) => d.outcome === 'ack')).toBe(true);
     expect(syncedIds(c)).toEqual(due);
     expect(runs(c.t).every((r) => r.kind === 'cron' && r.ok === 1)).toBe(true);
     expect(c.t.rows('SELECT 1 FROM connections WHERE queued_at IS NOT NULL')).toEqual([]); // the lock cleared every mark
-  });
-
-  it(`queues at most ${CRON_QUEUE_LIMIT} per tick; the rest go first next time`, async () => {
-    const c = ctx();
-    blob ||= await encryptedCreds();
-    for (let i = 0; i < CRON_QUEUE_LIMIT + 3; i++) await seed(c, `c${String(i).padStart(3, '0')}`, { lastSyncedAt: NOW - 5 * HOUR + i * MINUTE });
-
-    await runScheduledSync(c.env, NOW);
-    expect(queueOf(c.env).take()).toHaveLength(CRON_QUEUE_LIMIT);
-
-    // Ten minutes on, the first hundred are still waiting on the queue, so only the rest are sent.
-    vi.setSystemTime(NOW + 10 * MINUTE);
-    await runScheduledSync(c.env, NOW + 10 * MINUTE);
-    expect(queueOf(c.env).take().map((m) => (m.body as { connectionId: string }).connectionId)).toEqual(['c100', 'c101', 'c102']);
   });
 
   it('skips a connection that already has a sync on the queue, until that mark goes stale', async () => {
@@ -200,7 +243,8 @@ describe('runScheduledSync — selection', () => {
 
     expect(conn(c.t, 'a')).toMatchObject({ status: 'ok' });
     expect(c.t.rows('SELECT queued_at FROM connections')).toEqual([{ queued_at: null }]);
-    expect(summary(c)).toMatchObject({ due: 1, queued: 0, error: { message: 'Queue send failed' } });
+    expect(summary(c)).toMatchObject({ due: 1, queued: 0, rounds: 1, stop: 'error', left: 1, error: { message: 'Queue send failed' } });
+    expect(summaryLevel()).toBe('error');
   });
 
   it('backs off failing keys to 3 intervals, skips fresh locks and takes over stale ones', async () => {
@@ -304,6 +348,181 @@ describe('runScheduledSync — selection', () => {
   });
 });
 
+describe('runScheduledSync — rounds', () => {
+  it(`queues in rounds of ${CRON_QUEUE_LIMIT}, one sendBatch each, until nothing more is due`, async () => {
+    const c = ctx();
+    const ids = await seedDue(c, 2 * CRON_QUEUE_LIMIT + 50);
+    const sizes = batchSizes(c);
+
+    await runScheduledSync(c.env, NOW);
+
+    expect(sizes).toEqual([CRON_QUEUE_LIMIT, CRON_QUEUE_LIMIT, 50]);
+    const sent = queueOf(c.env).take().map((m) => m.body as { connectionId: string; kind: string; at: number });
+    // Each connection once, most overdue first, every message with the tick's time.
+    expect(sent.map((m) => m.connectionId)).toEqual(ids);
+    expect(sent.every((m) => m.kind === 'cron' && m.at === NOW)).toBe(true);
+    expect(c.t.rows('SELECT id FROM connections WHERE queued_at = ?', NOW)).toHaveLength(ids.length);
+    expect(summary(c)).toMatchObject({ due: 250, queued: 250, rounds: 3, stop: 'done', left: 0, requeued: 0 });
+    expect(summaryLevel()).toBe('log');
+  });
+
+  it('a full round that leaves nothing due ends the tick without selecting again', async () => {
+    const c = ctx();
+    await seedDue(c, 2 * CRON_QUEUE_LIMIT);
+    let selections = 0;
+    const db = interceptDb(c.env.DB, (sql) => {
+      if (sql.includes('WITH candidates AS')) selections++;
+    });
+
+    await runScheduledSync({ ...c.env, DB: db }, NOW);
+
+    expect(selections).toBe(2);
+    expect(queueOf(c.env).take()).toHaveLength(2 * CRON_QUEUE_LIMIT);
+    expect(summary(c)).toMatchObject({ due: 200, queued: 200, rounds: 2, stop: 'done', left: 0 });
+  });
+
+  it(`stops after ${CRON_MAX_ROUNDS} rounds and warns; the rest go first on the next tick`, async () => {
+    const c = ctx();
+    const cap = CRON_QUEUE_LIMIT * CRON_MAX_ROUNDS;
+    const ids = await seedDue(c, cap + 3);
+    const sizes = batchSizes(c);
+
+    await runScheduledSync(c.env, NOW);
+
+    expect(sizes).toEqual(Array.from({ length: CRON_MAX_ROUNDS }, () => CRON_QUEUE_LIMIT));
+    expect(sentIds(c)).toEqual(ids.slice(0, cap));
+    expect(summary(c)).toMatchObject({ due: cap + 3, queued: cap, rounds: CRON_MAX_ROUNDS, stop: 'cap', left: 3, requeued: 0 });
+    expect(summaryLevel()).toBe('warn');
+
+    // Ten minutes on, the first thousand are still waiting on the queue, so only the rest are sent.
+    c.out.length = 0;
+    vi.setSystemTime(NOW + 10 * MINUTE);
+    await runScheduledSync(c.env, NOW + 10 * MINUTE);
+    expect(sentIds(c)).toEqual(ids.slice(cap));
+    expect(summary(c)).toMatchObject({ due: 3, queued: 3, rounds: 1, stop: 'done' });
+
+    // Had the second tick not come early, they'd still go first: by the next tick the thousand have
+    // synced, and a connection that fell due since sorts after them.
+    c.t.exec('UPDATE connections SET queued_at = NULL WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(ids.slice(cap)));
+    c.t.exec('UPDATE connections SET last_synced_at = ?1, last_sync_started_at = ?1, queued_at = NULL WHERE queued_at = ?2', NOW + MINUTE, NOW);
+    await seed(c, 'since', { lastSyncedAt: NOW - 40 * MINUTE });
+    c.out.length = 0;
+    vi.setSystemTime(NOW + 30 * MINUTE);
+    await runScheduledSync(c.env, NOW + 30 * MINUTE);
+    expect(sentIds(c)).toEqual([...ids.slice(cap), 'since']);
+  });
+
+  it('round-robins tenants across rounds the way one selection would', async () => {
+    const c = ctx();
+    blob ||= await encryptedCreds();
+    const row = (id: string, userId: string, lastSyncedAt: number) =>
+      seedConnection(c.t, { id, userId, provider: 'stripe', credentialsEnc: blob, status: 'ok', lastSyncedAt, lastSyncStartedAt: lastSyncedAt });
+    // One tenant with 100 connections, all far more overdue than anyone else's, and 150 tenants with
+    // one each: the first turn alone is 151 connections, so it spans two rounds.
+    seedUser(c.t, { id: 'big' });
+    const big = Array.from({ length: 100 }, (_, i) => `big-${pad(i, 3)}`);
+    big.forEach((id, i) => row(id, 'big', NOW - 20 * HOUR + i * MINUTE));
+    const small = Array.from({ length: 150 }, (_, i) => `small-${pad(i, 3)}`);
+    small.forEach((id, i) => {
+      seedUser(c.t, { id: `tenant-${pad(i, 3)}` });
+      row(id, `tenant-${pad(i, 3)}`, NOW - 2 * HOUR + i * 1_000);
+    });
+
+    await runScheduledSync(c.env, NOW);
+
+    // Every tenant's first turn, then the big tenant's second, third, …. Round 2 doesn't start the
+    // turns over, which would have put the big tenant's second connection before 51 tenants' first.
+    expect(sentIds(c)).toEqual([big[0], ...small, ...big.slice(1)]);
+    expect(summary(c)).toMatchObject({ due: 250, queued: 250, rounds: 3, stop: 'done' });
+  });
+
+  it('a due connection already on its way takes its tenant’s turn', async () => {
+    const c = ctx();
+    await seed(c, 'a1', { lastSyncedAt: NOW - 4 * HOUR });
+    await seed(c, 'a2', { lastSyncedAt: NOW - 3 * HOUR });
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - 5 * MINUTE, 'a1'); // a webhook queued it
+    seedUser(c.t, { id: 'other' });
+    for (const [id, ago] of [['b1', 2 * HOUR], ['b2', 90 * MINUTE]] as const) {
+      seedConnection(c.t, { id, userId: 'other', provider: 'stripe', credentialsEnc: blob, status: 'ok', lastSyncedAt: NOW - ago, lastSyncStartedAt: NOW - ago });
+    }
+
+    await runScheduledSync(c.env, NOW);
+
+    // a1 was the first tenant's first turn, so the other tenant's first goes before a2.
+    expect(sentIds(c)).toEqual(['b1', 'a2', 'b2']);
+    expect(summary(c)).toMatchObject({ due: 3, queued: 3 });
+  });
+
+  it('stops when a round queues nothing, instead of selecting the same connections again', async () => {
+    const c = ctx();
+    await seedDue(c, CRON_QUEUE_LIMIT + 50);
+    let selections = 0;
+    // Every claim comes back empty, as if another producer had marked each one first, yet nothing
+    // marks them: without the guard, every round would select the same hundred.
+    const db = interceptDb(c.env.DB, (sql) => {
+      if (sql.includes('WITH candidates AS')) selections++;
+      if (sql.includes('SET queued_at = ?1')) return { bind: () => ({ all: async () => ({ results: [], success: true, meta: {} }) }) };
+      return undefined;
+    });
+
+    await runScheduledSync({ ...c.env, DB: db }, NOW);
+
+    expect(selections).toBe(1);
+    expect(queueOf(c.env).sent).toEqual([]);
+    expect(summary(c)).toMatchObject({ due: 150, queued: 0, rounds: 1, stop: 'unclaimed', left: 50 });
+    expect(summaryLevel()).toBe('log');
+  });
+
+  it(`starts no round once ${CRON_QUEUE_DEADLINE_MS / MINUTE} minutes have passed, and warns`, async () => {
+    const c = ctx();
+    await seedDue(c, 350);
+    const q = queueOf(c.env);
+    const send = q.sendBatch.bind(q);
+    // A struggling queue: each send takes just over half the guard.
+    q.sendBatch = async (messages, options) => {
+      const r = await send(messages, options);
+      vi.setSystemTime(Date.now() + CRON_QUEUE_DEADLINE_MS / 2 + 1_000);
+      return r;
+    };
+
+    await runScheduledSync(c.env, NOW);
+
+    expect(q.take()).toHaveLength(2 * CRON_QUEUE_LIMIT);
+    const s = summary(c);
+    expect(s).toMatchObject({ due: 350, queued: 200, rounds: 2, stop: 'deadline', left: 150 });
+    expect(s['durationMs']).toBeGreaterThanOrEqual(CRON_QUEUE_DEADLINE_MS);
+    expect(summaryLevel()).toBe('warn');
+  });
+
+  it('always runs the first round, however long FX took', async () => {
+    const c = ctx();
+    await seedDue(c, CRON_QUEUE_LIMIT + 50);
+    // FX's first read: by the time it returns, the guard has passed.
+    const db = interceptDb(c.env.DB, (sql) => {
+      if (sql.includes('MAX(fetched_at)')) vi.setSystemTime(Date.now() + CRON_QUEUE_DEADLINE_MS + MINUTE);
+    });
+
+    await runScheduledSync({ ...c.env, DB: db }, NOW);
+
+    expect(queueOf(c.env).take()).toHaveLength(CRON_QUEUE_LIMIT);
+    expect(summary(c)).toMatchObject({ due: 150, queued: 100, rounds: 1, stop: 'deadline', left: 50, fx: 'refreshed' });
+  });
+
+  it('counts connections whose earlier message never started as requeued, and warns', async () => {
+    const c = ctx();
+    await seed(c, 'stuck', { lastSyncedAt: NOW - 3 * HOUR });
+    // The last tick queued it; its message is still waiting behind a backlog, or was lost.
+    c.t.exec('UPDATE connections SET queued_at = ? WHERE id = ?', NOW - 30 * MINUTE, 'stuck');
+    await seed(c, 'normal', { lastSyncedAt: NOW - 2 * HOUR });
+
+    await runScheduledSync(c.env, NOW);
+
+    expect(sentIds(c)).toEqual(['stuck', 'normal']);
+    expect(summary(c)).toMatchObject({ due: 2, queued: 2, rounds: 1, stop: 'done', left: 0, requeued: 1 });
+    expect(summaryLevel()).toBe('warn');
+  });
+});
+
 describe('runScheduledSync — FX and limits', () => {
   it('refreshes FX at most once per ~day, and cron syncs never call ensureFx themselves', async () => {
     const c = ctx();
@@ -346,6 +565,6 @@ describe('runScheduledSync — FX and limits', () => {
     const c = ctx();
     const broken = { ...c.env, DB: { prepare: () => { throw new Error('D1_ERROR: down'); } } as unknown as D1Database };
     await expect(runScheduledSync(broken, NOW)).resolves.toBeUndefined();
-    expect(summary(c)).toMatchObject({ error: { errorKind: 'internal', message: 'D1_ERROR: down' }, queued: 0 });
+    expect(summary(c)).toMatchObject({ error: { errorKind: 'internal', message: 'D1_ERROR: down' }, queued: 0, rounds: 0, stop: 'error' });
   });
 });

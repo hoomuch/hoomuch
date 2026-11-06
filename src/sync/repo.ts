@@ -340,9 +340,23 @@ export interface DueQuery {
   retryWaitMs: number;
   /** A 'syncing' row started after this holds a fresh lock and is skipped. */
   staleBefore: number;
-  /** A row queued after this already has a sync on its way and is skipped. */
+  /** A row queued after this already has a sync on its way and is skipped (but keeps its turn). */
   queuedBefore: number;
   limit: number;
+}
+
+export interface DueSelection {
+  /** Up to `limit` connections to queue, in order. */
+  rows: Array<{
+    id: string;
+    /**
+     * It has a queued mark, but one older than `queuedBefore`: a sync queued that long ago never
+     * started, because its message is still waiting behind a backlog or was lost.
+     */
+    requeued: boolean;
+  }>;
+  /** Every connection due and without a sync on its way, whatever `limit` is. */
+  due: number;
 }
 
 /**
@@ -352,12 +366,20 @@ export interface DueQuery {
  * Failing connections therefore never sort ahead just because their last SUCCESS is old, one tenant
  * can't fill the batch while another tenant has due work, and because due times only move forward,
  * every due connection is eventually served even when the cron is over capacity.
+ *
+ * A due connection with a sync already on its way (a fresh queued mark) isn't returned, but still
+ * takes its turn in its tenant's order. The cron calls this once per round and the previous round's
+ * claims are such marks, so the rounds of one tick add up to the order a single selection would
+ * give, rather than each round starting every tenant's turns over. (A sync that has already started
+ * drops out, its lock being fresh, so its tenant moves up by the few of its syncs that start while
+ * the tick is still queueing.)
  */
-export async function selectDueConnections(db: D1Database, q: DueQuery): Promise<string[]> {
+export async function selectDueConnections(db: D1Database, q: DueQuery): Promise<DueSelection> {
   const { results } = await db
     .prepare(
       `WITH candidates AS (
-         SELECT id, user_id, created_at,
+         SELECT id, user_id, created_at, queued_at,
+                COALESCE(queued_at, 0) > ?7 AS on_its_way,
                 MAX(COALESCE(last_synced_at, 0), COALESCE(last_sync_started_at, 0)) +
                 CASE
                   WHEN status = 'error' THEN ?3
@@ -366,19 +388,22 @@ export async function selectDueConnections(db: D1Database, q: DueQuery): Promise
                 END AS due_at
            FROM connections
           WHERE NOT (status = 'syncing' AND COALESCE(last_sync_started_at, 0) > ?5)
-            AND COALESCE(queued_at, 0) <= ?7
        ),
        ranked AS (
-         SELECT id, created_at, due_at,
+         SELECT id, created_at, due_at, queued_at, on_its_way,
                 ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY due_at, created_at, id) AS turn
            FROM candidates
           WHERE due_at <= ?1
        )
-       SELECT id FROM ranked ORDER BY turn, due_at, created_at, id LIMIT ?6`,
+       SELECT id, queued_at IS NOT NULL AS requeued, COUNT(*) OVER () AS due
+         FROM ranked
+        WHERE NOT on_its_way
+        ORDER BY turn, due_at, created_at, id LIMIT ?6`,
     )
     .bind(q.now, q.okWaitMs, q.errorWaitMs, q.retryWaitMs, q.staleBefore, q.limit, q.queuedBefore)
-    .all<{ id: string }>();
-  return (results ?? []).map((r) => r.id);
+    .all<{ id: string; requeued: number; due: number }>();
+  const rows = results ?? [];
+  return { rows: rows.map((r) => ({ id: r.id, requeued: Boolean(r.requeued) })), due: rows[0]?.due ?? 0 };
 }
 
 /**

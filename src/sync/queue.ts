@@ -5,7 +5,9 @@
  * connection and one message per consumer invocation
  * (`max_batch_size: 1`), so each sync gets its own subrequest budget and 15 minutes of wall time
  * instead of sharing the cron's or a request's `waitUntil` (30 s). Producers:
- *   - the cron, for the connections that are due (`runScheduledSync`),
+ *   - the cron, for the connections that are due (`runScheduledSync`): up to 10 rounds of one
+ *     `sendBatch` each a tick, 1,000 syncs, which the consumer's 10 slots start within
+ *     QUEUED_STALE_MS while the average sync takes up to 9 s (CRON_MAX_ROUNDS in engine.ts),
  *   - creating a connection, replacing its key and "Sync now" (services/connections.ts),
  *   - provider webhooks, delayed a minute so a burst is one sync (services/webhooks.ts).
  *
@@ -32,6 +34,13 @@ export interface SyncMessage {
  * A queued sync that hasn't started after this long is presumed lost, and may be queued again. A message
  * merely waiting its turn can outlive it too, behind a backlog of long syncs (up to SYNC_DEADLINE_MS each,
  * `max_concurrency` at a time); its copy is then superseded by the first one's sync, or retries a failed one.
+ *
+ * Kept below the cron's 30 minutes on purpose. It is also how long "Sync now" and a webhook say a sync
+ * is already on its way, and how old a mark must be before a tick queues a lost message (one dropped
+ * after `max_retries`) again, so a longer one would leave a lost sync, and those answers, wrong for
+ * longer. What it would save is cheap: the cron queues a still-waiting connection again at most once a
+ * tick (`requeued` in its log), and the copy is acked after one D1 read once the first has synced. The
+ * cron's per-tick cap (CRON_MAX_ROUNDS) is what keeps a healthy instance's backlog inside it.
  */
 export const QUEUED_STALE_MS = 15 * MINUTE;
 /** Messages per `sendBatch` call (the Queues limit). */
