@@ -10,6 +10,10 @@ dist/
 *.log
 .vitest/
 
+# Benchmark data and results (bench/README.md): generated, hundreds of MB.
+bench/.state/
+bench/results/
+
 # Private design notes and assets; not part of the open-source release.
 design/
 

@@ -88,6 +88,8 @@ line above it.
 | `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
 | `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
 | `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
+| `npm run bench:ab` | Read-model benchmark: `main` against your working tree on production-sized data; fails on a p95 regression over 10% (see *Performance*) |
+| `npm run bench:e2e` | End-to-end load test with k6 against `wrangler dev`; `-- --profile smoke\|load\|stress\|spike\|soak` |
 
 ### Project layout
 
@@ -108,8 +110,19 @@ src/
 migrations/          D1 schema
 scripts/             client build, the commit-msg check, the domain list refresh, the security scan
 test/                Vitest suites and API fixtures
+bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases
 ```
+
+### Performance
+
+A change to a query, an index or a read model needs numbers, not a guess. `npm run bench:ab`
+seeds a database shaped like a busy instance (2.4M transactions over two years, written the way
+hourly syncs write them), runs every read model on `main` and on your working tree in turn, and
+fails if any case's p95 got more than 10% slower. Put its table in the pull request. A change to
+what a page does per request also gets a k6 run (`npm run bench:e2e -- --profile load`) against the
+SLOs in `bench/k6/slo.js`. [bench/README.md](bench/README.md) explains the data, the SLOs and every
+load profile; k6 is a program of its own (`brew install k6`), like the security scanners.
 
 ## Commit messages
 
