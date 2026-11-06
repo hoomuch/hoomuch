@@ -264,8 +264,12 @@ sağlayıcıların geliri okuma anında `transactions`'tan yerel güne göre gru
 DST aralığının farkı JS'te hesaplanıp SQL `CASE` ile uygulanır). Günlük toplam veren sağlayıcılar yeniden gruplanamaz ve
 kendi günlerini korur (`ProviderMeta.dayZone`): RevenueCat, Dodo Payments, Adapty, Superwall UTC; App Store Connect
 Pasifik saati. Kullanıcının dilimi farklıysa dashboard bunu söyler. Snapshot günü sahibin yerel günüdür; ilk backfill
-yerel gece yarısından başlar. Tarih içermeyen Google Play satırları UTC öğlene konur, ±12 saatlik her dilimde kendi
-tarihinde kalır.
+yerel gece yarısından başlar. Dilim batıya değişince eski dilimin "yarın"ına yazılmış snapshot ~25 saate kadar kalabilir;
+bu yüzden dashboard ve bağlantı sayfası snapshot'ları bugüne (dahil) kadar okur. Tarih içermeyen Google Play satırları
+UTC öğlene konur, ±12 saatlik her dilimde kendi tarihinde kalır. Dilim IANA'nın güncel adıyla, tek yazımla saklanır
+(`asia/calcutta` → `Asia/Kolkata`; ICU'nun hâlâ eski adıyla andığı dilimler de listede güncel adıyla görünür). Sabit
+farklar (`+05:30`, `Etc/GMT+5`), POSIX kuralları (`EST5EDT`) ve listede gösterilemeyen her şey reddedilir. Cloudflare'in
+dilimi de aynı denetimden geçer; geçmezse varsayılan (UTC) korunur. Saklanmış geçersiz bir dilim UTC sayılır.
 
 ### 6.1 Stripe
 

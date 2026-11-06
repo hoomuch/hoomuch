@@ -14,6 +14,7 @@ import type { CalendarMonth } from '../../src/data/types';
 import type { SessionUser } from '../../src/env';
 import { CalendarCard, calendarWeeks, cellAmount, heatStep, revenueLine } from '../../src/views/components/calendar-card';
 import { FIXTURE_CONNECTIONS } from '../../src/views/fixtures';
+import { PageRoot } from '../../src/views/page-root';
 import { createTestD1, seedConnection, seedUser, testEnv, type TestD1 } from '../fixtures/d1';
 
 const NOW = Date.parse('2026-11-05T12:00:00.000Z');
@@ -210,6 +211,37 @@ describe('listTransactions by day', () => {
     const all = await listTransactions(testEnv(t.db), user, { provider: null, page: 1 });
     expect(all.items).toHaveLength(4);
     expect(all.day).toBeNull();
+  });
+});
+
+describe('provider daily totals stay with their owner', () => {
+  it('leaves another user’s totals out of the calendar and the dashboard', async () => {
+    seedConnection(t, { id: 'mine', userId: 'u1', provider: 'revenuecat', name: 'App' });
+    seedConnection(t, { id: 'theirs', userId: 'u2', provider: 'revenuecat', name: 'Their app' });
+    const total = (conn: string, gross: number) =>
+      t.exec(
+        "INSERT INTO daily_revenue (connection_id, day, currency, gross, refunds, count, source) VALUES (?, '2026-11-03', 'USD', ?, 0, 1, 'provider')",
+        conn, gross,
+      );
+    total('mine', 5_00);
+    total('theirs', 999_00);
+
+    const m = await getCalendarMonth(testEnv(t.db), user, '2026-11');
+    expect(m.days[2]).toMatchObject({ day: '2026-11-03', net: 5_00 });
+    expect(m.days[2]!.byConnection).toEqual({ mine: 5_00 });
+    const d = await getDashboardData(testEnv(t.db), user, 7);
+    expect(d.kpis.revenue.value).toBe(5_00);
+  });
+});
+
+describe('the calendar card’s zone', () => {
+  it('names the zone the page says the days run in', () => {
+    const inZone = (timeZone: string) =>
+      renderToStaticMarkup(
+        createElement(PageRoot, { json: '{}', now: NOW, timeZone }, createElement(CalendarCard, { calendar: month(), connections: FIXTURE_CONNECTIONS })),
+      );
+    expect(inZone('America/Los_Angeles')).toContain('Net revenue per day (America/Los Angeles).');
+    expect(inZone('UTC')).toContain('Net revenue per day (UTC).');
   });
 });
 

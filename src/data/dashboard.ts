@@ -86,21 +86,24 @@ export async function getDashboardData(env: Bindings, user: SessionUser, rangeDa
 
   const SNAP_COLS = 's.connection_id, s.day, s.mrr, s.active_subscriptions, s.active_trials';
   const productDays = localDays('t.occurred_at', start, today, tz);
+  // Snapshots are keyed by the owner's local day, so after a move west the last zone's "tomorrow"
+  // can be on file: every snapshot read stops at today.
   const [connsR, windowR, latestR, beforeR, revR, fxR, productR, histR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE user_id = ? ORDER BY created_at ASC').bind(user.id),
     db
       .prepare(
         `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ? AND s.day >= ? ORDER BY s.day ASC`,
+          WHERE c.user_id = ? AND s.day >= ? AND s.day <= ? ORDER BY s.day ASC`,
       )
-      .bind(user.id, start),
+      .bind(user.id, start, today),
     db
       .prepare(
         `SELECT ${SNAP_COLS}, s.revenue_period, s.revenue_period_days, s.mrr_by_product, s.warnings FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
-          WHERE c.user_id = ? AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id)`,
+          WHERE c.user_id = ?
+            AND s.day = (SELECT MAX(day) FROM snapshots WHERE connection_id = s.connection_id AND day <= ?)`,
       )
-      .bind(user.id),
+      .bind(user.id, today),
     db
       .prepare(
         `SELECT ${SNAP_COLS} FROM snapshots s JOIN connections c ON c.id = s.connection_id

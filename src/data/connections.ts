@@ -5,6 +5,7 @@
 import type { Bindings, SessionUser } from '../env';
 import { listConnections, parseConfig, type ConnectionRow } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
+import { UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import { webhookPath } from '../services/webhooks';
 import { parseStoredWarnings } from '../sync/aggregate';
@@ -65,15 +66,17 @@ export async function getConnectionDetail(
 ): Promise<ConnectionDetail | null> {
   const db = env.DB;
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
+  // Snapshot days are the owner's local days: after a move west, one can be keyed tomorrow.
+  const today = zonedDayKey(Date.now(), user.timeZone || UTC);
   const [connR, snapR, runR, fxR] = await db.batch([
     db.prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?').bind(connectionId, user.id),
     db
       .prepare(
         `SELECT s.day, s.mrr, s.active_subscriptions, s.active_trials, s.warnings FROM snapshots s
            JOIN connections c ON c.id = s.connection_id
-          WHERE s.connection_id = ? AND c.user_id = ? ORDER BY s.day DESC LIMIT 30`,
+          WHERE s.connection_id = ? AND c.user_id = ? AND s.day <= ? ORDER BY s.day DESC LIMIT 30`,
       )
-      .bind(connectionId, user.id),
+      .bind(connectionId, user.id, today),
     db
       .prepare(
         `SELECT r.kind, r.started_at, r.finished_at, r.ok, r.events, r.message FROM sync_runs r

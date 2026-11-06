@@ -76,25 +76,81 @@ function partsFormat(tz: string): Intl.DateTimeFormat {
 const UTC_ALIASES = new Set(['UTC', 'ETC/UTC', 'ETC/GMT', 'GMT', 'ETC/UCT', 'UCT', 'ETC/ZULU', 'ZULU']);
 
 /**
- * An IANA zone name the runtime knows ("Europe/Istanbul"), as given, or 'UTC' for UTC's aliases;
- * else null. Not the runtime's canonical spelling: ICU calls Asia/Kolkata "Asia/Calcutta", and
- * the user should see the name they picked.
+ * Zones ICU (CLDR) still calls by a name IANA has since replaced. CLDR never renames its ids, so
+ * this only grows when IANA renames a zone, and a runtime that already uses IANA's names never
+ * hits it: either way the list, and so every stored zone, reads the same on Node and on Workers.
+ */
+const IANA_NAMES: ReadonlyMap<string, string> = new Map([
+  ['Africa/Asmera', 'Africa/Asmara'],
+  ['America/Buenos_Aires', 'America/Argentina/Buenos_Aires'],
+  ['America/Catamarca', 'America/Argentina/Catamarca'],
+  ['America/Coral_Harbour', 'America/Atikokan'],
+  ['America/Cordoba', 'America/Argentina/Cordoba'],
+  ['America/Godthab', 'America/Nuuk'],
+  ['America/Indianapolis', 'America/Indiana/Indianapolis'],
+  ['America/Jujuy', 'America/Argentina/Jujuy'],
+  ['America/Louisville', 'America/Kentucky/Louisville'],
+  ['America/Mendoza', 'America/Argentina/Mendoza'],
+  ['Asia/Calcutta', 'Asia/Kolkata'],
+  ['Asia/Katmandu', 'Asia/Kathmandu'],
+  ['Asia/Rangoon', 'Asia/Yangon'],
+  ['Asia/Saigon', 'Asia/Ho_Chi_Minh'],
+  ['Atlantic/Faeroe', 'Atlantic/Faroe'],
+  ['Europe/Kiev', 'Europe/Kyiv'],
+  ['Pacific/Enderbury', 'Pacific/Kanton'],
+  ['Pacific/Ponape', 'Pacific/Pohnpei'],
+  ['Pacific/Truk', 'Pacific/Chuuk'],
+]);
+
+let zoneList: { options: string[]; byLowerCase: Map<string, string> } | null = null;
+
+/**
+ * The pickable zones, built once: UTC, then the runtime's Area/Location zones by their IANA names.
+ * Fixed offsets (Etc/GMT+5) and POSIX rules (EST5EDT) stay out, whatever the runtime lists.
+ */
+function zones(): { options: string[]; byLowerCase: Map<string, string> } {
+  if (!zoneList) {
+    const runtime = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+    const names = new Set<string>();
+    for (const z of runtime) {
+      const name = IANA_NAMES.get(z) ?? z;
+      if (name.includes('/') && !name.startsWith('Etc/')) names.add(name);
+    }
+    const options = [UTC, ...[...names].sort()];
+    zoneList = { options, byLowerCase: new Map(options.map((z) => [z.toLowerCase(), z])) };
+  }
+  return zoneList;
+}
+
+/**
+ * The zone `tz` names, spelled as `timeZoneOptions()` lists it ("asia/calcutta" → "Asia/Kolkata",
+ * UTC's aliases → "UTC"), or null: offsets ("+05:30", "Etc/GMT+5"), POSIX rules ("EST5EDT") and
+ * anything else the list can't show are refused, so a stored zone is always one the user can pick.
  */
 export function normalizeTimeZone(tz: unknown): string | null {
-  if (typeof tz !== 'string' || tz.length === 0 || tz.length > 64 || !/^[A-Za-z0-9_+\-/]+$/.test(tz)) return null;
+  if (typeof tz !== 'string' || tz.length === 0 || tz.length > 64 || !/^[A-Za-z][A-Za-z0-9_+\-/]*$/.test(tz)) return null;
   if (UTC_ALIASES.has(tz.toUpperCase())) return UTC;
+  const { byLowerCase } = zones();
+  const listed = byLowerCase.get(tz.toLowerCase());
+  if (listed) return listed;
+  // POSIX rules and one-word links ("EST5EDT", "Japan") resolve differently by ICU version (an
+  // older one maps EST5EDT to America/New_York): refused everywhere, so they read the same.
+  if (!tz.includes('/')) return null;
+  // An old name or a link ("Asia/Calcutta", "US/Pacific"): the zone the runtime resolves it to,
+  // if that one is listed.
+  let resolved: string;
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-    return tz;
+    resolved = new Intl.DateTimeFormat('en-US', { timeZone: tz }).resolvedOptions().timeZone;
   } catch {
     return null;
   }
+  if (UTC_ALIASES.has(resolved.toUpperCase())) return UTC;
+  return byLowerCase.get((IANA_NAMES.get(resolved) ?? resolved).toLowerCase()) ?? null;
 }
 
-/** Every zone a user can pick, UTC first, then the runtime's IANA list. */
+/** Every zone a user can pick, UTC first, then the runtime's IANA zones by their current names. */
 export function timeZoneOptions(): string[] {
-  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
-  return [UTC, ...zones.filter((z) => z !== UTC)];
+  return [...zones().options];
 }
 
 /** Offset of `tz` from UTC at the instant `ms`, in ms (local wall clock = UTC + offset). */

@@ -19,6 +19,7 @@ import { Flash } from '../../src/views/components/flash';
 import { DeltaBadge, KpiStat } from '../../src/views/components/kpi';
 import { RangeTabs } from '../../src/views/components/range-tabs';
 import { RelativeTime } from '../../src/views/components/relative-time';
+import { PageRoot } from '../../src/views/page-root';
 import { ProviderDot, StatusBadge, TestModeBadge } from '../../src/views/components/badges';
 import { RingsMark } from '../../src/views/components/icons';
 import { ProviderLogo } from '../../src/views/components/provider-logos';
@@ -498,6 +499,15 @@ describe('ui primitives', () => {
     expect(dz).toContain('id="delete-account-title"');
     expect(await render('time', h(RelativeTime, { ms: FIXTURE_NOW - 4 * MINUTE, now: FIXTURE_NOW }))).toContain('4 min ago');
     expect(await render('time-never', h(RelativeTime, { ms: null }))).toContain('Never');
+  });
+
+  it('titles RelativeTime with the time in the page’s zone', async () => {
+    // 20:00 UTC on Nov 4 is 01:30 on Nov 5 in Kolkata (+05:30).
+    const ms = Date.UTC(2026, 10, 4, 20, 0);
+    const inZone = (timeZone: string) =>
+      render(`time-${timeZone}`, createElement(PageRoot, { json: '{}', now: FIXTURE_NOW, timeZone }, h(RelativeTime, { ms })));
+    expect(tags(await inZone('Asia/Kolkata'), 'time', 'title="Nov 5, 2026, 01:30 Asia/Kolkata"')).toHaveLength(1);
+    expect(tags(await inZone('UTC'), 'time', 'title="Nov 4, 2026, 20:00 UTC"')).toHaveLength(1);
   });
 });
 
