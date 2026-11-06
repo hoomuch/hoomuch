@@ -4,12 +4,18 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly on main, so tests that read the real clock (the Polar API version deadline in
+  # test/providers/polar.test.ts) fail even when nobody pushes. A failed scheduled run is emailed to
+  # whoever last changed the cron line; GitHub turns the schedule off after 60 days without activity.
+  schedule:
+    - cron: '23 6 * * 1' # Mondays, 06:23 UTC
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The event is part of the group, so a push to main and the weekly run never cancel each other.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
