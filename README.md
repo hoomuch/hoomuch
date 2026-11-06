@@ -91,6 +91,7 @@ interval.
 | `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below). |
 | `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
+| `RL_WEBHOOKS` | `ratelimits` in `wrangler.jsonc` | 30 a minute | Webhook calls per connection (see [Real-time updates](#real-time-updates)). Webhooks skip the per-network limits, because a provider sends every customer's calls from the same addresses. Its `namespace_id` must be unique too. |
 | `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
 The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
@@ -171,6 +172,9 @@ which events to pick.
   charts refresh on their own schedule).
 
 ## Updating
+
+Each [release](https://github.com/hoomuch/hoomuch/releases) lists what changed and anything you have
+to do by hand. To hear about new ones, choose **Watch → Custom → Releases** on this repository.
 
 Pull the latest changes from this repository into your copy and deploy (with the button, pushing to
 your copy redeploys it). Every deploy applies pending D1 migrations first. Some migrations rebuild a

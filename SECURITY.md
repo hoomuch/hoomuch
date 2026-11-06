@@ -4,8 +4,9 @@ hoomuch holds API keys to your billing providers, so security reports come first
 
 ## Supported versions
 
-hoomuch doesn't publish releases yet. Fixes land on `main`, so the supported version is the latest
-commit on `main`. Self-hosters get a fix by updating their copy and deploying (README, *Updating*).
+Security fixes are made for the latest [release](https://github.com/hoomuch/hoomuch/releases) and the
+latest commit on `main`; older releases don't get them. A fix lands on `main` first and ships in the
+next release. Self-hosters get it by updating their copy and deploying (README, *Updating*).
 
 ## Reporting a vulnerability
 
