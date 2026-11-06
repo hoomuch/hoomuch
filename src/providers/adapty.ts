@@ -12,6 +12,8 @@
  * Requests per method (each body also carries period_unit=day, date_type=purchase_date, format=json):
  *   verify         mrr [today] + revenue [today]                                              2 requests
  *   fetchSnapshot  mrr, subscriptions_active, trials_active [today] + revenue [today−29, today] 4 requests
+ *   fetchSnapshotHistory (a connection's first sync) mrr, subscriptions_active, trials_active
+ *                  [today−90, today−1]: one day-resolution series each                          3 requests
  *   fetchRevenue   revenue + refund_money per window of ≤ 92 days                             2 per window
  *                  (fallback when a window's per-day series can't be read: the same two charts one day at a
  *                  time, read from the documented `value` field: 2 requests per day)
@@ -36,12 +38,14 @@
  * answer with `revenue` (gross), `proceeds` and `net_revenue`. The items of the inner `data` array are not
  * documented. The adapter reads the total row as `{type: 'total', values: [{x: 'YYYY-MM-DD', y}]}` (the row
  * shape of Adapty's documented LTV/funnel answers and of the API's existing consumers) and only trusts it when
- * the days add up to the documented `value`; otherwise it falls back to one-day queries and `value`.
+ * the days add up to the documented `value`; otherwise it falls back to one-day queries and `value`. Level charts
+ * (mrr and the active counts, aggregated with `last`) read over a range for snapshot history are trusted when the
+ * series' last day matches the documented `value_to`; there is no one-day fallback for them (90 days × 3 charts).
  */
 
 import { normalizeCurrency, toMinor } from '../lib/money';
 import { addDays, dayKey, dayRange } from '../lib/time';
-import { fetchJson, hasBudget, sanitizeErrorText } from './http';
+import { BudgetExhaustedError, fetchJson, hasBudget, sanitizeErrorText } from './http';
 import {
   ProviderError,
   type ConnectionConfig,
@@ -51,6 +55,7 @@ import {
   type ProviderAdapter,
   type ProviderContext,
   type RevenuePage,
+  type SnapshotHistoryPoint,
   type VerifyResult,
 } from './types';
 
@@ -65,6 +70,8 @@ const DEFAULT_CURRENCY = 'USD';
 const MAX_WINDOW_DAYS = 92;
 /** Trailing window of the snapshot's revenue total (the dashboard's fallback when there's no daily history). */
 export const REVENUE_PERIOD_DAYS = 30;
+/** Most past days snapshot history reads: the dashboard's longest range, one request per chart. */
+export const HISTORY_MAX_DAYS = 90;
 
 export type AdaptyChart = 'mrr' | 'subscriptions_active' | 'trials_active' | 'revenue' | 'refund_money';
 
@@ -293,31 +300,46 @@ function pointDay(v: unknown): string | null {
 }
 
 /**
- * The total series of a day-resolution answer, per day, or null when the shape isn't one we know or its days
- * don't add up to the documented `value` (the range total). An empty `data` array is Adapty's documented
+ * The points of a day-resolution answer's total series that fall in [from, to], in answer order (`value` null
+ * where Adapty sent null), or null when the shape isn't one we know. An empty `data` array is Adapty's documented
  * "nothing in this range" answer.
  */
-function dailySeries(metric: Record<string, unknown>, from: string, to: string): Map<string, number> | null {
+function seriesPoints(
+  metric: Record<string, unknown>,
+  from: string,
+  to: string,
+): Array<{ day: string; value: number | null }> | null {
   const rows = metric['data'];
   if (!Array.isArray(rows)) return null;
-  const byDay = new Map<string, number>();
-  if (rows.length > 0) {
-    if (!rows.every(isRecord)) return null;
-    const records = rows as Array<Record<string, unknown>>;
-    const row =
-      records.find((r) => typeof r['type'] === 'string' && r['type'].toLowerCase() === 'total') ??
-      (records.length === 1 ? records[0] : undefined);
-    if (!row || !Array.isArray(row['values'])) return null;
-    for (const p of row['values']) {
-      if (!isRecord(p)) return null;
-      const day = pointDay(p['x'] ?? p['date']);
-      const raw = p['y'] !== undefined ? p['y'] : p['value'];
-      const value = raw === null ? 0 : num(raw);
-      if (!day || value === null) return null;
-      if (day < from || day > to) continue;
-      byDay.set(day, (byDay.get(day) ?? 0) + value);
-    }
+  if (rows.length === 0) return [];
+  if (!rows.every(isRecord)) return null;
+  const records = rows as Array<Record<string, unknown>>;
+  const row =
+    records.find((r) => typeof r['type'] === 'string' && r['type'].toLowerCase() === 'total') ??
+    (records.length === 1 ? records[0] : undefined);
+  if (!row || !Array.isArray(row['values'])) return null;
+  const points: Array<{ day: string; value: number | null }> = [];
+  for (const p of row['values']) {
+    if (!isRecord(p)) return null;
+    const day = pointDay(p['x'] ?? p['date']);
+    const raw = p['y'] !== undefined ? p['y'] : p['value'];
+    const value = raw === null ? null : num(raw);
+    if (!day || (raw !== null && value === null)) return null;
+    if (day < from || day > to) continue;
+    points.push({ day, value });
   }
+  return points;
+}
+
+/**
+ * A flow chart's (revenue, refund_money) total series, per day (a null point is 0), or null when the shape isn't
+ * one we know or its days don't add up to the documented `value` (the range total).
+ */
+function dailySeries(metric: Record<string, unknown>, from: string, to: string): Map<string, number> | null {
+  const points = seriesPoints(metric, from, to);
+  if (!points) return null;
+  const byDay = new Map<string, number>();
+  for (const p of points) byDay.set(p.day, (byDay.get(p.day) ?? 0) + (p.value ?? 0));
   const total = num(metric['value']);
   if (total !== null) {
     let sum = 0;
@@ -341,6 +363,28 @@ function flowByDay(metric: Record<string, unknown>, from: string, to: string): M
 /** A stock chart's level on `day` (one-day query): `value`, else `value_to`, else the series point. */
 function levelOn(metric: Record<string, unknown>, day: string): number | null {
   return num(metric['value']) ?? num(metric['value_to']) ?? dailySeries(metric, day, day)?.get(day) ?? null;
+}
+
+/**
+ * A stock chart's (mrr, subscriptions_active, trials_active) level per day over [from, to]. A day without a value
+ * is left out, never read as zero. A day listed twice is a shape we don't know, and the series is only trusted
+ * when its last day matches the documented level at the end of the range: `value_to`, or `value` when Adapty
+ * aggregates the chart with `last`.
+ */
+function levelSeries(metric: Record<string, unknown>, from: string, to: string): Map<string, number> | null {
+  const points = seriesPoints(metric, from, to);
+  if (!points) return null;
+  const byDay = new Map<string, number>();
+  const seen = new Set<string>();
+  for (const p of points) {
+    if (seen.has(p.day)) return null;
+    seen.add(p.day);
+    if (p.value !== null) byDay.set(p.day, p.value);
+  }
+  const end = num(metric['value_to']) ?? (metric['default_aggregation'] === 'last' ? num(metric['value']) : null);
+  const last = byDay.get(to);
+  if (end !== null && last !== undefined && Math.abs(end - last) > 0.01) return null;
+  return byDay;
 }
 
 // ---------- snapshot ----------
@@ -381,6 +425,46 @@ async function optionalRead(
   ctx.log('adapty_snapshot_chart_unavailable', { chart, reason: read.reason, status: read.error.status ?? null });
   onMissing?.('unavailable');
   return null;
+}
+
+// ---------- snapshot history ----------
+
+/** A level series the history can't do without (MRR, subscriptions): anything unusable fails the call. */
+async function requiredSeries(
+  ctx: ProviderContext,
+  apiKey: string,
+  chart: AdaptyChart,
+  from: string,
+  to: string,
+): Promise<{ byDay: Map<string, number>; currency: string }> {
+  const read = await readChart(ctx, apiKey, chart, from, to);
+  if (!read.ok) throw read.error;
+  const byDay = levelSeries(read.metric.body, from, to);
+  if (!byDay) {
+    ctx.log('adapty_series_unreadable', { chart, ...answerShape({ data: { [read.metric.key]: read.metric.body } }) });
+    throw new ProviderError('upstream', `${PROVIDER} returned a ${chart} chart hoomuch couldn’t read.`);
+  }
+  return { byDay, currency: read.metric.currency };
+}
+
+/**
+ * Past days' trials: unknown (null) when the chart can't be read, nothing is left of the budget or the time, or
+ * Adapty keeps answering 429 or 5xx. Today's snapshot still has its own trials.
+ */
+async function historyTrials(ctx: ProviderContext, apiKey: string, from: string, to: string): Promise<Map<string, number> | null> {
+  const unavailable = (reason: string, status: number | null) => {
+    ctx.log('adapty_history_trials_unavailable', { reason, status });
+    return null;
+  };
+  if (!hasBudget(ctx)) return unavailable('budget', null);
+  try {
+    const read = await readChart(ctx, apiKey, 'trials_active', from, to);
+    if (!read.ok) return unavailable(read.reason, read.error.status ?? null);
+    return levelSeries(read.metric.body, from, to) ?? unavailable('unreadable', null);
+  } catch (err) {
+    if (!(err instanceof ProviderError)) throw err;
+    return unavailable(err instanceof BudgetExhaustedError ? err.reason : err.kind, err.status ?? null);
+  }
 }
 
 // ---------- revenue ----------
@@ -586,5 +670,60 @@ export const adaptyAdapter: ProviderAdapter = {
 
     ctx.log('adapty_revenue_fetched', { windows, refundWindows, days: daily.length, perDay });
     return finished();
+  },
+
+  async fetchSnapshotHistory(input, req, ctx): Promise<SnapshotHistoryPoint[]> {
+    const apiKey = requireKey(input);
+    const today = dayKey(ctx.now());
+    const days = Number.isFinite(req.days) ? Math.min(HISTORY_MAX_DAYS, Math.max(0, Math.floor(req.days))) : 0;
+    if (days === 0) return [];
+    const from = addDays(today, -days);
+    const to = addDays(today, -1);
+    // Every day needs MRR and a subscription count, so don't start what the budget (or the clock) can't finish.
+    if (!hasBudget(ctx, 2)) {
+      ctx.log('adapty_history_skipped', { reason: 'budget' });
+      return [];
+    }
+
+    let mrr: { byDay: Map<string, number>; currency: string };
+    let subscriptions: { byDay: Map<string, number> };
+    try {
+      mrr = await requiredSeries(ctx, apiKey, 'mrr', from, to);
+      subscriptions = await requiredSeries(ctx, apiKey, 'subscriptions_active', from, to);
+    } catch (err) {
+      // The deadline passed mid-way: MRR alone can't make a day.
+      if (err instanceof BudgetExhaustedError) {
+        ctx.log('adapty_history_skipped', { reason: err.reason });
+        return [];
+      }
+      throw err;
+    }
+    const trials = await historyTrials(ctx, apiKey, from, to);
+
+    const out: SnapshotHistoryPoint[] = [];
+    let unmatched = 0;
+    for (const day of dayRange(from, to)) {
+      const value = mrr.byDay.get(day);
+      const count = subscriptions.byDay.get(day);
+      if (value === undefined || count === undefined) {
+        // A day with only one of the two is left out: a subscription count is never made up.
+        if (value !== undefined || count !== undefined) unmatched += 1;
+        continue;
+      }
+      const t = trials?.get(day);
+      out.push({
+        day,
+        snapshot: {
+          mrr: { [mrr.currency]: Math.max(0, toMinor(value, mrr.currency)) },
+          activeSubscriptions: Math.max(0, Math.round(count)),
+          activeTrials: t === undefined ? null : Math.max(0, Math.round(t)),
+          revenuePeriod: null,
+          revenuePeriodDays: null,
+          newCustomers: null,
+        },
+      });
+    }
+    ctx.log('adapty_history_fetched', { days: out.length, unmatched, trials: trials !== null });
+    return out;
   },
 };

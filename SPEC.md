@@ -142,8 +142,8 @@ ack'lenip işaretini bırakır; webhook mesajı ise 60 sn sonra yeniden dener. `
 3. `fetchRevenue` → `revenue_cursor` varsa oradan, yoksa `revenue_synced_until − 2 gün` (ilk sefer: şimdi − 90 gün).
    Dönen `events` → `transactions` upsert; etkilenen günler için `daily_revenue` yeniden hesaplanır.
    Dönen `daily` (RevenueCat gibi) → doğrudan `daily_revenue` upsert (`source='provider'`).
-   İlk başarılı senkronizasyonda adaptörün `fetchSnapshotHistory`'si varsa (demo) geçmiş günlerin snapshot'ları
-   eklenir; var olan gün ezilmez.
+   İlk başarılı senkronizasyonda adaptörün `fetchSnapshotHistory`'si varsa (demo, Adapty, Superwall) geçmiş günlerin
+   snapshot'ları eklenir; var olan gün ezilmez.
 4. Sayfa bütçesi dolduysa `revenue_cursor` saklanır (sonraki çalışmada devam); bittiyse cursor temizlenir,
    `revenue_synced_until` ilerletilir.
 5. `status='ok'|'error'`, `last_error`, `last_synced_at`, `sync_runs` kapanır.
@@ -522,6 +522,13 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   MRR veya aktif abonelik okunamazsa snapshot **yazılmaz**; deneme ve 30 günlük gelir okunamazsa `null`. Adapty'nin tanımları aynen
   kullanılır: MRR denemeleri ve tek seferlik satın almaları içermez; aktif abonelik denemeleri **ve yenilemesi kapatılmış** abonelikleri
   hariç tutar (§6'dan farklı).
+- **Snapshot geçmişi (v1.1):** bağlantının ilk başarılı senkronizasyonunda `fetchSnapshotHistory`, `mrr`, `subscriptions_active`
+  ve `trials_active` grafiklerini dünden geriye en çok 90 gün için birer istekle okur (3 istek); MRR trendi tek noktayla değil
+  geçmişle başlar. Bu grafikler `last` ile toplanır: günlük seri ancak son günü belgelenmiş `value_to` ile tutarsa ve hiçbir gün
+  iki kez geçmiyorsa kullanılır (gün gün yedek sorgu yok). MRR'ı ya da aktif abonelik sayısı olmayan gün (`null` nokta,
+  uygulamanın ilk aboneliğinden önceki günler) atlanır, sıfırla doldurulmaz. Deneme grafiği okunamazsa, reddedilirse ya da
+  429'da kalırsa o günlerin denemesi `null`. Bütçe MRR ve abonelik grafiklerine yetmiyorsa istek yapılmaz; süre ikisinin arasında
+  dolarsa da geçmiş boş döner. Zorunlu grafik reddedilirse çağrı hata verir: engine loglar, senkronizasyon yine başarılı olur.
 - **Gelir geçmişi:** ≤ 92 günlük pencerelerde günlük `revenue` ve `refund_money` → `daily_revenue` (`source='provider'`, USD).
   Adapty Revenue = kullanıcının ödediği brüt tutar (mağaza komisyonu düşülmeden, vergi dahil; RevenueCat Revenue grafiğiyle aynı) −
   işlendiği gün düşülen iadeler. Gün başına `gross = revenue + refund_money`, `refunds = refund_money`, `count = 0` (Adapty günlük işlem
@@ -533,6 +540,8 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   2 istek/sn ([export API](https://adapty.io/docs/api-export-analytics/operations/retrieveAnalyticsData),
   [revenue](https://adapty.io/docs/revenue), [refund money](https://adapty.io/docs/refund-money)). İç `data` dizisindeki günlük nokta
   şekli belgelenmemiştir (`{type:'total', values:[{x, y}]}` varsayılır); toplamla doğrulanır, tutmazsa gün gün `value` okunur.
+  Aralık sorgusunda `mrr` ve aktif sayıların serisi ile `value_to`'nun aralık sonundaki seviye olduğu da varsayımdır (geçmiş
+  bununla doğrulanır).
 
 ### 6.12 Superwall
 
@@ -549,6 +558,12 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   hariç). **Aktif deneme** Superwall metriği değildir: `data:read` ile SQL'den türetilir (son olayı TRIAL dönemi,
   `expiration` değil, bitişi gelecekte olan abonelik; iptal edilmiş deneme bitene kadar sayılır). Entegrasyon olayı
   hiç yoksa `null`. Para birimi USD.
+- **Snapshot geçmişi (v1.1):** ilk başarılı senkronizasyonda aynı iki grafik belgelenmiş `last_90_days` hazır aralığıyla okunur
+  (definitions + 2 istek). Aralık bugünle bittiği için dünden geriye en çok 89 gün gelir; bugünün snapshot'ıyla dashboard'un
+  90 günlük penceresi dolar. Değeri olmayan ya da hâlâ `incomplete` işaretli geçmiş noktalar ve iki grafikten yalnızca birinde
+  olan günler atlanır, sıfırla doldurulmaz. Geçmiş günlerin denemesi `null`: Superwall'da deneme serisi yok, SQL yalnızca
+  bugünü verir. Bütçe üç isteğe yetmiyorsa istek yapılmaz; süre grafikler arasında dolarsa da geçmiş boş döner. Reddedilen
+  (400) ya da birimi beklenmeyen grafik çağrıyı hata ile bitirir: engine loglar, senkronizasyon yine başarılı olur.
 - **Gelir geçmişi:** `GET /v2/organizations/{id}/query?query=…` (ClickHouse, salt okunur; ham SQL gövdeli POST yerine
   belgelenmiş GET kullanılır) ile `open_revenue.attributed_events_by_ts_rep FINAL` üzerinde gün bazında toplanır →
   `daily_revenue` (`source='provider'`, USD). Brüt = pozitif `price` toplamı, iade = negatif `price` toplamının mutlak
@@ -557,7 +572,8 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
   Family Sharing ve RevenueCat'in Stripe kopyaları hariç. SQL sabit tek bir SELECT'tir; tarihler `param_*` ile geçer;
   yalnızca toplamlar döner (kullanıcı verisi çekilmez). 31 günlük pencereler, cursor ile devam; 429'da cursor döner.
 - ⚠️ **Doğrulanmadı:** grafik adları/anahtarları ve nokta anlamı canlı denenmedi; grafik değerlerinin USD olduğu
-  varsayımdır (yanıtta para birimi yok). Tablo şeması Superwall'un resmî ajan becerisinden
+  varsayımdır (yanıtta para birimi yok). `last_90_days` OpenAPI'de belgelidir; bugünü içerdiği (7 günlük aralık gibi)
+  canlı denenmedi. Tablo şeması Superwall'un resmî ajan becerisinden
   ([superwall/skills](https://github.com/superwall/skills)) alındı. Uygulamanın "revenue provider" seçimi API'de yok;
   mağaza ile RevenueCat aynı `transactionId`'yi taşımıyorsa çift sayım olabilir. Test modu yok (sandbox hariç tutulur).
 
@@ -819,8 +835,8 @@ Kurallar:
 
 ### 12.1 v1.1 teknik borç (ekiplerden gelen kontrat talepleri) — tamamlandı
 
-- ✅ `ProviderAdapter.fetchSnapshotHistory?` (opsiyonel) — engine'deki demo'ya özel dal kalktı; demo uyguluyor.
-  Superwall ve Adapty'nin MRR serileri de bu kancayı kullanabilir (sonraki iş).
+- ✅ `ProviderAdapter.fetchSnapshotHistory?` (opsiyonel) — engine'deki demo'ya özel dal kalktı; demo, Adapty (§6.11) ve
+  Superwall (§6.12) uyguluyor. Paddle ve Polar'ın serilerinde abonelik sayısı olmadığı için onlarda yok.
 - ✅ `MetricsSnapshot.warnings?: string[]` — adaptör uyarıları dashboard'a ve bağlantı sayfasına taşındı (F-19).
 - ✅ `ProviderContext.deadline` / `signal` — engine'deki getter çözümü (`withDeadline`) kalktı.
 - ✅ Cron → Cloudflare Queues fan-out; sağlayıcı webhook'ları (F-17).

@@ -41,6 +41,9 @@
  *                 a 403 only adds a warning and records revenueHistory = 'none'). 3 requests.
  *   fetchSnapshot definitions + MRR chart + Active Subscriptions chart (+ the trials query unless the
  *                 connection is known to lack data:read). 3–4 requests.
+ *   fetchSnapshotHistory  (a connection's first sync) definitions + the same two charts over `last_90_days`:
+ *                 up to 89 past days of MRR and subscriptions, trials unknown. 3 requests, or none when the
+ *                 budget can't cover all three.
  *   fetchRevenue  one revenue query per ≤31-day window, resumable via a 'YYYY-MM-DD' cursor.
  *
  * SQL is constant text: the only inputs are dates, passed as ClickHouse query parameters (`param_*`), never
@@ -68,6 +71,7 @@ import {
   type ProviderAdapter,
   type ProviderContext,
   type RevenuePage,
+  type SnapshotHistoryPoint,
   type VerifyResult,
 } from './types';
 
@@ -85,6 +89,13 @@ const WINDOW_DAYS = 31;
 /** ClickHouse may scan a month of events; give it longer than the default, and don't retry a slow query twice. */
 const QUERY_TIMEOUT_MS = 25_000;
 const QUERY_MAX_ATTEMPTS = 2;
+/**
+ * Snapshot history's chart window. It ends today, so it holds up to 89 past days: with today's snapshot, the
+ * dashboard's 90-day range.
+ */
+const HISTORY_PRESET = 'last_90_days';
+/** Definitions, then the MRR and Active Subscriptions charts. */
+const HISTORY_REQUESTS = 3;
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const ORG_ID_RE = /^\d{1,12}$/;
@@ -395,13 +406,17 @@ function chartShape(body: unknown): Record<string, unknown> {
   };
 }
 
-async function getChartValue(
+/** Documented `date_filter.preset` values hoomuch asks for. Both windows end today, today included. */
+type ChartPreset = 'last_7_days' | 'last_90_days';
+
+/** A chart's day points over a preset window, oldest first, once its unit is the expected one. */
+async function getChartPoints(
   ctx: ProviderContext,
   inp: SwInput,
   spec: ChartSpec,
   expect: 'currency' | 'number',
-  today: string,
-): Promise<number> {
+  preset: ChartPreset,
+): Promise<ChartPoint[]> {
   const body = await swFetch(ctx, inp, {
     path: '/v2/charts/data',
     readQuery: {
@@ -409,7 +424,7 @@ async function getChartValue(
       y_axis: spec.yAxis,
       x_axis: spec.xAxis,
       breakdown: null,
-      date_filter: { dimension: spec.dateDimension, preset: 'last_7_days' },
+      date_filter: { dimension: spec.dateDimension, preset },
       date_interval: 'day',
       environment: ['PRODUCTION'],
     },
@@ -422,12 +437,41 @@ async function getChartValue(
   }
   const points = parseChartPoints(body);
   if (!points) throw unreadable(ctx, `a ${spec.name} chart`, { chart: spec.chart, ...chartShape(body) });
-  const { value, fellBack } = currentValue(points, today);
-  // Neither is a snapshot warning: yesterday's point stands in until Superwall computes today's, and an
-  // organization with no subscriptions yet has an empty chart.
-  if (fellBack) ctx.log('superwall_chart_used_last_complete_day', { chart: spec.chart });
+  // Not a snapshot warning: an organization with no subscriptions yet has an empty chart.
   if (points.length === 0) ctx.log('superwall_chart_empty', { chart: spec.chart });
+  return points;
+}
+
+async function getChartValue(
+  ctx: ProviderContext,
+  inp: SwInput,
+  spec: ChartSpec,
+  expect: 'currency' | 'number',
+  today: string,
+): Promise<number> {
+  const points = await getChartPoints(ctx, inp, spec, expect, 'last_7_days');
+  const { value, fellBack } = currentValue(points, today);
+  // Not a snapshot warning either: yesterday's point stands in until Superwall computes today's.
+  if (fellBack) ctx.log('superwall_chart_used_last_complete_day', { chart: spec.chart });
   return value;
+}
+
+/**
+ * Past days' values of a chart, for days in [from, today). Only today's point should be incomplete; a past one
+ * that is (or that carries no values) may not be final, so it's left out rather than stored for good.
+ */
+function pastValues(points: ChartPoint[], from: string, today: string): { byDay: Map<string, number>; notFinal: number } {
+  const byDay = new Map<string, number>();
+  let notFinal = 0;
+  for (const p of points) {
+    if (p.day < from || p.day >= today) continue;
+    if (p.incomplete || p.value === null) {
+      notFinal += 1;
+      continue;
+    }
+    byDay.set(p.day, p.value);
+  }
+  return { byDay, notFinal };
 }
 
 // ---------- Query API (SQL) ----------
@@ -757,5 +801,61 @@ export const superwallAdapter: ProviderAdapter = {
 
     ctx.log('superwall_revenue_fetched', { windows, days: daily.length });
     return finished();
+  },
+
+  async fetchSnapshotHistory(input, req, ctx): Promise<SnapshotHistoryPoint[]> {
+    const inp = requireInput(input);
+    const today = dayKey(ctx.now());
+    const days = Number.isFinite(req.days) ? Math.max(0, Math.floor(req.days)) : 0;
+    if (days === 0) return [];
+    // Every day needs both charts, so don't start what the budget (or the clock) can't finish.
+    if (!hasBudget(ctx, HISTORY_REQUESTS)) {
+      ctx.log('superwall_history_skipped', { reason: 'budget' });
+      return [];
+    }
+
+    let mrr: ChartPoint[];
+    let subscriptions: ChartPoint[];
+    try {
+      const defs = await getDefinitions(ctx, inp);
+      mrr = await getChartPoints(ctx, inp, defs.mrr, 'currency', HISTORY_PRESET);
+      subscriptions = await getChartPoints(ctx, inp, defs.activeSubscriptions, 'number', HISTORY_PRESET);
+    } catch (err) {
+      // The deadline passed mid-way: one chart alone can't make a day.
+      if (err instanceof BudgetExhaustedError) {
+        ctx.log('superwall_history_skipped', { reason: err.reason });
+        return [];
+      }
+      throw err;
+    }
+
+    const from = addDays(today, -days);
+    const m = pastValues(mrr, from, today);
+    const s = pastValues(subscriptions, from, today);
+    const out: SnapshotHistoryPoint[] = [];
+    let unmatched = 0;
+    for (const day of dayRange(from, addDays(today, -1))) {
+      const value = m.byDay.get(day);
+      const count = s.byDay.get(day);
+      if (value === undefined || count === undefined) {
+        // A day with only one of the two is left out: a subscription count is never made up.
+        if (value !== undefined || count !== undefined) unmatched += 1;
+        continue;
+      }
+      out.push({
+        day,
+        snapshot: {
+          mrr: { [REPORTING_CURRENCY]: toMinor(value, REPORTING_CURRENCY) },
+          activeSubscriptions: Math.max(0, Math.round(count)),
+          // Trials come from SQL as of now; Superwall has no trials series to read past days from.
+          activeTrials: null,
+          revenuePeriod: null,
+          revenuePeriodDays: null,
+          newCustomers: null,
+        },
+      });
+    }
+    ctx.log('superwall_history_fetched', { days: out.length, unmatched, notFinal: m.notFinal + s.notFinal });
+    return out;
   },
 };

@@ -11,11 +11,15 @@ import {
   TRIALS_SQL,
   superwallAdapter,
 } from '../../src/providers/superwall';
-import { ProviderError, type ConnectionInput } from '../../src/providers/types';
+import { ProviderError, type ConnectionInput, type SnapshotHistoryPoint } from '../../src/providers/types';
+import { dayRange } from '../../src/lib/time';
+import { cleanSnapshotHistory } from '../../src/sync/aggregate';
 import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall, type TestCtx } from '../fixtures/harness';
 import definitionsFixture from '../fixtures/superwall/definitions.json';
 import mrrChart from '../fixtures/superwall/chart-mrr.json';
 import subsChart from '../fixtures/superwall/chart-active-subscriptions.json';
+import mrrChart90 from '../fixtures/superwall/chart-mrr-90-days.json';
+import subsChart90 from '../fixtures/superwall/chart-active-subscriptions-90-days.json';
 import revenueRows from '../fixtures/superwall/query-revenue.json';
 import trialsRows from '../fixtures/superwall/query-trials.json';
 import err400Chart from '../fixtures/superwall/error-400-chart.json';
@@ -684,5 +688,154 @@ describe('superwall fetchRevenue', () => {
     const { fetch, calls } = fakeFetch([route(QUERY, { json: emptyRevenue })]);
     await superwallAdapter.fetchRevenue(input(), { since: NOW, cursor: '2026-13-45' }, makeCtx(fetch));
     expect(paramsOf(calls[0]!).get('param_day_from')).toBe(TODAY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('superwall fetchSnapshotHistory', () => {
+  const historyRoutes = (charts: { mrr?: unknown; subs?: unknown } = {}) => [
+    route(DEFS, { json: definitionsFixture }, { query: { organization_id: ORG } }),
+    route(DATA, chartData({ mrr: charts.mrr ?? mrrChart90, subs: charts.subs ?? subsChart90 }), { method: 'POST' }),
+  ];
+  const history = (ctx: TestCtx, days = 90) => superwallAdapter.fetchSnapshotHistory!(input(), { days }, ctx);
+  const point = (day: string, mrr: number, subscriptions: number): SnapshotHistoryPoint => ({
+    day,
+    snapshot: {
+      mrr: { USD: mrr },
+      activeSubscriptions: subscriptions,
+      activeTrials: null, // Superwall has no trials series
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+    },
+  });
+  type Point = { x: string; incomplete: boolean; values: Json };
+  const points = (chart: unknown) => (chart as { data: Point[] }).data;
+  const at = (chart: unknown, day: string) => points(chart).find((p) => p.x === day)!;
+
+  it('reads 89 past days of MRR and subscriptions from the two charts over last_90_days, oldest first', async () => {
+    const { fetch, calls } = fakeFetch(historyRoutes());
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+
+    // last_90_days ends today, whose (incomplete) point is fetchSnapshot's.
+    expect(rows.map((r) => r.day)).toEqual(dayRange('2026-08-08', '2026-11-04'));
+    expect(rows[0]).toEqual(point('2026-08-08', 310000, 318));
+    expect(rows[3]).toEqual(point('2026-08-11', 313329, 321));
+    expect(rows[87]).toEqual(point('2026-11-03', 405873, 407)); // 4058.73 is 405872.99999… in floating point
+    expect(rows[88]).toEqual(point('2026-11-04', 406620, 408));
+
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual([DEFS, DATA, DATA]);
+    expect(bodyOf(calls[1]!)['y_axis']).toBe('mrrValue');
+    expect(bodyOf(calls[2]!)['y_axis']).toBe('activeSubscriptionCount');
+    for (const c of calls.slice(1)) {
+      expect(bodyOf(c)).toMatchObject({
+        organization_id: ORG,
+        breakdown: null,
+        date_filter: { dimension: 'mrrDate', preset: 'last_90_days' },
+        date_interval: 'day',
+        environment: ['PRODUCTION'],
+      });
+    }
+    // The engine stores every row as it is.
+    const cleaned = cleanSnapshotHistory(rows, TODAY, 90);
+    expect(cleaned.skipped).toBe(0);
+    expect(cleaned.rows).toHaveLength(89);
+    expect(ctx.logs.find((l) => l.event === 'superwall_history_fetched')?.data).toEqual({ days: 89, unmatched: 0, notFinal: 0 });
+    expectClean(ctx);
+  });
+
+  it('returns only the newest `days` days when asked for fewer', async () => {
+    const { fetch } = fakeFetch(historyRoutes());
+    const rows = await history(makeCtx(fetch), 30);
+    expect(rows.map((r) => r.day)).toEqual(dayRange('2026-10-06', '2026-11-04'));
+    expect(await history(makeCtx(fetch), 0)).toEqual([]);
+  });
+
+  it('leaves out days missing from either chart and points that aren’t final, never zero-filling them', async () => {
+    // A young organization: MRR from 2026-09-20, subscriptions from the day after.
+    const mrr = clone(mrrChart90);
+    mrr.data = mrr.data.filter((p) => p.x >= '2026-09-20');
+    const subs = clone(subsChart90);
+    subs.data = subs.data.filter((p) => p.x >= '2026-09-21');
+    at(subs, '2026-10-10').values = {}; // a point without values
+    at(mrr, '2026-10-20').incomplete = true; // a past point Superwall hasn't finished
+
+    const { fetch } = fakeFetch(historyRoutes({ mrr, subs }));
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+
+    const expected = dayRange('2026-09-21', '2026-11-04').filter((d) => d !== '2026-10-10' && d !== '2026-10-20');
+    expect(rows.map((r) => r.day)).toEqual(expected);
+    expect(rows.find((r) => r.day === '2026-10-11')).toEqual(point('2026-10-11', 380487, 382));
+    expect(ctx.logs.find((l) => l.event === 'superwall_history_fetched')?.data).toEqual({ days: 43, unmatched: 3, notFinal: 2 });
+  });
+
+  it('returns nothing for an organization whose charts are still empty', async () => {
+    const { fetch } = fakeFetch(historyRoutes({ mrr: { ...clone(mrrChart90), data: [] }, subs: { ...clone(subsChart90), data: [] } }));
+    const ctx = makeCtx(fetch);
+    expect(await history(ctx)).toEqual([]);
+    expect(logEvents(ctx)).toContain('superwall_chart_empty');
+  });
+
+  it('makes no request when the budget can’t cover the definitions and both charts', async () => {
+    const { fetch, calls } = fakeFetch(historyRoutes());
+    const ctx = makeCtx(fetch, { pageBudget: 2 });
+    expect(await history(ctx)).toEqual([]);
+    expect(calls).toHaveLength(0);
+    expect(ctx.logs.find((l) => l.event === 'superwall_history_skipped')?.data).toEqual({ reason: 'budget' });
+  });
+
+  it('returns nothing, without failing, when the deadline passes between the two charts', async () => {
+    let t = NOW;
+    const { fetch, calls } = fakeFetch([
+      route(DEFS, { json: definitionsFixture }),
+      route(
+        DATA,
+        (url, init) => {
+          t = NOW + 61_000; // the MRR chart took the rest of the sync's time
+          return chartData({ mrr: mrrChart90, subs: subsChart90 })(url, init);
+        },
+        { method: 'POST' },
+      ),
+    ]);
+    const ctx: TestCtx = { ...makeCtx(fetch), now: () => t, deadline: NOW + 60_000 };
+    expect(await history(ctx)).toEqual([]);
+    expect(calls).toHaveLength(2);
+    expect(ctx.logs.find((l) => l.event === 'superwall_history_skipped')?.data).toEqual({ reason: 'deadline' });
+  });
+
+  it('fails with Superwall’s reason when it refuses a chart (400), so the engine logs it', async () => {
+    const { fetch } = fakeFetch([
+      route(DEFS, { json: definitionsFixture }),
+      route(
+        DATA,
+        (_url, init) =>
+          (JSON.parse(String(init?.body)) as Json)['y_axis'] === 'mrrValue' ? { json: mrrChart90 } : { status: 400, json: err400Chart },
+        { method: 'POST' },
+      ),
+    ]);
+    const ctx = makeCtx(fetch);
+    const e = await catchErr(history(ctx));
+    expect(e).toMatchObject({ kind: 'upstream', status: 400 });
+    expect(e.message).toMatch(/Unknown y_axis metric/);
+    expectClean(ctx);
+  });
+
+  it('fails on a chart in an unexpected unit instead of storing it', async () => {
+    const subs = clone(subsChart90);
+    subs.y_axis.value_type = 'currency';
+    const { fetch } = fakeFetch(historyRoutes({ subs }));
+    const e = await catchErr(history(makeCtx(fetch)));
+    expect(e.kind).toBe('upstream');
+    expect(e.message).toMatch(/Active Subscriptions chart in an unexpected unit/);
+  });
+
+  it('throws invalid_input without network', async () => {
+    const { fetch, calls } = fakeFetch([]);
+    const e = await catchErr(superwallAdapter.fetchSnapshotHistory!(input('pk_abcdefghijklmnopqrst'), { days: 90 }, makeCtx(fetch)));
+    expect(e.kind).toBe('invalid_input');
+    expect(calls).toHaveLength(0);
   });
 });

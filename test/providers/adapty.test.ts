@@ -5,7 +5,9 @@ import {
   adaptyAdapter,
   HISTORY_UNAVAILABLE_WARNING,
 } from '../../src/providers/adapty';
-import { ProviderError, type ConnectionInput, type RevenuePage } from '../../src/providers/types';
+import { ProviderError, type ConnectionInput, type RevenuePage, type SnapshotHistoryPoint } from '../../src/providers/types';
+import { dayRange } from '../../src/lib/time';
+import { cleanSnapshotHistory } from '../../src/sync/aggregate';
 import {
   expectNoSecretsInLogs,
   fakeFetch,
@@ -23,6 +25,9 @@ import refundChart from '../fixtures/adapty/chart-refund-money-day.json';
 import mrrChart from '../fixtures/adapty/chart-mrr.json';
 import subsChart from '../fixtures/adapty/chart-subscriptions-active.json';
 import trialsChart from '../fixtures/adapty/chart-trials-active.json';
+import mrrChart90 from '../fixtures/adapty/chart-mrr-90-days.json';
+import subsChart90 from '../fixtures/adapty/chart-subscriptions-active-90-days.json';
+import trialsChart90 from '../fixtures/adapty/chart-trials-active-90-days.json';
 import err400 from '../fixtures/adapty/error-400.json';
 import err401 from '../fixtures/adapty/error-401.json';
 import err403 from '../fixtures/adapty/error-403.json';
@@ -661,5 +666,190 @@ describe('adapty fetchRevenue', () => {
     const future = await adaptyAdapter.fetchRevenue(input(), { since: NOW + 3 * 86_400_000, cursor: null }, makeCtx(fetch));
     expect(future).toEqual({ events: [], daily: [], nextCursor: null, done: true });
     expect(calls).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('adapty fetchSnapshotHistory', () => {
+  const FROM = '2026-08-07'; // today − 90
+  const TO = '2026-11-04'; // yesterday: today's snapshot is fetchSnapshot's
+  const historyRoutes = (over: Partial<Record<string, Handler>> = {}) =>
+    analytics({
+      mrr: { json: mrrChart90 },
+      subscriptions_active: { json: subsChart90 },
+      trials_active: { json: trialsChart90 },
+      ...over,
+    });
+  const history = (ctx: TestCtx, days = 90) => adaptyAdapter.fetchSnapshotHistory!(input(), { days }, ctx);
+  const point = (day: string, mrr: number, subscriptions: number, trials: number | null): SnapshotHistoryPoint => ({
+    day,
+    snapshot: {
+      mrr: { USD: mrr },
+      activeSubscriptions: subscriptions,
+      activeTrials: trials,
+      revenuePeriod: null,
+      revenuePeriodDays: null,
+      newCustomers: null,
+    },
+  });
+  type Metric = { data: Array<{ values: Array<{ x: string; y: number | null }> }>; value_to: number | null };
+  /** The total row's points of one metric in a cloned answer. */
+  const values = (answer: { data: Record<string, unknown> }, metric: string) => (answer.data[metric] as Metric).data[0]!.values;
+
+  it('reads 90 past days of gross MRR, subscriptions and trials, one request per chart, oldest first', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes()]);
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+
+    expect(rows.map((r) => r.day)).toEqual(dayRange(FROM, TO));
+    expect(rows[0]).toEqual(point(FROM, 360000, 430, 20));
+    expect(rows[1]).toEqual(point('2026-08-08', 361089, 430, 21));
+    expect(rows[44]).toEqual(point('2026-09-20', 406278, 470, 22));
+    // Gross `revenue` metric, not proceeds (3491.67) or net_revenue (3113.02).
+    expect(rows[89]).toEqual(point(TO, 453463, 511, 25));
+
+    expect(charts(calls)).toEqual([`mrr ${FROM}..${TO}`, `subscriptions_active ${FROM}..${TO}`, `trials_active ${FROM}..${TO}`]);
+    for (const q of queries(calls)) expect(q).toMatchObject({ period_unit: 'day', date_type: 'purchase_date', format: 'json' });
+    expect(calls[0]!.headers['adapty-tz']).toBe('UTC');
+    // The engine stores every row as it is.
+    const cleaned = cleanSnapshotHistory(rows, TODAY, 90);
+    expect(cleaned.skipped).toBe(0);
+    expect(cleaned.rows).toHaveLength(90);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_fetched')?.data).toEqual({ days: 90, unmatched: 0, trials: true });
+    expectClean(ctx);
+  });
+
+  it('asks for fewer days when the engine does, and never for more than 90', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes()]);
+    const week = await history(makeCtx(fetch), 7);
+    expect(week.map((r) => r.day)).toEqual(dayRange('2026-10-29', TO));
+    expect(charts(calls)[0]).toBe(`mrr 2026-10-29..${TO}`);
+
+    const year = await history(makeCtx(fetch), 365);
+    expect(year).toHaveLength(90);
+    expect(charts(calls)[3]).toBe(`mrr ${FROM}..${TO}`);
+    expect(await history(makeCtx(fetch), 0)).toEqual([]);
+    expect(calls).toHaveLength(6);
+  });
+
+  it('leaves out days without MRR or a subscription count, never zero-filling them; missing trials are unknown', async () => {
+    // A young app: subscriptions from 2026-09-20, an MRR and a subscription point Adapty sent as null, a trials day missing.
+    const mrr = clone(mrrChart90);
+    values(mrr, 'revenue').find((p) => p.x === '2026-10-01')!.y = null;
+    const subs = clone(subsChart90);
+    const subsMetric = subs.data.common as unknown as Metric;
+    subsMetric.data[0]!.values = values(subs, 'common').filter((p) => p.x >= '2026-09-20');
+    values(subs, 'common').find((p) => p.x === '2026-10-15')!.y = null;
+    const trials = clone(trialsChart90);
+    const trialsMetric = trials.data.common as unknown as Metric;
+    trialsMetric.data[0]!.values = values(trials, 'common').filter((p) => p.x !== '2026-10-20');
+
+    const { fetch } = fakeFetch([
+      historyRoutes({ mrr: { json: mrr }, subscriptions_active: { json: subs }, trials_active: { json: trials } }),
+    ]);
+    const ctx = makeCtx(fetch);
+    const rows = await history(ctx);
+
+    const expected = dayRange('2026-09-20', TO).filter((d) => d !== '2026-10-01' && d !== '2026-10-15');
+    expect(rows.map((r) => r.day)).toEqual(expected);
+    expect(rows.every((r) => r.snapshot.activeSubscriptions > 0)).toBe(true);
+    expect(rows.find((r) => r.day === '2026-10-20')!.snapshot.activeTrials).toBeNull();
+    expect(rows.find((r) => r.day === '2026-10-21')!.snapshot.activeTrials).toBe(25);
+    // 44 MRR-only days before the app's first subscription, plus the two null points.
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_fetched')?.data).toEqual({ days: 44, unmatched: 46, trials: true });
+  });
+
+  it('returns nothing for an app with no data yet (Adapty’s empty answer)', async () => {
+    const empty = (metric: string) => ({ json: { data: { [metric]: { ...clone(subsChart90.data.common), data: [], value: 0, value_to: 0 } } } });
+    const { fetch } = fakeFetch([historyRoutes({ mrr: empty('revenue'), subscriptions_active: empty('common'), trials_active: empty('common') })]);
+    expect(await history(makeCtx(fetch))).toEqual([]);
+  });
+
+  it('makes no request when the budget can’t cover MRR and subscriptions', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes()]);
+    const ctx = makeCtx(fetch, { pageBudget: 1 });
+    expect(await history(ctx)).toEqual([]);
+    expect(calls).toHaveLength(0);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_skipped')?.data).toEqual({ reason: 'budget' });
+  });
+
+  it('with budget for the required charts only, returns every day with trials unknown', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes()]);
+    const ctx = makeCtx(fetch, { pageBudget: 2 });
+    const rows = await history(ctx);
+    expect(rows).toHaveLength(90);
+    expect(rows[89]).toEqual(point(TO, 453463, 511, null));
+    expect(charts(calls)).toEqual([`mrr ${FROM}..${TO}`, `subscriptions_active ${FROM}..${TO}`]);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_trials_unavailable')?.data).toEqual({ reason: 'budget', status: null });
+  });
+
+  it('returns nothing, without failing, when the deadline passes after the MRR chart', async () => {
+    let t = NOW;
+    const { fetch, calls } = fakeFetch([
+      historyRoutes({
+        mrr: () => {
+          t = NOW + 61_000; // the MRR chart took the rest of the sync's time
+          return { json: mrrChart90 };
+        },
+      }),
+    ]);
+    const ctx: TestCtx = { ...makeCtx(fetch), now: () => t, deadline: NOW + 60_000 };
+    expect(await history(ctx)).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_skipped')?.data).toEqual({ reason: 'deadline' });
+  });
+
+  it('fails with Adapty’s reason when it refuses a required chart (400), so the engine logs it', async () => {
+    const { fetch, calls } = fakeFetch([historyRoutes({ subscriptions_active: { status: 400, json: err400 } })]);
+    const ctx = makeCtx(fetch);
+    const e = await catchErr(history(ctx));
+    expect(e).toMatchObject({ kind: 'upstream', status: 400 });
+    expect(e.message).toMatch(/refused the analytics query \(HTTP 400\): "subscriptions_activ" is not a valid choice/);
+    expect(calls).toHaveLength(2); // no trials request after a failed required chart
+    expectClean(ctx);
+  });
+
+  it('keeps every day, with trials unknown, when the trials chart is refused or stays rate-limited', async () => {
+    const refused = fakeFetch([historyRoutes({ trials_active: { status: 403, json: err403 } })]);
+    const ctx = makeCtx(refused.fetch);
+    const rows = await history(ctx);
+    expect(rows).toHaveLength(90);
+    expect(rows.every((r) => r.snapshot.activeTrials === null)).toBe(true);
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_trials_unavailable')?.data).toEqual({ reason: 'permission', status: 403 });
+    expect(ctx.logs.find((l) => l.event === 'adapty_history_fetched')?.data).toMatchObject({ trials: false });
+
+    recordSleeps();
+    const limited = fakeFetch([historyRoutes({ trials_active: { status: 429, json: err429 } })]);
+    const ctx2 = makeCtx(limited.fetch);
+    expect((await history(ctx2)).map((r) => r.snapshot.activeTrials)).toEqual(Array(90).fill(null));
+    expect(ctx2.logs.find((l) => l.event === 'adapty_history_trials_unavailable')?.data).toEqual({ reason: 'rate_limit', status: 429 });
+    expectClean(ctx);
+    expectClean(ctx2);
+  });
+
+  it('does not trust a series that ends away from value_to, or lists a day twice (logging the shape, not values)', async () => {
+    const mrr = clone(mrrChart90);
+    (mrr.data.revenue as unknown as Metric).value_to = 9999.99;
+    const off = fakeFetch([historyRoutes({ mrr: { json: mrr } })]);
+    const ctx = makeCtx(off.fetch);
+    const e = await catchErr(history(ctx));
+    expect(e.kind).toBe('upstream');
+    expect(e.message).toMatch(/mrr chart hoomuch couldn’t read/);
+    const logged = ctx.logs.find((l) => l.event === 'adapty_series_unreadable')?.data;
+    expect(logged).toMatchObject({ chart: 'mrr', rows: 1, points: 90 });
+    expect(JSON.stringify(logged)).not.toMatch(/4534|9999/);
+
+    const subs = clone(subsChart90);
+    values(subs, 'common').push({ x: '2026-09-01', y: 999 });
+    const twice = fakeFetch([historyRoutes({ subscriptions_active: { json: subs } })]);
+    await expect(history(makeCtx(twice.fetch))).rejects.toMatchObject({ kind: 'upstream' });
+  });
+
+  it('throws invalid_input without network', async () => {
+    const { fetch, calls } = fakeFetch([]);
+    const e = await catchErr(adaptyAdapter.fetchSnapshotHistory!(input('public_live_abcdefghijklmnop'), { days: 90 }, makeCtx(fetch)));
+    expect(e.kind).toBe('invalid_input');
+    expect(calls).toHaveLength(0);
   });
 });

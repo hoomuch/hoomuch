@@ -212,7 +212,8 @@ references.
      `nextCursor`, so the next sync can resume.
    - `fetchSnapshotHistory` (optional): past days' snapshots, oldest first, if the provider has an MRR
      series. It runs once, on a connection's first successful sync, so a new dashboard starts with a
-     trend. The demo adapter is the reference.
+     trend. The demo adapter is the reference; Adapty and Superwall read it from the provider's daily
+     charts. A day without a subscription count is left out, never zero-filled.
 4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
    `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.
