@@ -4,7 +4,7 @@ import { getDashboardData, getDashboardPage, kpi, PRODUCT_ROWS } from '../../src
 import type { DashboardData } from '../../src/data/types';
 import { recomputeDailyRevenue, upsertSnapshot } from '../../src/sync/repo';
 import { cleanSnapshot } from '../../src/sync/aggregate';
-import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/stripe';
+import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/warnings';
 import { encodeCursor, listTransactions, parseCursor } from '../../src/data/transactions';
 import { getConnectionDetail, listConnectionSummaries } from '../../src/data/connections';
 import { addDays } from '../../src/lib/time';

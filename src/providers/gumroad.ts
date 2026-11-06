@@ -123,13 +123,11 @@ import {
   type VerifyResult,
 } from './types';
 
-export const GUMROAD_API_BASE = 'https://api.gumroad.com/v2';
+const GUMROAD_API_BASE = 'https://api.gumroad.com/v2';
 
 const PROVIDER = 'Gumroad';
 /** OAuth scope for sales and subscribers, used verbatim in 403 messages (registry permissions). */
 export const PERM_SALES = 'view_sales';
-/** Fixed by Gumroad (Api::V2::SalesController::RESULTS_PER_PAGE). */
-export const SALES_PER_PAGE = 10;
 /** Incremental syncs re-read sales this far before the window for refunds of already-stored sales. */
 export const REFUND_LOOKBACK_MS = 30 * DAY;
 /** A window longer than this is the first backfill: no older sales are stored, so no refund lookback. */

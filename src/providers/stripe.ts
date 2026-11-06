@@ -103,8 +103,9 @@ import {
   type RevenueRequest,
   type VerifyResult,
 } from './types';
+import { STRIPE_PRODUCTS_WARNING } from './warnings';
 
-export const STRIPE_API_BASE = 'https://api.stripe.com/v1';
+const STRIPE_API_BASE = 'https://api.stripe.com/v1';
 export const STRIPE_API_VERSION = '2026-10-28.endive';
 
 const PROVIDER = 'Stripe';
@@ -123,15 +124,11 @@ const PERM_PRODUCTS = 'Products: Read';
 
 export const SECRET_KEY_WARNING =
   'This is a full-access secret key. A restricted key (rk_…) with read access is safer. You can replace the key on this page.';
-export const COUPONS_PERMISSION_WARNING =
-  'This key can’t read coupons, so MRR is shown before discounts. Add Coupons: Read to fix it.';
-export const PRODUCTS_PERMISSION_WARNING =
-  'This key can’t read product names, so MRR isn’t split by product. Add Products: Read to fix it.';
 
-// Snapshot warnings (`MetricsSnapshot.warnings`). The permission ones say the same as verify's, word for word.
-export const STRIPE_COUPONS_WARNING = COUPONS_PERMISSION_WARNING;
-/** The dashboard matches this exact string to name the Stripe connections it can't split by product. */
-export const STRIPE_PRODUCTS_WARNING = PRODUCTS_PERMISSION_WARNING;
+// Snapshot warnings (`MetricsSnapshot.warnings`). The permission ones are verify's warnings too, word for
+// word; STRIPE_PRODUCTS_WARNING is in ./warnings.ts, because the dashboard matches it.
+export const STRIPE_COUPONS_WARNING =
+  'This key can’t read coupons, so MRR is shown before discounts. Add Coupons: Read to fix it.';
 export const STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING =
   'MRR isn’t split by product this time, because Stripe didn’t return the product names; the next sync tries again.';
 
@@ -1100,13 +1097,13 @@ async function verify(input: ConnectionInput, ctx: ProviderContext): Promise<Ver
       await stripeGet(ctx, key, '/coupons', { limit: 1 }, PERM_COUPONS);
     } catch (err) {
       if (!(err instanceof ProviderError && err.kind === 'permission')) throw err;
-      warnings.push(COUPONS_PERMISSION_WARNING);
+      warnings.push(STRIPE_COUPONS_WARNING);
     }
     try {
       await stripeGet(ctx, key, '/products', { limit: 1 }, PERM_PRODUCTS);
     } catch (err) {
       if (!(err instanceof ProviderError && err.kind === 'permission')) throw err;
-      warnings.push(PRODUCTS_PERMISSION_WARNING);
+      warnings.push(STRIPE_PRODUCTS_WARNING);
     }
   } catch (err) {
     if (err instanceof ProviderError && err.kind === 'auth') {

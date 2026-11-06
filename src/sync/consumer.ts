@@ -7,13 +7,13 @@ import { SYNC_KINDS, message, type SyncMessage } from './queue';
 import { clearQueued, lastSyncedAt } from './repo';
 
 /** Wait before a message whose handling crashed, or whose sync couldn't start, is tried again. */
-export const CRASH_RETRY_DELAY_SECONDS = 60;
+const CRASH_RETRY_DELAY_SECONDS = 60;
 /**
  * Wait before a webhook nudge that found the connection busy tries again. Most syncs are done by
  * then; one still running (a big account's can take up to SYNC_DEADLINE_MS) sends the nudge to the
  * stale-lock wait below, after which that sync is long finished.
  */
-export const BUSY_RETRY_DELAY_SECONDS = 60;
+const BUSY_RETRY_DELAY_SECONDS = 60;
 /**
  * Wait before a redelivered message that found the connection busy tries again. Its earlier attempt
  * may have died holding the lock; by then that lock is stale and the retry takes it over. Within
@@ -22,7 +22,7 @@ export const BUSY_RETRY_DELAY_SECONDS = 60;
  * for WEBHOOK_MIN_GAP_MS may outlive it, which at worst lets a second message be queued: whichever
  * of the two runs later finds a newer successful sync and is acked as superseded.
  */
-export const STALE_LOCK_RETRY_DELAY_SECONDS = SYNC_LOCK_STALE_MS / 1000;
+const STALE_LOCK_RETRY_DELAY_SECONDS = SYNC_LOCK_STALE_MS / 1000;
 
 function emit(level: 'log' | 'warn' | 'error', event: string, data: Record<string, unknown>): void {
   try {

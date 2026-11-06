@@ -27,10 +27,8 @@ import {
   updateUserPassword,
 } from '../db/queries';
 
-export { PASSWORD_MIN };
-
 /** Base name; on HTTPS the cookie is `__Host-hm_session` (see lib/cookies.ts). */
-export const SESSION_COOKIE = 'hm_session';
+const SESSION_COOKIE = 'hm_session';
 const SESSION_TTL_MS = 30 * DAY;
 const SESSION_REFRESH_BELOW_MS = 15 * DAY;
 /** Hard cap: sliding renewal never keeps one session alive longer than this. */

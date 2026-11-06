@@ -13,7 +13,7 @@ import { chrome, parsePage } from './util';
 import { renderPage } from '../views/render';
 
 /** Filters for the providers the user actually has (plus the active one), in registry order. */
-export function filterProviders(connections: ConnectionSummary[], active: ProviderId | null): ProviderId[] {
+function filterProviders(connections: ConnectionSummary[], active: ProviderId | null): ProviderId[] {
   const present = new Set<ProviderId>(connections.map((c) => c.provider));
   if (active) present.add(active);
   return PROVIDER_IDS.filter((id) => present.has(id));

@@ -2,21 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { BudgetExhaustedError } from '../../src/providers/http';
 import { formatMoney } from '../../src/lib/money';
 import {
-  COUPONS_PERMISSION_WARNING,
   fromStripeAmount,
-  PRODUCTS_PERMISSION_WARNING,
   SECRET_KEY_WARNING,
   splitRounded,
   STRIPE_API_VERSION,
   STRIPE_COUPONS_WARNING,
   STRIPE_PRODUCT_SPLIT_SKIPPED_WARNING,
-  STRIPE_PRODUCTS_WARNING,
   stripeAdapter,
   stripeDigits,
   stripeDiscountsUnresolvedWarning,
   stripeInclusiveTaxWarning,
   stripeUnpricedItemsWarning,
 } from '../../src/providers/stripe';
+import { STRIPE_PRODUCTS_WARNING } from '../../src/providers/warnings';
 import { ProviderError, type MetricsSnapshot } from '../../src/providers/types';
 import {
   expectNoSecretsInLogs,
@@ -290,8 +288,8 @@ describe('stripe verify', () => {
     const { fetch, calls } = fakeFetch([route('/v1/products', { status: 403, json: forbidden('rak_product_read') }), ...routes]);
     const ctx = makeCtx(fetch);
     const res = await stripeAdapter.verify(input(RK_LIVE), ctx);
-    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [PRODUCTS_PERMISSION_WARNING] });
-    expect(PRODUCTS_PERMISSION_WARNING).toMatch(/isn’t split by product.*Products: Read/);
+    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [STRIPE_PRODUCTS_WARNING] });
+    expect(STRIPE_PRODUCTS_WARNING).toMatch(/isn’t split by product.*Products: Read/);
     expect(calls.map((c) => new URL(c.url).pathname)).toEqual(PROBES);
     expectNoSecretsInLogs(ctx, [RK_LIVE, RK_TEST.slice(8)]);
   });
@@ -304,7 +302,7 @@ describe('stripe verify', () => {
       ...routes,
     ]);
     const res = await stripeAdapter.verify(input(SK_TEST), makeCtx(fetch));
-    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, COUPONS_PERMISSION_WARNING, PRODUCTS_PERMISSION_WARNING] });
+    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, STRIPE_COUPONS_WARNING, STRIPE_PRODUCTS_WARNING] });
   });
 
   it('treats other failures of the products probe like any other request', async () => {
@@ -318,8 +316,8 @@ describe('stripe verify', () => {
     const { fetch, calls } = fakeFetch([route('/v1/coupons', { status: 403, json: forbidden('rak_coupon_read') }), ...routes]);
     const ctx = makeCtx(fetch);
     const res = await stripeAdapter.verify(input(RK_LIVE), ctx);
-    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [COUPONS_PERMISSION_WARNING] });
-    expect(COUPONS_PERMISSION_WARNING).toMatch(/before discounts.*Coupons: Read/);
+    expect(res).toEqual({ ok: true, accountLabel: 'Stripe (live)', config: {}, testMode: false, warnings: [STRIPE_COUPONS_WARNING] });
+    expect(STRIPE_COUPONS_WARNING).toMatch(/before discounts.*Coupons: Read/);
     expect(calls.map((c) => new URL(c.url).pathname)).toEqual(PROBES);
     expectNoSecretsInLogs(ctx, [RK_LIVE, RK_TEST.slice(8)]);
   });
@@ -328,7 +326,7 @@ describe('stripe verify', () => {
     const routes = okRoutes().filter((r) => !r.label.startsWith('/v1/coupons'));
     const { fetch } = fakeFetch([route('/v1/coupons', { status: 403, json: forbidden('rak_coupon_read') }), ...routes]);
     const res = await stripeAdapter.verify(input(SK_TEST), makeCtx(fetch));
-    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, COUPONS_PERMISSION_WARNING] });
+    expect(res).toMatchObject({ ok: true, warnings: [SECRET_KEY_WARNING, STRIPE_COUPONS_WARNING] });
   });
 
   it('treats other failures of the coupons probe like any other request', async () => {
@@ -1033,7 +1031,6 @@ describe('stripe fetchSnapshot: warnings', () => {
       active: [simple(4000, { discounts: [discount('PCT25')] }), simple(5000, { discounts: [discount('PCT20')] })],
     });
     expect(snap.warnings).toEqual([STRIPE_COUPONS_WARNING]);
-    expect(STRIPE_COUPONS_WARNING).toBe(COUPONS_PERMISSION_WARNING); // same words as verify's
     expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
   });
 
@@ -1081,7 +1078,6 @@ describe('stripe fetchSnapshot: warnings', () => {
     const { snap, ctx } = await snapshot({ extra: [route('/v1/products', { status: 403, json: forbidden })], active: [simple(4000)] });
     expect(snap.mrrByProduct).toBeNull();
     expect(snap.warnings).toEqual([STRIPE_PRODUCTS_WARNING]);
-    expect(STRIPE_PRODUCTS_WARNING).toBe(PRODUCTS_PERMISSION_WARNING);
     expectNoSecretsInLogs(ctx, [RK_TEST, RK_TEST.slice(8)]);
   });
 

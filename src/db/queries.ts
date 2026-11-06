@@ -1,7 +1,7 @@
 /**
  * Base D1 queries for users, sessions and connections. Owner: Lead.
  * Every connection query is scoped by user_id — never fetch a connection by id alone
- * on a request path. Sync code (no user context) uses `getConnectionForSync`.
+ * on a request path. Sync code (no user context) has its own queries in sync/repo.ts.
  */
 
 import type { ProviderId } from '../providers/types';
@@ -81,13 +81,7 @@ export async function updateUserCurrency(db: D1Database, userId: string, currenc
 }
 
 export type CurrencySource = 'default' | 'inferred' | 'chosen';
-export type TimezoneSource = CurrencySource;
-
-export async function getTimezoneSource(db: D1Database, userId: string): Promise<TimezoneSource> {
-  const row = await db.prepare('SELECT timezone_source FROM users WHERE id = ?').bind(userId).first<{ timezone_source: string }>();
-  const v = row?.timezone_source;
-  return v === 'inferred' || v === 'chosen' ? v : 'default';
-}
+type TimezoneSource = CurrencySource;
 
 /** The user picked a time zone in Settings: never infer it again. */
 export async function updateUserTimezone(db: D1Database, userId: string, timezone: string): Promise<void> {
@@ -263,11 +257,6 @@ export function getConnection(db: D1Database, userId: string, id: string): Promi
     .prepare('SELECT * FROM connections WHERE id = ? AND user_id = ?')
     .bind(id, userId)
     .first<ConnectionRow>();
-}
-
-/** Sync-only: no user scope. Never call from a request handler with a user-supplied id. */
-export function getConnectionForSync(db: D1Database, id: string): Promise<ConnectionRow | null> {
-  return db.prepare('SELECT * FROM connections WHERE id = ?').bind(id).first<ConnectionRow>();
 }
 
 export async function insertConnection(

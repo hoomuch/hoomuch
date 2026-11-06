@@ -17,7 +17,7 @@ import type { ProviderId } from '../providers/types';
 import { FxConverter, FxHistory, LATEST_FX_SQL, LATEST_LOOKBACK_DAYS, latestFx, slimRatesSql, type FxRow } from '../sync/fx';
 import { rowsOf, type TransactionPage, type TransactionRow } from './types';
 
-export const TRANSACTIONS_PAGE_SIZE = 50;
+const TRANSACTIONS_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
 /** Deep OFFSETs get slow; nobody pages 2,000 pages into a list. */
 const MAX_PAGE = 2_000;

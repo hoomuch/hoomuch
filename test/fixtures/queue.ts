@@ -12,7 +12,7 @@ export interface SentMessage<T = unknown> {
 }
 
 /** Messages per `sendBatch` call that Cloudflare Queues accepts. */
-export const QUEUES_BATCH_LIMIT = 100;
+const QUEUES_BATCH_LIMIT = 100;
 
 export class FakeQueue<T = unknown> implements Queue<T> {
   sent: SentMessage<T>[] = [];

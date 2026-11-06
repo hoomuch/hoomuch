@@ -79,8 +79,8 @@ import {
 } from './types';
 
 const PROVIDER = 'Polar';
-export const POLAR_API_BASE = 'https://api.polar.sh/v1';
-export const POLAR_SANDBOX_API_BASE = 'https://sandbox-api.polar.sh/v1';
+const POLAR_API_BASE = 'https://api.polar.sh/v1';
+const POLAR_SANDBOX_API_BASE = 'https://sandbox-api.polar.sh/v1';
 export const POLAR_API_VERSION = '2026-10';
 
 /** List maximum. */
@@ -92,10 +92,10 @@ const PAGE_SIZE = 100;
 export const REVENUE_LOOKBACK_MS = 30 * DAY;
 
 // Scope names exactly as Polar's token form lists them; the registry checklist and 403 messages use them too.
-export const SCOPE_METRICS = 'metrics:read';
-export const SCOPE_SUBSCRIPTIONS = 'subscriptions:read';
-export const SCOPE_ORDERS = 'orders:read';
-export const SCOPE_REFUNDS = 'refunds:read';
+const SCOPE_METRICS = 'metrics:read';
+const SCOPE_SUBSCRIPTIONS = 'subscriptions:read';
+const SCOPE_ORDERS = 'orders:read';
+const SCOPE_REFUNDS = 'refunds:read';
 
 /** Config key written by verify: 'production' | 'sandbox'. */
 export const CONFIG_ENVIRONMENT = 'environment';
@@ -115,7 +115,7 @@ export const VERSION_GONE_MESSAGE =
 
 // ---------- token + environment ----------
 
-export type PolarEnvironment = 'production' | 'sandbox';
+type PolarEnvironment = 'production' | 'sandbox';
 
 const BASES: Record<PolarEnvironment, string> = { production: POLAR_API_BASE, sandbox: POLAR_SANDBOX_API_BASE };
 

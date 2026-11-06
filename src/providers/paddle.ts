@@ -72,8 +72,8 @@ import {
   type VerifyResult,
 } from './types';
 
-export const PADDLE_LIVE_BASE = 'https://api.paddle.com';
-export const PADDLE_SANDBOX_BASE = 'https://sandbox-api.paddle.com';
+const PADDLE_LIVE_BASE = 'https://api.paddle.com';
+const PADDLE_SANDBOX_BASE = 'https://sandbox-api.paddle.com';
 export const PADDLE_API_VERSION = '1';
 
 const PROVIDER = 'Paddle';
@@ -106,12 +106,12 @@ interface Permission {
   api: string;
 }
 
-export const PERM_SUBSCRIPTIONS: Permission = { label: 'Subscriptions: Read', api: 'subscription.read' };
-export const PERM_TRANSACTIONS: Permission = { label: 'Transactions: Read', api: 'transaction.read' };
-export const PERM_ADJUSTMENTS: Permission = { label: 'Adjustments: Read', api: 'adjustment.read' };
-export const PERM_METRICS: Permission = { label: 'Metrics: Read', api: 'metrics.read' };
+const PERM_SUBSCRIPTIONS: Permission = { label: 'Subscriptions: Read', api: 'subscription.read' };
+const PERM_TRANSACTIONS: Permission = { label: 'Transactions: Read', api: 'transaction.read' };
+const PERM_ADJUSTMENTS: Permission = { label: 'Adjustments: Read', api: 'adjustment.read' };
+const PERM_METRICS: Permission = { label: 'Metrics: Read', api: 'metrics.read' };
 /** Optional: only the subscription-based MRR estimate uses it. */
-export const PERM_DISCOUNTS: Permission = { label: 'Discounts: Read', api: 'discount.read' };
+const PERM_DISCOUNTS: Permission = { label: 'Discounts: Read', api: 'discount.read' };
 
 export const DISCOUNTS_WARNING =
   'This key can’t read discounts (Discounts: Read). When Paddle’s MRR metric isn’t available (sandbox accounts, brand-new accounts), hoomuch estimates MRR from subscriptions and will leave discounts out.';

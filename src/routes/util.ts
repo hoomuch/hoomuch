@@ -66,7 +66,7 @@ export function isUuid(v: string | undefined): v is string {
   return typeof v === 'string' && UUID_RE.test(v);
 }
 
-export const MAX_PAGE = 10_000;
+const MAX_PAGE = 10_000;
 
 /** Positive integer page number; junk → 1, capped at MAX_PAGE. */
 export function parsePage(v: string | undefined): number {

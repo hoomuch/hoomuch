@@ -42,11 +42,52 @@ the syncs follow a moment later in the same terminal.
 Before opening a pull request, run:
 
 ```bash
-npm run check                           # typecheck + tests + build
+npm run check                           # typecheck + unused code + module boundaries + tests + build
 ```
 
 It must pass. CI runs the same check on every pull request, on Node 24.14 and on the `.nvmrc`
 version, and checks that the pull request title is a Conventional Commit (see *Commit messages*).
+
+### Unused code
+
+`npm run knip` runs [Knip](https://knip.dev): it finds files nothing imports, exports nothing else
+uses, and npm dependencies that are unused or missing from `package.json`. `npm run check` runs it,
+so CI does too. When it reports something:
+
+- An export only its own file uses: drop the `export`. Tests count as users, so a constant a test
+  checks stays exported.
+- Something nothing uses: delete it. Git keeps it.
+- A file only a tool loads (an esbuild or k6 entry, another scanner's test cases): add it to
+  `entry` or `ignore` in `knip.jsonc`.
+
+The coss ui components in `src/components/ui/` stay as the shadcn CLI writes them, so their unused
+exports aren't reported. A whole component nothing imports still is: delete it, and
+`npx shadcn@latest add @coss/<name>` brings it back when a page needs it.
+
+### Module boundaries
+
+`npm run deps` runs [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) over
+`src/`, `test/`, `scripts/` and `bench/`, with the rules in `.dependency-cruiser.mjs`; `npm run check`
+runs it too. Most rules are ground rules, written as rules about imports:
+
+- **Adapters are pure:** `src/providers/` imports only `src/providers/` and the shared helpers in
+  `src/lib/`, never D1, `env`, the sync engine or the UI.
+- **The dashboard reads only from D1:** read models never import adapter code or the sync engine.
+  Adapters are looked up in `src/providers/adapters.ts`, which only the sync engine and the
+  connection services import.
+- **Pages stay off the server:** at runtime, pages and the browser entry import only pages, coss ui,
+  the shared helpers in `src/lib/`, provider metadata (`providers/registry.ts`, `types.ts`,
+  `warnings.ts`) and `data/types.ts`. The page gets its data as props. Types may come from anywhere.
+- **coss ui stays generic,** and only `src/views/` imports it.
+
+The rest are general: no cycles of runtime imports, no import that doesn't resolve, nothing in `src/`
+from `devDependencies`, `test/`, `bench/` or `scripts/`. A finding names its rule, and the rule's
+comment in `.dependency-cruiser.mjs` says why it's there. `import type` vanishes when the code is
+built, so most rules let it through.
+
+TypeScript 7.0 has no compiler API for dependency-cruiser to read TypeScript with, so it parses with
+swc (`@swc/core`, a devDependency) for now. Once dependency-cruiser supports a stable TypeScript
+7.x, the `parser` option and `@swc/core` can go.
 
 ### Security checks
 
@@ -78,7 +119,9 @@ line above it.
 | Script | What it does |
 |--------|--------------|
 | `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
-| `npm run check` | Typecheck, tests and build |
+| `npm run check` | Typecheck, Knip, dependency-cruiser, tests and build |
+| `npm run knip` | Files, exports and dependencies nothing uses (see *Unused code*) |
+| `npm run deps` | Checks imports against the rules in `.dependency-cruiser.mjs` (see *Module boundaries*) |
 | `npm run security` | gitleaks, OSV-Scanner, Opengrep and zizmor, on your machine (see *Security checks*) |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |
@@ -98,7 +141,7 @@ src/
   index.tsx          middleware (CSP, CSRF, session, flash) and cron entry
   lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
-  providers/         adapter contract, registry, one adapter per provider, Demo
+  providers/         adapter contract, registry (metadata), adapter lookup, one adapter per provider, Demo
   sync/              sync engine, the sync queue and its consumer, aggregation, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
   services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks
@@ -112,6 +155,8 @@ scripts/             client build, the commit-msg check, the domain list refresh
 test/                Vitest suites and API fixtures
 bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases
+knip.jsonc           what Knip counts as an entry point, and what it skips
+.dependency-cruiser.mjs   the module boundaries `npm run deps` checks
 ```
 
 ### Performance
@@ -256,8 +301,9 @@ references.
      `req.today`, the owner's local day that today's snapshot is stored under: it can be a day either
      side of the UTC one. The demo adapter is the reference; Adapty and Superwall read it from the
      provider's daily charts. A day without a subscription count is left out, never zero-filled.
-4. **Registry.** Add its `ProviderMeta` to `PROVIDERS`, and the adapter to `ADAPTERS`, in
-   `src/providers/registry.ts`. Mark key fields `secret: true` so they're stored encrypted. Spell out
+4. **Registry.** Add its `ProviderMeta` to `PROVIDERS` in `src/providers/registry.ts`, and the
+   adapter to `ADAPTERS` in `src/providers/adapters.ts`. The registry never imports an adapter: pages
+   and the browser bundle read it. Mark key fields `secret: true` so they're stored encrypted. Spell out
    the `dotClass` as a literal Tailwind class such as `bg-[#635BFF]` so the CSS build picks it up.
    List the exact read permissions the key needs. If the provider's API shows a change within
    minutes and its dashboard lets anyone add a webhook URL by hand, add `webhook` (steps, event names)

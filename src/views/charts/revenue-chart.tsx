@@ -86,7 +86,7 @@ export interface RevenueSeries {
   col: number;
 }
 
-export interface RevenueRow {
+interface RevenueRow {
   day: string;
   total: number;
   /** Net per series column (connections in order, then Other). */

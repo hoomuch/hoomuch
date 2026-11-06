@@ -61,7 +61,7 @@ import {
 } from './types';
 
 const PROVIDER = 'Adapty';
-export const ADAPTY_ANALYTICS_URL = 'https://api-admin.adapty.io/api/v1/client-api/metrics/analytics/';
+const ADAPTY_ANALYTICS_URL = 'https://api-admin.adapty.io/api/v1/client-api/metrics/analytics/';
 
 /** Days are grouped in this IANA zone (`Adapty-Tz`), not the app's reporting time zone, to match UTC day keys. */
 const REPORT_TIMEZONE = 'UTC';
@@ -70,11 +70,11 @@ const DEFAULT_CURRENCY = 'USD';
 /** Days per revenue request: the 90-day first backfill is one window. */
 const MAX_WINDOW_DAYS = 92;
 /** Trailing window of the snapshot's revenue total (the dashboard's fallback when there's no daily history). */
-export const REVENUE_PERIOD_DAYS = 30;
+const REVENUE_PERIOD_DAYS = 30;
 /** Most past days snapshot history reads: the dashboard's longest range, one request per chart. */
-export const HISTORY_MAX_DAYS = 90;
+const HISTORY_MAX_DAYS = 90;
 
-export type AdaptyChart = 'mrr' | 'subscriptions_active' | 'trials_active' | 'revenue' | 'refund_money';
+type AdaptyChart = 'mrr' | 'subscriptions_active' | 'trials_active' | 'revenue' | 'refund_money';
 
 const MONEY_CHARTS: ReadonlySet<AdaptyChart> = new Set(['mrr', 'revenue', 'refund_money']);
 /** Never read by the single-metric fallback: they are after store commission (and taxes). */
@@ -107,7 +107,7 @@ const KEY_HINT = 'Copy it from App settings → General → API keys in the Adap
 type InputCheck = { ok: true; apiKey: string } | { ok: false; error: string; field: 'apiKey' };
 
 /** Validates the key's shape without any network call. Never echoes the value back. */
-export function checkAdaptyInput(input: ConnectionInput): InputCheck {
+function checkAdaptyInput(input: ConnectionInput): InputCheck {
   const apiKey = (input.credentials['apiKey'] ?? '').trim().replace(HEADER_PREFIX_RE, '').trim();
   const fail = (error: string): InputCheck => ({ ok: false, error, field: 'apiKey' });
 

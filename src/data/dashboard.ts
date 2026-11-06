@@ -13,7 +13,7 @@ import { normalizeCurrency, parseMoneyMap } from '../lib/money';
 import { addDays, dayNumberToKeySql, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
-import { STRIPE_PRODUCTS_WARNING } from '../providers/stripe';
+import { STRIPE_PRODUCTS_WARNING } from '../providers/warnings';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
 import type { FxTable } from '../lib/money';
 import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx, type FxRow } from '../sync/fx';
@@ -65,7 +65,7 @@ interface ProductDayRow extends ProductSumRow {
   refunds: number;
 }
 
-export interface ProductSumRow {
+interface ProductSumRow {
   connection_id: string;
   /** Null when the transactions had no product name. */
   product: string | null;
@@ -124,7 +124,7 @@ export async function getDashboardPage(
 }
 
 /** The dashboard as statements for a page's batch (ReadModelQuery); getDashboardData runs it alone. */
-export function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays, now: number): ReadModelQuery<DashboardData> {
+function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays, now: number): ReadModelQuery<DashboardData> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   // Days run midnight to midnight in the user's zone (SPEC §6).
   const tz = user.timeZone || UTC;
@@ -440,7 +440,7 @@ function otherDayZones(conns: readonly ConnectionView[], tz: string): Array<{ la
  * refund (per connection, so "Pro" in two stores is two rows); everything else in the revenue KPI
  * (daily totals, charges without a name) goes to `unnamed`, so the whole adds up to that KPI.
  */
-export function productBreakdown(
+function productBreakdown(
   rows: readonly ProductSumRow[],
   conns: readonly ConnectionView[],
   revenueByConn: ReadonlyMap<string, number>,
@@ -550,7 +550,7 @@ const ROUNDING = 0.5;
  * connection whose snapshot has no split, and products without a name, go to `unnamed`: each
  * connection adds its MRR minus its named products, so the whole adds up to the MRR KPI.
  */
-export function productMrrBreakdown(
+function productMrrBreakdown(
   latest: readonly SnapRow[],
   conns: readonly ConnectionView[],
   cv: FxConverter,

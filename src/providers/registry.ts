@@ -1,21 +1,10 @@
 /**
- * Provider metadata (Lead) + adapter lookup. Adapters live in ./<provider>.ts (Data Plane).
+ * Provider metadata (Lead): names, form fields, permissions, webhooks. The adapters themselves are
+ * looked up in ./adapters.ts. This file imports none of them, so the pages and the browser bundle
+ * can read the metadata without pulling in adapter code (.dependency-cruiser.mjs checks it).
  */
 
-import type { ConnectionConfig, Credentials, ProviderAdapter, ProviderId, ProviderMeta } from './types';
-import { stripeAdapter } from './stripe';
-import { lemonSqueezyAdapter } from './lemonsqueezy';
-import { revenueCatAdapter } from './revenuecat';
-import { paddleAdapter } from './paddle';
-import { polarAdapter } from './polar';
-import { chargebeeAdapter } from './chargebee';
-import { dodoAdapter } from './dodo';
-import { gumroadAdapter } from './gumroad';
-import { adaptyAdapter } from './adapty';
-import { superwallAdapter } from './superwall';
-import { appStoreAdapter } from './appstore';
-import { googlePlayAdapter } from './googleplay';
-import { demoAdapter } from './demo';
+import type { ConnectionConfig, Credentials, ProviderId, ProviderMeta } from './types';
 
 export const PROVIDERS: readonly ProviderMeta[] = [
   {
@@ -598,30 +587,10 @@ export const PROVIDERS: readonly ProviderMeta[] = [
   },
 ];
 
-const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
-  stripe: stripeAdapter,
-  paddle: paddleAdapter,
-  lemonsqueezy: lemonSqueezyAdapter,
-  polar: polarAdapter,
-  revenuecat: revenueCatAdapter,
-  chargebee: chargebeeAdapter,
-  dodo: dodoAdapter,
-  gumroad: gumroadAdapter,
-  adapty: adaptyAdapter,
-  superwall: superwallAdapter,
-  appstore: appStoreAdapter,
-  googleplay: googlePlayAdapter,
-  demo: demoAdapter,
-};
-
 export function getProviderMeta(id: ProviderId): ProviderMeta {
   const meta = PROVIDERS.find((p) => p.id === id);
   if (!meta) throw new Error(`Unknown provider: ${id}`);
   return meta;
-}
-
-export function getAdapter(id: ProviderId): ProviderAdapter {
-  return ADAPTERS[id];
 }
 
 /**

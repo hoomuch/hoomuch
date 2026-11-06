@@ -35,13 +35,13 @@ const MONTH = utc({ month: 'long' });
 
 const at = (day: string) => new Date(dayStart(day));
 /** "Tuesday, Nov 3, 2026" */
-export const longDay = (day: string) => LONG_DAY.format(at(day));
+const longDay = (day: string) => LONG_DAY.format(at(day));
 /** "Nov 3" */
 const shortDay = (day: string) => SHORT_DAY.format(at(day));
 /** "Nov 3, 2026" */
 const fullDay = (day: string) => FULL_DAY.format(at(day));
 /** "November 2026" */
-export const monthLabel = (month: string) => MONTH_YEAR.format(at(`${month}-01`));
+const monthLabel = (month: string) => MONTH_YEAR.format(at(`${month}-01`));
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatNumber(n)} ${n === 1 ? one : many}`;
 

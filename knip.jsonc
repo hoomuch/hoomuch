@@ -1,0 +1,21 @@
+// Knip: files, exports and dependencies nothing uses (`npm run knip`, part of `npm run check`).
+// It finds the Worker's entry in wrangler.jsonc, the tests through Vitest and the scripts through
+// package.json on its own; this file holds what it can't know.
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Loaded by tools, not imported: the browser bundle's entry (scripts/build-client.mjs builds it)
+  // and the k6 load test (bench/serve.mjs runs it).
+  "entry": ["src/client/entry.tsx", "bench/k6/app.js"],
+  // Opengrep's test cases are code that breaks the rules on purpose (.opengrep/), and
+  // commit-msg.d.mts types scripts/commit-msg.mjs for the tests.
+  "ignore": [".opengrep/**", "scripts/commit-msg.d.mts"],
+  // Programs of their own, not npm packages (CONTRIBUTING.md: Security checks, Performance).
+  "ignoreBinaries": ["k6", "opengrep"],
+  // k6's modules (k6/http, ...) are built into k6. dependency-cruiser loads @swc/core by name, as
+  // its parser (.dependency-cruiser.mjs).
+  "ignoreDependencies": ["k6", "@swc/core"],
+  // The coss ui components stay as the shadcn CLI writes them, unused exports and all.
+  "ignoreIssues": {
+    "src/components/ui/**": ["exports", "types"]
+  }
+}
