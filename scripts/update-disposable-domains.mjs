@@ -35,6 +35,7 @@ const rejected = [];
 for (const raw of text.split('\n')) {
   const line = raw.trim().toLowerCase();
   if (!line || line.startsWith('#')) continue;
+  // nosemgrep: detect-redos -- DOMAIN caps the length at 253 and its labels can't overlap
   if (DOMAIN.test(line)) domains.add(line);
   else rejected.push(line);
 }

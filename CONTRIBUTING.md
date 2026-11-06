@@ -48,12 +48,38 @@ npm run check                           # typecheck + tests + build
 It must pass. CI runs the same check on every pull request, on Node 24.14 and on the `.nvmrc`
 version, and checks that the pull request title is a Conventional Commit (see *Commit messages*).
 
+### Security checks
+
+Four scanners run on your machine. They're programs of their own, not npm dependencies:
+
+```bash
+brew install gitleaks osv-scanner zizmor   # or from each project's releases page
+```
+
+and Opengrep from its [installation instructions](https://github.com/opengrep/opengrep#installation).
+
+- **gitleaks** runs on every commit (`.githooks/pre-commit`) and stops one that adds a secret. The
+  tests' made-up keys pass when they say so: put `Fake` in the value
+  (`sk_live_51FakeKeyForTestsOnly…`), and see `.gitleaks.toml`. Without gitleaks the hook warns and
+  lets the commit through, as `commit-msg` does without node.
+- **`npm run security`** runs all four: gitleaks over the history and your uncommitted changes,
+  OSV-Scanner over `package-lock.json`, Opengrep over `src/` and `scripts/`, and zizmor over
+  `.github/`. It exits 1 if any of them finds something or isn't installed.
+
+Opengrep runs the community JavaScript and TypeScript security rules and hoomuch's own rules in
+`.opengrep/`, which check the ground rules a pattern can see: adapters only read, call `ctx.fetch`
+and `ctx.now`, nothing logs a secret or puts one in an error, and pages neither read the clock while
+rendering nor write raw HTML. Each rule file has test cases next to it, and `npm run security` runs
+them first. A finding that's fine on purpose takes a `// nosemgrep: <rule> -- <why>` comment on the
+line above it.
+
 ### Scripts
 
 | Script | What it does |
 |--------|--------------|
 | `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
 | `npm run check` | Typecheck, tests and build |
+| `npm run security` | gitleaks, OSV-Scanner, Opengrep and zizmor, on your machine (see *Security checks*) |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |
 | `npm run css` | Builds `public/app.css` with the Tailwind CLI |
@@ -80,8 +106,9 @@ src/
   client/entry.tsx   browser entry: hydrates the page the server rendered
   styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
 migrations/          D1 schema
-scripts/             client build, the commit-msg check, the domain list refresh
+scripts/             client build, the commit-msg check, the domain list refresh, the security scan
 test/                Vitest suites and API fixtures
+.opengrep/           Opengrep rules for the ground rules, each with its test cases
 ```
 
 ## Commit messages

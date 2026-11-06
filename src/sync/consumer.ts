@@ -19,6 +19,7 @@ export const STALE_LOCK_RETRY_DELAY_SECONDS = SYNC_LOCK_STALE_MS / 1000;
 
 function emit(level: 'log' | 'warn' | 'error', event: string, data: Record<string, unknown>): void {
   try {
+    // nosemgrep: unsafe-dynamic-method -- level is typed to three console methods
     console[level](JSON.stringify({ event, ...data }));
   } catch {
     // logging must never break the queue

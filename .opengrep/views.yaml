@@ -1,0 +1,47 @@
+# hoomuch's rules for pages (CONTRIBUTING.md, "Forms work before hydration, scripts stay
+# same-origin" and "Render the same thing on the server and in the browser").
+# Cases: views.tsx. Run them with `opengrep scan --test .opengrep`.
+rules:
+  # Effects and callbacks run after hydration, so the clock is fine there.
+  - id: render-clock
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      This runs while the page renders, on the server and again in the browser, and the two
+      answers differ. Use useNow() (src/views/page-root.tsx) for the request's time, or move it
+      into an effect or an event handler (CONTRIBUTING.md, "Render the same thing on the server
+      and in the browser").
+    paths:
+      include: ['/src/views/']
+      # render.tsx takes the request's clock for useNow(), page-root.tsx defines useNow(), and
+      # fixtures.ts is demo data built on the server.
+      exclude: ['/src/views/render.tsx', '/src/views/page-root.tsx', '/src/views/fixtures.ts']
+    patterns:
+      - pattern-either:
+          - pattern: Date.now()
+          - pattern: new Date()
+          - pattern: Math.random()
+          - pattern: crypto.randomUUID()
+      - pattern-not-inside: useEffect(...)
+      - pattern-not-inside: useLayoutEffect(...)
+      - pattern-not-inside: useCallback(...)
+
+  # The page payload, a JSON data block, is the one raw HTML hoomuch writes into a page.
+  - id: raw-html
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Pages don't write raw HTML: React escapes what it renders, and the CSP (script-src 'self')
+      blocks inline scripts anyway. Render it as React elements instead. The page payload in
+      src/views/page-root.tsx, a <script type="application/json"> block, is the one exception
+      (CONTRIBUTING.md, "Forms work before hydration, scripts stay same-origin").
+    paths:
+      include: ['/src/views/', '/src/client/']
+    pattern-either:
+      - patterns:
+          - pattern: <$EL dangerouslySetInnerHTML={...} />
+          - pattern-not: <script type="application/json" dangerouslySetInnerHTML={...} />
+      - pattern: $NODE.innerHTML = $V
+      - pattern: $NODE.outerHTML = $V
+      - pattern: $NODE.insertAdjacentHTML(...)
+      - pattern: document.write(...)

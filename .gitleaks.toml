@@ -1,0 +1,39 @@
+# gitleaks: the default rules, plus the fake keys hoomuch's tests use on purpose. Read by the
+# pre-commit hook (.githooks/pre-commit) and by `npm run security`.
+#
+# The tests need key-shaped strings to prove that keys are checked, encrypted and masked, so they're
+# full of values gitleaks rightly flags. The allowlist below lets those through, and nothing else:
+# a value has to sit under test/ AND look made up, so a real key pasted into a test or a fixture
+# (fixtures are real API responses) is still caught.
+#
+# A new fake key in a test: put "Fake" in it (sk_live_51FakeKeyForTestsOnly...) and it passes. If
+# it trips a rule that isn't in targetRules below, add the rule there.
+
+[extend]
+useDefault = true
+
+# |targetRules| matters: without it this is a global allowlist, and gitleaks skips every file whose
+# path matches before it looks at |condition|, so all of test/ would go unscanned.
+[[allowlists]]
+description = "Made-up keys in tests"
+targetRules = ["stripe-access-token", "generic-api-key", "private-key", "jwt"]
+condition = "AND"
+paths = ['''^test/''']
+regexTarget = "secret"
+regexes = [
+  # Values that say they're made up, or are an obvious run of letters or digits.
+  '''(?i)(fake|abcdef|0123456789|x1y2z3|supersecret|looksrealenough|shouldneverrender|donotecho)''',
+
+  # A PEM block whose whole body is a stub: AAAA, the template's ${body}, or the first 24 or 36
+  # bytes every P-256 PKCS#8 key starts with. Only the stub with nothing after it: a real Apple
+  # .p8 key starts with those same bytes, then carries on.
+  '''^-----BEGIN[ A-Z]*PRIVATE KEY-----(?:\\{1,2}n|\r?\n)?(?:AAAA|\$\{body\}|MIGTAgEAMBMGByqGSM49AgEGCCqGSM49(?:AwEHBHkwdwIBAQQg)?)(?:\\{1,2}n|\r?\n)?-----END''',
+
+  # Example keys printed in the providers' own docs: Paddle's Authentication page (API key,
+  # legacy key, client-side token), Gumroad's "Create an application" article and its API
+  # reference's license keys.
+  '''^(?:pdl_(?:live|sdbx)_apikey_01gtgztp8f4kek3yd4g1wrksa3_q6TGTJyvoIz7LDtXT65bX7_AQO|da3f01dbed7a549cf0d8eb454bf5fded90d021f9975eba5cae|live_7d279f61a3499fed520f7cd8c08|abf11e4ab2850ffd50ef690257f7a1c998a443059513d1a4826f2b3159620505|83DB262A-C19D3B06-A5235A6B-8C079166|85DB562A-C11D4B06-A2335A6B-8C079166)$''',
+
+  # A Lemon Squeezy-shaped JWT whose signature is base64 for "fake-signature-for-tests".
+  '''\.ZmFrZS1zaWduYXR1cmUtZm9yLXRlc3Rz$''',
+]

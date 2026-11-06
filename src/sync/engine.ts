@@ -135,6 +135,7 @@ export const BACKFILL_CONTINUES_MESSAGE = 'Revenue backfill in progress; the nex
 
 function emit(level: 'log' | 'warn' | 'error', event: string, data: Record<string, unknown>): void {
   try {
+    // nosemgrep: unsafe-dynamic-method -- level is typed to three console methods
     console[level](JSON.stringify({ event, ...data }));
   } catch {
     // logging must never break a sync

@@ -1,0 +1,65 @@
+# hoomuch's rules for provider adapters (CONTRIBUTING.md, "Read-only" and "Adding a provider").
+# Cases: providers.ts. Run them with `opengrep scan --test .opengrep`.
+rules:
+  # Read-only. PUT, PATCH and DELETE have no place in an adapter, http.ts included.
+  - id: provider-write-method
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      hoomuch only ever reads from a provider, so an adapter never sends $M. Read the data with a
+      GET instead (CONTRIBUTING.md, "Read-only").
+    paths:
+      include: ['/src/providers/']
+    patterns:
+      - pattern: '{ ..., method: $M, ... }'
+      - metavariable-regex:
+          metavariable: $M
+          regex: (?i)^['"`](PUT|PATCH|DELETE)['"`]$
+
+  # Some read APIs take a body (Adapty's export, Google's token exchange). Those reads go through
+  # http.ts as `readQuery` or `tokenForm`, so a POST anywhere else is a write until shown otherwise.
+  - id: provider-post-outside-http
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      An adapter doesn't send a POST itself. A read that needs a body goes through fetchJson in
+      src/providers/http.ts, as `readQuery` (a JSON query) or `tokenForm` (an OAuth token
+      exchange), so every POST hoomuch sends is in one place.
+    paths:
+      include: ['/src/providers/']
+      exclude: ['/src/providers/http.ts']
+    patterns:
+      - pattern: '{ ..., method: $M, ... }'
+      - metavariable-regex:
+          metavariable: $M
+          regex: (?i)^['"`]POST['"`]$
+
+  - id: provider-global-fetch
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Adapters call the injected ctx.fetch, never the global fetch: tests stub the network through
+      it, and the sync's request budget counts every call (CONTRIBUTING.md, "Adding a provider").
+    paths:
+      include: ['/src/providers/']
+      # context.ts builds the production ProviderContext: it is where the real fetch goes in.
+      exclude: ['/src/providers/context.ts']
+    pattern-either:
+      - pattern: fetch(...)
+      - pattern: globalThis.fetch(...)
+      - pattern: self.fetch(...)
+
+  - id: provider-wall-clock
+    languages: [typescript]
+    severity: ERROR
+    message: >-
+      Adapters read the time from ctx.now, so tests can pin it and the adapter agrees with the
+      sync's deadline (CONTRIBUTING.md, "Adding a provider").
+    paths:
+      include: ['/src/providers/']
+      # context.ts builds the production ProviderContext: it is where the real clock goes in.
+      exclude: ['/src/providers/context.ts']
+    pattern-either:
+      - pattern: Date.now()
+      - pattern: new Date()
+      - pattern: performance.now()

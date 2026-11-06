@@ -32,6 +32,7 @@ async function hydrate(): Promise<void> {
   const json = el?.textContent;
   if (!json) return;
   const payload = JSON.parse(json) as PagePayload;
+  // nosemgrep: unsafe-dynamic-method -- the server wrote the page name, and LOADERS is fixed
   const load = LOADERS[payload.name];
   if (!load) return;
   const Page = (await load()) as ComponentType<Record<string, unknown>>;

@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "npm run typecheck && npm run test && npm run build",
+    "security": "node scripts/security.mjs",
     "prepare": "git config core.hooksPath .githooks || exit 0"
   },
   "cloudflare": {

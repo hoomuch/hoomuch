@@ -272,6 +272,7 @@ function asList(ctx: ProviderContext, path: string, body: unknown): PaddleList {
   };
 }
 
+// nosemgrep: detect-non-literal-regexp -- prefix is one of the constants below
 const idPattern = (prefix: string) => new RegExp(`^${prefix}_[a-z\\d]{26}$`);
 const SUB_ID = idPattern('sub');
 const TXN_ID = idPattern('txn');

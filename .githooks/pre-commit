@@ -1,0 +1,29 @@
+#!/bin/sh
+# Stops a commit that would add a secret: gitleaks scans the staged changes, with the default rules
+# and the allowlist for the made-up keys in tests (.gitleaks.toml). Findings are printed redacted.
+# Git runs hooks from the top of the working tree, so the paths are relative to it.
+# Without gitleaks the commit goes through with a warning, as commit-msg does without node; install
+# it with `brew install gitleaks` or from https://github.com/gitleaks/gitleaks/releases.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks not found, staged changes not scanned for secrets" >&2
+  exit 0
+fi
+
+# Leaks exit 99, so a crash or a broken config (exit 1) isn't reported as a leak.
+gitleaks git --pre-commit --staged --redact --no-banner --log-level warn --exit-code 99 --verbose .
+status=$?
+if [ "$status" -eq 99 ]; then
+  cat >&2 <<'EOF'
+
+Commit stopped: the staged changes contain what looks like a secret (above, redacted).
+
+  - A real key: unstage it, keep it in .dev.vars or `wrangler secret put`, and revoke it if it
+    has been anywhere else.
+  - A made-up key in a test: put "Fake" in it (sk_live_51FakeKeyForTestsOnly...); see
+    .gitleaks.toml.
+  - Anything else that isn't a secret: end the line with a `gitleaks:allow` comment.
+
+EOF
+  exit 1
+fi
+exit "$status"
