@@ -42,11 +42,27 @@ the syncs follow a moment later in the same terminal.
 Before opening a pull request, run:
 
 ```bash
-npm run check                           # typecheck + tests + build
+npm run check                           # typecheck + unused code + tests + build
 ```
 
 It must pass. CI runs the same check on every pull request, on Node 24.14 and on the `.nvmrc`
 version, and checks that the pull request title is a Conventional Commit (see *Commit messages*).
+
+### Unused code
+
+`npm run knip` runs [Knip](https://knip.dev): it finds files nothing imports, exports nothing else
+uses, and npm dependencies that are unused or missing from `package.json`. `npm run check` runs it,
+so CI does too. When it reports something:
+
+- An export only its own file uses: drop the `export`. Tests count as users, so a constant a test
+  checks stays exported.
+- Something nothing uses: delete it. Git keeps it.
+- A file only a tool loads (an esbuild or k6 entry, another scanner's test cases): add it to
+  `entry` or `ignore` in `knip.jsonc`.
+
+The coss ui components in `src/components/ui/` stay as the shadcn CLI writes them, so their unused
+exports aren't reported. A whole component nothing imports still is: delete it, and
+`npx shadcn@latest add @coss/<name>` brings it back when a page needs it.
 
 ### Security checks
 
@@ -78,7 +94,8 @@ line above it.
 | Script | What it does |
 |--------|--------------|
 | `npm run dev` | `wrangler dev`, with D1 and the sync queue local. Rebuilds the CSS and the browser bundle on every reload |
-| `npm run check` | Typecheck, tests and build |
+| `npm run check` | Typecheck, Knip, tests and build |
+| `npm run knip` | Files, exports and dependencies nothing uses (see *Unused code*) |
 | `npm run security` | gitleaks, OSV-Scanner, Opengrep and zizmor, on your machine (see *Security checks*) |
 | `npm test` | Vitest: adapters, sync engine and read models run on an in-memory D1 |
 | `npm run build` | `css` + `js` |
@@ -112,6 +129,7 @@ scripts/             client build, the commit-msg check, the domain list refresh
 test/                Vitest suites and API fixtures
 bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases
+knip.jsonc           what Knip counts as an entry point, and what it skips
 ```
 
 ### Performance
