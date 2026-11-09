@@ -192,8 +192,9 @@ say) and publishes it:
 - **`/p/<slug>`** shows how much the product makes, in US dollars: total revenue (all the history
   hoomuch holds, from its first day), MRR with active subscriptions, revenue over the last 30 days,
   and subscriptions, with the founder under the name. Below that, a chart of revenue or MRR over 7
-  days to all time, and the providers the figures come from, with **Visit** and buttons to post it on
-  X, LinkedIn or Bluesky at the top. Anyone sees revenue over the
+  days to all time, and the providers the figures come from, with **Visit**, for an app its
+  **App Store** and **Google Play** listings, and buttons to post it on X, LinkedIn or Bluesky at the
+  top. Anyone sees revenue over the
   last 30 days; every other chart needs a free hoomuch account, and choosing one asks the visitor to
   sign up and brings them back to it. The locked history isn't in the page: it comes from
   `/api/p/<slug>/history`, for signed-in accounts only. They're the dashboard's figures
@@ -206,7 +207,8 @@ say) and publishes it:
   revenue, MRR and total. Publishing a product needs a founder profile, and the profile is public
   while at least one of their products is.
 - **Photos and logos**, with the `MEDIA` bucket: a founder can upload a photo, and a product gets its
-  website's icon when it's saved with a website, or a logo its owner uploads (on the new-product form
+  website's icon when it's saved with a website (or, without one, its App Store icon), or a logo its
+  owner uploads (on the new-product form
   too). An image can be dragged onto the photo or logo card. They're served from
   your own domain at `/media/<key>` (so the pages' `img-src 'self'` still holds), checked by their
   bytes (PNG, JPEG, WebP or GIF; ICO from a website; never SVG), at most 2 MB and 4096 pixels a side,

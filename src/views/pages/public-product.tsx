@@ -37,7 +37,16 @@ import { formatDay, listNames } from './shared';
 
 export interface PublicProductPageProps {
   /** `logo` is an image URL (lib/media.ts), null for initials. */
-  product: { slug: string; name: string; tagline: string | null; website: string | null; logo: string | null };
+  product: {
+    slug: string;
+    name: string;
+    tagline: string | null;
+    website: string | null;
+    /** The app's store listings, canonical (lib/public-pages.ts); null for none. */
+    appStoreUrl: string | null;
+    playStoreUrl: string | null;
+    logo: string | null;
+  };
   /** The figures, without the chart history a visitor needs an account for (publicFigures). */
   stats: PublicFigures;
   /** The founder (SPEC F-22): every published product has one. */
@@ -107,15 +116,10 @@ export function PublicProductPage(props: PublicProductPageProps) {
             <h1 className="font-heading text-hero-sm wrap-break-word">{product.name}</h1>
             {product.tagline ? <p className="mt-1 text-lead text-pretty text-muted-foreground wrap-break-word">{product.tagline}</p> : null}
             {owner ? <Byline owner={owner} /> : null}
+            <ProductLinks product={product} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {product.website ? (
-            <LinkButton href={product.website} variant="secondary" rel="nofollow ugc noopener noreferrer" target="_blank">
-              Visit {siteLabel(product.website)}
-              <ArrowUpRight />
-            </LinkButton>
-          ) : null}
           <ShareButtons url={props.url} title={product.name} text={`${product.name} is at ${usd(stats.mrr.value)} MRR, verified by hoomuch`} copy />
         </div>
       </header>
@@ -219,6 +223,38 @@ function Note(props: { children: ReactNode }) {
       <TriangleAlert className="mt-px size-3.5 shrink-0 text-warning-foreground" />
       <span>{props.children}</span>
     </li>
+  );
+}
+
+/**
+ * Where to get it: the website, and for an app its App Store and Google Play listings, the owner's
+ * links (rel="nofollow ugc"). The stores keep their own marks; nothing shows when there's none.
+ */
+function ProductLinks(props: { product: PublicProductPageProps['product'] }) {
+  const p = props.product;
+  if (!p.website && !p.appStoreUrl && !p.playStoreUrl) return null;
+  const rel = 'nofollow ugc noopener noreferrer';
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      {p.website ? (
+        <LinkButton href={p.website} variant="secondary" small rel={rel} target="_blank">
+          Visit {siteLabel(p.website)}
+          <ArrowUpRight />
+        </LinkButton>
+      ) : null}
+      {p.appStoreUrl ? (
+        <LinkButton href={p.appStoreUrl} variant="secondary" small rel={rel} target="_blank">
+          <ProviderLogo provider="appstore" />
+          App Store
+        </LinkButton>
+      ) : null}
+      {p.playStoreUrl ? (
+        <LinkButton href={p.playStoreUrl} variant="secondary" small rel={rel} target="_blank">
+          <ProviderLogo provider="googleplay" />
+          Google Play
+        </LinkButton>
+      ) : null}
+    </div>
   );
 }
 

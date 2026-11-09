@@ -18,7 +18,7 @@ import { Card as CossCard } from '@/components/ui/card';
 import type { ProviderId } from '../../providers/types';
 import { formatMoney } from '../../lib/money';
 import { cn } from '../../lib/utils';
-import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
+import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, STORE_LINK_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
 import { Avatar, ProductTile } from '../components/avatar';
 import { CopyField } from '../components/copy-field';
 import { ImageField, ImageUploadCard } from '../components/image-upload';
@@ -36,6 +36,9 @@ interface ShareProduct {
   name: string;
   tagline: string | null;
   website: string | null;
+  /** The App Store and Google Play listings, canonical; null for none. */
+  appStoreUrl: string | null;
+  playStoreUrl: string | null;
   connectionIds: string[];
   published: boolean;
   /** MRR in USD from the stored figures; null before there are any. */
@@ -74,6 +77,8 @@ export interface ShareFormValues {
   slug: string;
   tagline: string;
   website: string;
+  appStore: string;
+  playStore: string;
   connections: string[];
 }
 
@@ -83,6 +88,8 @@ export interface ShareFormErrors {
   name?: string;
   slug?: string;
   website?: string;
+  appStore?: string;
+  playStore?: string;
   connections?: string;
 }
 
@@ -538,7 +545,17 @@ function EditProductView(props: SharePageProps & { product: ShareProduct }) {
             connections={props.connections}
             productName={new Map(props.products.map((x) => [x.id, x.name]))}
             productId={p.id}
-            values={failed?.values ?? { name: p.name, slug: p.slug, tagline: p.tagline ?? '', website: p.website ?? '', connections: p.connectionIds }}
+            values={
+              failed?.values ?? {
+                name: p.name,
+                slug: p.slug,
+                tagline: p.tagline ?? '',
+                website: p.website ?? '',
+                appStore: p.appStoreUrl ?? '',
+                playStore: p.playStoreUrl ?? '',
+                connections: p.connectionIds,
+              }
+            }
             failed={failed}
             origin={props.origin}
             submitLabel="Save changes"
@@ -577,14 +594,15 @@ function EditProductView(props: SharePageProps & { product: ShareProduct }) {
 function LogoCard(props: { product: ShareProduct }) {
   const p = props.product;
   const base = `/share/products/${p.id}/logo`;
+  const source = p.website || p.appStoreUrl;
   const where =
     p.logoSource === 'upload'
       ? 'Your own logo.'
       : p.logoSource === 'site'
-        ? 'Your website’s icon. Upload your own to use that instead.'
-        : p.website
-          ? 'Initials for now: your website has no icon hoomuch can use yet. Upload a logo, or try the icon again.'
-          : 'Initials for now. Upload a logo, or add the product’s website below and its icon is used.';
+        ? `The icon from your ${p.website ? 'website' : 'App Store page'}. Upload your own to use that instead.`
+        : source
+          ? 'Initials for now: hoomuch found no icon it can use. Upload a logo, or try the icon again.'
+          : 'Initials for now. Upload a logo, or add the product’s website or App Store link below and its icon is used.';
   return (
     <Card>
       <ImageUploadCard
@@ -597,10 +615,10 @@ function LogoCard(props: { product: ShareProduct }) {
         description={where}
         extra={
           <>
-            {p.website && p.logoSource !== 'site' ? (
+            {source && p.logoSource !== 'site' ? (
               <form method="post" action={`${base}/site`}>
                 <Button variant="ghost" small busyLabel="Fetching…">
-                  Use your website’s icon
+                  {p.website ? 'Use your website’s icon' : 'Use your App Store icon'}
                 </Button>
               </form>
             ) : null}
@@ -676,7 +694,21 @@ function ProductForm(props: {
   const v = props.values;
   const errors = props.failed?.fieldErrors ?? {};
   const formError = props.failed && Object.keys(errors).length === 0 ? props.failed.error : null;
-  const focus = formError ? 'form' : errors.name ? 'name' : errors.slug ? 'slug' : errors.website ? 'website' : errors.logo ? 'logo' : null;
+  const focus = formError
+    ? 'form'
+    : errors.name
+      ? 'name'
+      : errors.slug
+        ? 'slug'
+        : errors.website
+          ? 'website'
+          : errors.appStore
+            ? 'appStore'
+            : errors.playStore
+              ? 'playStore'
+              : errors.logo
+                ? 'logo'
+                : null;
   const id = (name: string) => `${props.idPrefix}-${name}`;
   const picked = new Set(v?.connections ?? []);
   const rows = props.connections.map((c) => ({
@@ -739,6 +771,36 @@ function ProductForm(props: {
         autoCapitalize="none"
         autoFocus={focus === 'website'}
         error={errors.website}
+      />
+      {/* For an app: its store listings, linked on the public page beside the website. */}
+      <Field
+        id={id('app-store')}
+        name="app_store"
+        label="App Store"
+        type="url"
+        inputMode="url"
+        maxLength={STORE_LINK_MAX}
+        value={v?.appStore}
+        placeholder="https://apps.apple.com/app/id…"
+        spellCheck={false}
+        autoCapitalize="none"
+        autoFocus={focus === 'appStore'}
+        error={errors.appStore}
+      />
+      <Field
+        id={id('play-store')}
+        name="play_store"
+        label="Google Play"
+        type="url"
+        inputMode="url"
+        maxLength={STORE_LINK_MAX}
+        value={v?.playStore}
+        placeholder="https://play.google.com/store/apps/details?id=…"
+        help="For an app: its store pages, linked on the product’s public page."
+        spellCheck={false}
+        autoCapitalize="none"
+        autoFocus={focus === 'playStore'}
+        error={errors.playStore}
       />
       {/* The free ones first; one already in another product comes after, faded, with its product
           named, and the rule is said once under the list. */}

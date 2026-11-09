@@ -18,6 +18,9 @@ export interface PublicProductRow {
   name: string;
   tagline: string | null;
   website: string | null;
+  /** The App Store and Google Play listings, canonical (migration 0015); null for none. */
+  app_store_url: string | null;
+  play_store_url: string | null;
   published_at: number | null;
   /** PublicProductStats JSON; parse with parsePublicStats. */
   stats: string | null;
@@ -46,6 +49,8 @@ export interface ProductFields {
   name: string;
   tagline: string | null;
   website: string | null;
+  appStoreUrl: string | null;
+  playStoreUrl: string | null;
 }
 
 export type SaveResult = 'ok' | 'not-found' | 'slug-taken' | 'limit';
@@ -114,11 +119,11 @@ export async function insertProduct(
     [inserted] = await db.batch([
       db
         .prepare(
-          `INSERT INTO public_products (id, user_id, slug, name, tagline, website, created_at, updated_at)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7
+          `INSERT INTO public_products (id, user_id, slug, name, tagline, website, app_store_url, play_store_url, created_at, updated_at)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?9, ?10, ?7, ?7
             WHERE (SELECT COUNT(*) FROM public_products WHERE user_id = ?2) < ?8`,
         )
-        .bind(p.id, p.userId, p.slug, p.name, p.tagline, p.website, p.now, MAX_PRODUCTS),
+        .bind(p.id, p.userId, p.slug, p.name, p.tagline, p.website, p.now, MAX_PRODUCTS, p.appStoreUrl, p.playStoreUrl),
       ...linkStatements(db, p.userId, p.id, connectionIds),
     ]);
   } catch (err) {
@@ -141,8 +146,11 @@ export async function updateProduct(
   try {
     [updated] = await db.batch([
       db
-        .prepare('UPDATE public_products SET slug = ?, name = ?, tagline = ?, website = ?, updated_at = ? WHERE id = ? AND user_id = ?')
-        .bind(fields.slug, fields.name, fields.tagline, fields.website, now, id, userId),
+        .prepare(
+          `UPDATE public_products SET slug = ?, name = ?, tagline = ?, website = ?, app_store_url = ?, play_store_url = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?`,
+        )
+        .bind(fields.slug, fields.name, fields.tagline, fields.website, fields.appStoreUrl, fields.playStoreUrl, now, id, userId),
       ...linkStatements(db, userId, id, connectionIds),
     ]);
   } catch (err) {
@@ -354,12 +362,14 @@ export interface PublishedProduct {
   owner_x: string | null;
   logo_key: string | null;
   owner_avatar: string | null;
+  app_store_url: string | null;
+  play_store_url: string | null;
 }
 
 export function getPublishedProductBySlug(db: D1Database, slug: string): Promise<PublishedProduct | null> {
   return db
     .prepare(
-      `SELECT p.slug, p.name, p.tagline, p.website, p.stats, p.logo_key,
+      `SELECT p.slug, p.name, p.tagline, p.website, p.app_store_url, p.play_store_url, p.stats, p.logo_key,
               f.handle AS owner_handle, f.display_name AS owner_name, f.x_handle AS owner_x, f.avatar_key AS owner_avatar
          FROM public_products p
          LEFT JOIN public_profiles f ON f.user_id = p.user_id

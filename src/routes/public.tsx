@@ -41,6 +41,8 @@ import {
   isValidSlug,
   MAX_PRODUCTS,
   NAME_MAX,
+  normalizeAppStoreUrl,
+  normalizePlayStoreUrl,
   normalizeSlug,
   normalizeWebsite,
   normalizeXHandle,
@@ -48,6 +50,7 @@ import {
   parseExploreSort,
   publicPagesEnabled,
   SLUG_MAX,
+  STORE_LINK_MAX,
   slugFromName,
   STALE_AFTER_MS,
   TAGLINE_MAX,
@@ -116,7 +119,8 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (saved === 'slug-taken') return fromNew({ productId: null, values: input.values, fieldErrors: { slug: SLUG_TAKEN }, error: FIX_BELOW });
     await refreshProductStats(c.env, id);
     let note = '';
-    if (mediaEnabled(c.env) && (logo?.ok || input.fields.website) && !(await allowMediaChange(c.env, user.id))) {
+    const iconSource = input.fields.website || input.fields.appStoreUrl;
+    if (mediaEnabled(c.env) && (logo?.ok || iconSource) && !(await allowMediaChange(c.env, user.id))) {
       note = logo?.ok ? ' The logo wasn’t saved: that’s a lot of changes at once. Add it from Edit in a few minutes.' : '';
     } else if (logo?.ok && mediaEnabled(c.env)) {
       // The owner's own logo, so the website's icon isn't fetched.
@@ -125,8 +129,8 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
       } catch {
         note = ' The logo wasn’t saved. Add it from Edit.';
       }
-    } else if (input.fields.website) {
-      // Its website's icon as its logo, when there's one (and the instance keeps images).
+    } else if (iconSource) {
+      // Its website's or App Store listing's icon as its logo, when there's one (and the instance keeps images).
       await refreshSiteIcon(c.env, user.id, id, new URL(c.req.url).origin, { websiteChanged: true });
     }
     return redirectWithFlash(c, `/share/products/${id}`, 'success', `Saved ${input.fields.name}. Publish it when you’re ready.${note}`);
@@ -146,9 +150,11 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (saved === 'not-found') return c.notFound();
     if (saved === 'slug-taken') return failed({ productId: id, values: input.values, fieldErrors: { slug: SLUG_TAKEN }, error: FIX_BELOW });
     await refreshProductStats(c.env, id);
-    // A new website brings its icon (an uploaded logo stays); the old site's icon goes with it. Over
-    // the account's limit on lookups (lib/auth.ts allowMediaChange), the save still goes through.
-    if (product.website !== input.fields.website && mediaEnabled(c.env) && (await allowMediaChange(c.env, user.id))) {
+    // A new website or App Store listing brings its icon (an uploaded logo stays); the old one's icon
+    // goes with it. Over the account's limit on lookups (lib/auth.ts allowMediaChange), the save
+    // still goes through.
+    const sourceChanged = product.website !== input.fields.website || product.app_store_url !== input.fields.appStoreUrl;
+    if (sourceChanged && mediaEnabled(c.env) && (await allowMediaChange(c.env, user.id))) {
       await refreshSiteIcon(c.env, user.id, id, new URL(c.req.url).origin, { websiteChanged: true });
     }
     const moved = product.published_at !== null && product.slug !== input.fields.slug;
@@ -314,7 +320,15 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (!row || !stats) return c.notFound();
     const origin = new URL(c.req.url).origin;
     const media = mediaEnabled(c.env);
-    const product = { slug: row.slug, name: row.name, tagline: row.tagline, website: row.website, logo: media ? mediaUrl(row.logo_key) : null };
+    const product = {
+      slug: row.slug,
+      name: row.name,
+      tagline: row.tagline,
+      website: row.website,
+      appStoreUrl: row.app_store_url,
+      playStoreUrl: row.play_store_url,
+      logo: media ? mediaUrl(row.logo_key) : null,
+    };
     const owner =
       row.owner_handle && row.owner_name
         ? { handle: row.owner_handle, name: row.owner_name, x: row.owner_x, avatar: media ? mediaUrl(row.owner_avatar) : null }
@@ -400,9 +414,19 @@ function readProduct(
   const slugInput = form.text('slug', SLUG_MAX + 20);
   const tagline = form.text('tagline', TAGLINE_MAX);
   const websiteInput = form.text('website', WEBSITE_MAX + 20);
+  const appStoreInput = form.text('app_store', STORE_LINK_MAX);
+  const playStoreInput = form.text('play_store', STORE_LINK_MAX);
   const eligible = new Set(conns.filter((c) => countsPublicly(c.provider, c.test_mode === 1)).map((c) => c.id));
   const picked = [...new Set(form.all('connections', 64, 25))].filter((id) => eligible.has(id));
-  const values: ShareFormValues = { name, slug: slugInput, tagline, website: websiteInput, connections: picked };
+  const values: ShareFormValues = {
+    name,
+    slug: slugInput,
+    tagline,
+    website: websiteInput,
+    appStore: appStoreInput,
+    playStore: playStoreInput,
+    connections: picked,
+  };
 
   const errors: ShareFormErrors = {};
   if (!name) errors.name = 'Give the product a name.';
@@ -410,6 +434,12 @@ function readProduct(
   if (!isValidSlug(slug)) errors.slug = slugInput ? SLUG_ERROR : `The name doesn’t make an address. ${SLUG_ERROR}`;
   const website = websiteInput ? normalizeWebsite(websiteInput) : null;
   if (websiteInput && !website) errors.website = 'Enter an https address, like https://acme.com.';
+  const appStoreUrl = appStoreInput ? normalizeAppStoreUrl(appStoreInput) : null;
+  if (appStoreInput && !appStoreUrl) errors.appStore = 'Paste the app’s App Store link, like https://apps.apple.com/app/id1234567890.';
+  const playStoreUrl = playStoreInput ? normalizePlayStoreUrl(playStoreInput) : null;
+  if (playStoreInput && !playStoreUrl) {
+    errors.playStore = 'Paste the app’s Google Play link, like https://play.google.com/store/apps/details?id=com.acme.app.';
+  }
   const taken = links.find((l) => picked.includes(l.connection_id) && l.product_id !== productId);
   if (picked.length === 0) errors.connections = 'Pick at least one connection.';
   else if (taken) {
@@ -417,7 +447,7 @@ function readProduct(
     errors.connections = `${conn?.name ?? 'A connection'} is already in another product. A connection counts in one product only.`;
   }
   if (Object.keys(errors).length > 0) return { values, errors };
-  return { values, errors, fields: { slug, name, tagline: tagline || null, website } };
+  return { values, errors, fields: { slug, name, tagline: tagline || null, website, appStoreUrl, playStoreUrl } };
 }
 
 /** The owner's profile form, read and checked. `fields` is set only when everything is valid. */
@@ -472,6 +502,8 @@ async function renderShare(
         name: p.name,
         tagline: p.tagline,
         website: p.website,
+        appStoreUrl: p.app_store_url,
+        playStoreUrl: p.play_store_url,
         connectionIds: linked.get(p.id) ?? [],
         published: p.published_at !== null,
         mrr: parsePublicStats(p.stats)?.mrr.value ?? null,

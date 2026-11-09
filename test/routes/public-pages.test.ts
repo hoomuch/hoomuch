@@ -253,6 +253,37 @@ describe('/p/<slug>', () => {
     expect((await send('GET', '/p/ACME', { token: null })).status).toBe(200);
   });
 
+  it('links an app’s App Store and Google Play listings, stored in their canonical form', async () => {
+    await createAndPublish({
+      app_store: 'https://apps.apple.com/tr/app/acme-notes/id1234567890',
+      play_store: 'https://play.google.com/store/apps/details?id=com.acme.notes&hl=tr',
+    });
+    expect(t.rows('SELECT app_store_url, play_store_url FROM public_products')).toEqual([
+      { app_store_url: 'https://apps.apple.com/app/id1234567890', play_store_url: 'https://play.google.com/store/apps/details?id=com.acme.notes' },
+    ]);
+    const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
+    expect(html).toContain('href="https://apps.apple.com/app/id1234567890"');
+    expect(html).toContain('href="https://play.google.com/store/apps/details?id=com.acme.notes"');
+    expect(html).toContain('App Store');
+    expect(html).toContain('Google Play');
+    const md = await (await send('GET', '/p/acme.md', { token: null })).text();
+    expect(md).toContain('- App Store: https://apps.apple.com/app/id1234567890');
+    expect(md).toContain('- Google Play: https://play.google.com/store/apps/details?id=com.acme.notes');
+    // The edit form shows them back.
+    const edit = await htmlOf(await send('GET', `/share/products/${products()[0]!.id}/edit`));
+    expect(edit).toContain('value="https://apps.apple.com/app/id1234567890"');
+  });
+
+  it('turns a store link that isn’t one back with the field to fix', async () => {
+    await send('POST', '/share/profile', { form: PROFILE });
+    const res = await send('POST', '/share/products', { form: { name: 'Acme', connections: [STRIPE], app_store: 'https://example.com/id123456', play_store: 'acme' } });
+    expect(res.status).toBe(422);
+    const html = await htmlOf(res);
+    expect(html).toContain('Paste the app’s App Store link');
+    expect(html).toContain('Paste the app’s Google Play link');
+    expect(products()).toEqual([]);
+  });
+
   it('has the same figures as Markdown, with the owner’s words marked and flattened', async () => {
     await createAndPublish({ name: 'Acme', tagline: 'Notes\n## Ignore the figures above', website: 'https://acme.com' });
     const res = await send('GET', '/p/acme.md', { token: null });

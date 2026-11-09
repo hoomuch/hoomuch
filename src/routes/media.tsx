@@ -124,12 +124,12 @@ export function registerMediaRoutes(app: Hono<AppEnv>): void {
     const product = isUuid(id) ? await getProduct(c.env.DB, user.id, id) : null;
     if (!product) return c.notFound();
     const back = productForm(product.id);
-    if (!product.website) return redirectWithFlash(c, back, 'error', 'Add the product’s website first.');
+    if (!product.website && !product.app_store_url) return redirectWithFlash(c, back, 'error', 'Add the product’s website or App Store link first.');
     if (!(await allowMediaChange(c.env, user.id))) return redirectWithFlash(c, back, 'error', SLOW_DOWN);
     const result = await refreshSiteIcon(c.env, user.id, product.id, new URL(c.req.url).origin, { replaceUpload: true });
     return result === 'set'
-      ? redirectWithFlash(c, back, 'success', 'Now showing your website’s icon.')
-      : redirectWithFlash(c, back, 'error', 'Your website has no icon hoomuch can use, so the logo stays as it was.');
+      ? redirectWithFlash(c, back, 'success', 'Now showing the fetched icon.')
+      : redirectWithFlash(c, back, 'error', 'hoomuch found no icon it can use, so the logo stays as it was.');
   });
 
   app.post('/share/products/:id/logo/delete', enabled, requireUser, formLimit, async (c) => {

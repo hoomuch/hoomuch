@@ -72,6 +72,62 @@ export function normalizeWebsite(input: string): string | null {
   return out.length > WEBSITE_MAX ? null : out;
 }
 
+/** The most a store link may be as typed (its canonical form is shorter). */
+export const STORE_LINK_MAX = 300;
+
+/**
+ * An App Store listing as `https://apps.apple.com/app/id<number>`, from any form a person pastes:
+ * a country or app name in the path (`apps.apple.com/tr/app/weigho/id123`), the old
+ * itunes.apple.com host, or `id123` alone. Null for anything else.
+ */
+export function normalizeAppStoreUrl(input: string): string | null {
+  const raw = input.trim();
+  if (raw === '' || raw.length > STORE_LINK_MAX) return null;
+  const bare = /^id(\d{5,12})$/i.exec(raw);
+  if (bare) return `https://apps.apple.com/app/id${bare[1]}`;
+  let url: URL;
+  try {
+    url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || !/^(apps|itunes)\.apple\.com$/i.test(url.hostname)) return null;
+  const id = /\/id(\d{5,12})(?:\/|$)/.exec(url.pathname)?.[1];
+  return id ? `https://apps.apple.com/app/id${id}` : null;
+}
+
+/** An Android package name, e.g. com.acme.notes: two or more dotted parts, each starting with a letter. */
+const PACKAGE_RE = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/i;
+
+/**
+ * A Google Play listing as `https://play.google.com/store/apps/details?id=<package>`, from the
+ * listing's address (any extra query, such as `hl`, is dropped) or the package name alone.
+ */
+export function normalizePlayStoreUrl(input: string): string | null {
+  const raw = input.trim();
+  if (raw === '' || raw.length > STORE_LINK_MAX) return null;
+  let pkg: string | null = null;
+  if (PACKAGE_RE.test(raw) && !raw.toLowerCase().startsWith('play.google.com')) {
+    pkg = raw;
+  } else {
+    let url: URL;
+    try {
+      url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'play.google.com') return null;
+    if (url.pathname.replace(/\/$/, '') !== '/store/apps/details') return null;
+    pkg = url.searchParams.get('id');
+  }
+  return pkg && pkg.length <= 150 && PACKAGE_RE.test(pkg) ? `https://play.google.com/store/apps/details?id=${pkg}` : null;
+}
+
+/** The App Store listing's id, from its canonical link (to look its icon up). */
+export function appStoreId(url: string | null): string | null {
+  return url ? (/\/id(\d{5,12})$/.exec(url)?.[1] ?? null) : null;
+}
+
 // ---------- profiles (SPEC F-22) ----------
 
 export const HANDLE_MAX = 30;

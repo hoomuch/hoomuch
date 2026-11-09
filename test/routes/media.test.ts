@@ -271,7 +271,7 @@ describe('a product’s logo', () => {
 
     await send('POST', `/share/products/${id}`, { form: { name: 'Acme', connections: [STRIPE], website: 'https://acme.com' } });
     const res = await send('POST', `/share/products/${id}/logo/site`, { form: {} });
-    expect(flashOf(res)).toContain('website’s icon');
+    expect(flashOf(res)).toContain('fetched icon');
     expect(product().logo_source).toBe('site');
     expect(r2.objects.size).toBe(1);
   });
@@ -319,6 +319,21 @@ describe('a product’s logo', () => {
     const off = await htmlOf(await send('GET', '/share/new', { env: testEnv(t.db, { PUBLIC_PAGES: 'true' }) }));
     expect(off).not.toContain('name="logo"');
     expect(off).not.toContain('multipart/form-data');
+  });
+
+  it('comes from the App Store listing when there’s no website', async () => {
+    // Apple's lookup API, then the artwork it names (the fake matches on the path).
+    useWeb([
+      route('/lookup', { json: { resultCount: 1, results: [{ artworkUrl512: 'https://is1-ssl.mzstatic.com/image/thumb/icon/512x512bb.png' }] } }, { query: { id: '1234567890' } }),
+      route('/image/thumb/icon/512x512bb.png', { bytes: pngBytes(512, 512), headers: { 'content-type': 'image/png' } }),
+    ]);
+    await withProduct({ app_store: 'https://apps.apple.com/app/id1234567890' });
+    expect(product().logo_source).toBe('site');
+    expect(r2.objects.get(product().logo_key!)?.bytes).toEqual(pngBytes(512, 512));
+    expect(calls.map((c) => c.url)).toEqual([
+      'https://itunes.apple.com/lookup?id=1234567890',
+      'https://is1-ssl.mzstatic.com/image/thumb/icon/512x512bb.png',
+    ]);
   });
 
   it('drops the old site’s icon when the website changes to one without an icon', async () => {
