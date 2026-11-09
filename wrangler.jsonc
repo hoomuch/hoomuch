@@ -67,7 +67,15 @@
     // Email verification: who the sign-up confirmation mail comes from, on a domain verified in
     // Resend, e.g. "hoomuch <hello@example.com>". It's on once the RESEND_API_KEY secret is set;
     // without that secret, nothing is mailed and new accounts don't need confirming.
-    "MAIL_FROM": ""
+    "MAIL_FROM": "",
+    // Public pages: "true" lets owners publish a product's verified revenue at /p/<slug>, with an
+    // embeddable badge at /badge/<slug>.svg. Empty (the default) leaves them off.
+    "PUBLIC_PAGES": "",
+    // hoomuch.com's privacy policy and terms at /privacy and /terms, naming its operator and contact
+    // address. They're written for an individual in Türkiye under the KVKK: leave these empty
+    // (the default: no pages, no links) and publish your own unless that's you.
+    "LEGAL_NAME": "",
+    "LEGAL_EMAIL": ""
   },
 
   // Per-network request limits, checked before any D1 work (src/lib/rate-limit.ts). Counts are per
@@ -81,6 +89,13 @@
     // Provider webhook calls, per connection (exempt from RL_REQUESTS: providers share addresses).
     { "name": "RL_WEBHOOKS", "namespace_id": "730003", "simple": { "limit": 30, "period": 60 } }
   ],
+
+  // Founders' photos and products' logos on public pages (src/lib/media.ts): an R2 bucket, bound
+  // as MEDIA. Optional, and off here, because R2 has to be turned on in your Cloudflare account
+  // first. To use it, add this to wrangler.local.jsonc (see wrangler.local.example.jsonc); without a
+  // bucket_name, `wrangler deploy` creates the bucket for you:
+  //   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "hoomuch-media" }]
+  // Without it, pages show initials and nothing is uploaded or fetched.
 
   "observability": {
     "enabled": true

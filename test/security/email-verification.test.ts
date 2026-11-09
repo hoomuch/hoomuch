@@ -275,6 +275,20 @@ describe('the mailed link', () => {
     expect((await b.get('/verify-email')).headers.get('location')).toBe('/dashboard');
   });
 
+  it('comes back to the page the sign-up started from (a public page’s lock), once', async () => {
+    const b = new Browser();
+    const next = '/p/acme?chart=mrr&range=1y';
+    expect((await b.post('/signup', { email: EMAIL, password: PW, next })).headers.get('location')).toBe('/verify-email');
+    expect(b.has('__Host-hm_next')).toBe(true);
+    const res = await b.post('/verify-email/confirm', { token: mailedToken() });
+    expect(res.headers.get('location')).toBe(next);
+    expect(b.has('__Host-hm_celebrate')).toBe(true);
+    expect(b.has('__Host-hm_next')).toBe(false);
+    // Signed in, with the hint the public page reads to open its charts.
+    expect(b.has('__Host-hm_session')).toBe(true);
+    expect(b.has('__Host-hm_in')).toBe(true);
+  });
+
   it('confirms from another device without signing it in', async () => {
     const b = await signedUp();
     const phone = new Browser();
@@ -465,6 +479,22 @@ describe('purgeAbandonedAccounts (cron)', () => {
       'never-mailed',
     ]);
     expect(t.rows("SELECT id FROM email_verifications WHERE user_id = 'abandoned'")).toEqual([]);
+  });
+
+  it('leaves an account with a photo or a logo: something would be lost, and its images are in R2', async () => {
+    for (const id of ['with-photo', 'with-logo']) {
+      seedUser(t, { id });
+      t.exec('INSERT INTO email_verifications (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)', `${id}-0`, id, NOW - 1, 0);
+    }
+    t.exec(
+      `INSERT INTO public_profiles (user_id, handle, display_name, avatar_key, created_at, updated_at) VALUES ('with-photo', 'photo', 'P', ?, 0, 0)`,
+      `${'a'.repeat(32)}.png`,
+    );
+    t.exec(
+      `INSERT INTO public_products (id, user_id, slug, name, logo_key, logo_source, created_at, updated_at) VALUES ('p1', 'with-logo', 'logo', 'L', ?, 'upload', 0, 0)`,
+      `${'b'.repeat(32)}.png`,
+    );
+    expect(await purgeAbandonedAccounts(t.db, NOW)).toBe(0);
   });
 
   it('runs in the scheduled handler', async () => {

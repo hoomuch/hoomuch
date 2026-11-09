@@ -381,7 +381,8 @@ const ABANDONED_PURGE_LIMIT = 500;
 
 /**
  * Removes accounts nobody confirmed: never verified, every link mailed to them has expired, and no
- * connections (so nothing is lost). It frees an address someone else typed in. An account that
+ * connections and no photo or logo (so nothing is lost, and nothing is left in R2). It frees an
+ * address someone else typed in. An account that
  * was never sent a link (created while mail was off) has no rows here and is never touched.
  * Pass `userId` to check just one account (sign-up does, for the address being registered).
  * Returns how many accounts were removed; FK cascades take their sessions and links.
@@ -396,6 +397,8 @@ export async function purgeAbandonedAccounts(db: D1Database, now: number, userId
             AND EXISTS (SELECT 1 FROM email_verifications v WHERE v.user_id = u.id)
             AND NOT EXISTS (SELECT 1 FROM email_verifications v WHERE v.user_id = u.id AND v.expires_at > ?)
             AND NOT EXISTS (SELECT 1 FROM connections c WHERE c.user_id = u.id)
+            AND NOT EXISTS (SELECT 1 FROM public_profiles f WHERE f.user_id = u.id AND f.avatar_key IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM public_products p WHERE p.user_id = u.id AND p.logo_key IS NOT NULL)
           LIMIT ?)`,
     )
     .bind(userId ?? null, userId ?? null, now, ABANDONED_PURGE_LIMIT)

@@ -3,7 +3,7 @@
  * Pages and handlers live in ./routes (Experience); sync lives in ./sync (Data Plane).
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv, Bindings } from './env';
@@ -13,11 +13,21 @@ import { loadFlash } from './lib/flash';
 import { limitRequests } from './lib/rate-limit';
 import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
+import { PUBLIC_PATH } from './routes/public';
 import { WEBHOOK_PATH_PREFIX } from './services/webhooks';
 import { handleSyncBatch } from './sync/consumer';
 import { runScheduledSync } from './sync/engine';
 
 const app = new Hono<AppEnv>();
+
+/** What loadUser leaves for a signed-out request, without reading the session cookie. */
+const withoutUser = async (c: Context<AppEnv>, next: Next) => {
+  c.set('user', null);
+  c.set('emailUnverified', false);
+  c.set('currencySource', 'default');
+  c.set('timezoneSource', 'default');
+  await next();
+};
 
 const CSP = {
   defaultSrc: ["'self'"],
@@ -66,8 +76,27 @@ const turnstilePageHeaders = secureHeaders(
   headerOptions({ ...CSP, scriptSrc: ["'self'", TURNSTILE_ORIGIN], frameSrc: [TURNSTILE_ORIGIN] }),
 );
 
+/**
+ * The embeddable badge (routes/public.tsx) is an image other sites load: Cross-Origin-Resource-Policy
+ * has to allow that. Every other response stays same-origin.
+ */
+const badgeHeaders = secureHeaders({ ...headerOptions(CSP), crossOriginResourcePolicy: 'cross-origin' });
+
+/**
+ * A stored photo or logo (routes/media.tsx), opened on its own: nothing may load or run, and it
+ * renders in a sandbox with an opaque origin. secureHeaders writes its CSP after the handler, so
+ * this is where the one for /media/ is set.
+ */
+const mediaHeaders = secureHeaders({ ...headerOptions(CSP), contentSecurityPolicy: { defaultSrc: ["'none'"], sandbox: [] } });
+
 app.use('*', (c, next) =>
-  (TURNSTILE_PAGES.has(c.req.path) && turnstileSiteKey(c.env) ? turnstilePageHeaders : pageHeaders)(c, next),
+  (c.req.path.startsWith('/badge/')
+    ? badgeHeaders
+    : c.req.path.startsWith('/media/')
+      ? mediaHeaders
+      : TURNSTILE_PAGES.has(c.req.path) && turnstileSiteKey(c.env)
+      ? turnstilePageHeaders
+      : pageHeaders)(c, next),
 );
 // Provider webhooks come from servers, not browsers, and carry no session: CSRF doesn't apply
 // (routes/webhooks.ts checks its own per-connection token). Every other path keeps it.
@@ -85,8 +114,10 @@ app.use('*', async (c, next) => {
 });
 // Floods stop here, before the session lookup or any other D1 work.
 app.use('*', limitRequests);
-app.use('*', loadFlash);
-app.use('*', loadUser);
+// Public pages and badges render the same for everyone, so they can be cached: no session, no
+// flash, no Set-Cookie, nothing of the visitor's in them (routes/public.tsx).
+app.use('*', (c, next) => (PUBLIC_PATH.test(c.req.path) ? next() : loadFlash(c, next)));
+app.use('*', (c, next) => (PUBLIC_PATH.test(c.req.path) ? withoutUser(c, next) : loadUser(c, next)));
 
 app.get('/healthz', (c) => c.json({ ok: true }));
 

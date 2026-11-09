@@ -43,6 +43,8 @@ down by connection.
   your customers' emails, names or addresses.
 - **Try it without a key.** After signing up, **Try demo data** fills the dashboard with a sample
   business.
+- **Show your MRR, verified.** On instances that turn it on, publish a product's MRR on a public page
+  with a badge for your site or README (see [Public pages](#public-pages)).
 
 ## Deploy to Cloudflare
 
@@ -97,6 +99,9 @@ interval.
 | `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
 | `RL_WEBHOOKS` | `ratelimits` in `wrangler.jsonc` | 30 a minute | Webhook calls per connection (see [Real-time updates](#real-time-updates)). Webhooks skip the per-network limits, because a provider sends every customer's calls from the same addresses. Its `namespace_id` must be unique too. |
+| `PUBLIC_PAGES` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. `"true"` lets owners publish a product's verified revenue at `/p/<slug>`, with a badge, a profile at `/u/<handle>` and a listing on `/explore` (see [Public pages](#public-pages)). |
+| `MEDIA` | `r2_buckets` in `wrangler.local.jsonc` | none (off) | Optional, with `PUBLIC_PAGES`. An [R2](https://developers.cloudflare.com/r2/) bucket for founders' photos and products' logos (see [Public pages](#public-pages)). Turn R2 on in your Cloudflare account, then add `"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "hoomuch-media" }]`; `wrangler deploy` creates the bucket if it's missing. Without it, pages show initials. |
+| `LEGAL_NAME`, `LEGAL_EMAIL` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. With both set, `/privacy` and `/terms` serve hoomuch.com's privacy policy and terms of service, naming this operator and address, and every footer and the sign-up form link them. They're written for an individual operator in Türkiye under the KVKK: if that isn't you, leave these empty and publish your own. |
 | `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
 The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
@@ -177,6 +182,57 @@ which events to pick.
 - **Not offered** for App Store Connect and Google Play (their reports arrive a day later), Adapty
   (one webhook URL per environment, which apps already use), and RevenueCat and Superwall (their
   charts refresh on their own schedule).
+
+### Public pages
+
+With `PUBLIC_PAGES` set to `"true"`, a **Share** page appears next to Transactions. There an owner
+groups one or more connections into a product (Stripe for the web app and RevenueCat for the iOS app,
+say) and publishes it:
+
+- **`/p/<slug>`** shows how much the product makes, in US dollars: total revenue (all the history
+  hoomuch holds, from its first day), MRR with active subscriptions, revenue over the last 30 days,
+  and subscriptions, with the founder under the name. Below that, a chart of revenue or MRR over 7
+  days to all time, and the providers the figures come from, with **Visit** and buttons to post it on
+  X, LinkedIn or Bluesky at the top. Anyone sees revenue over the
+  last 30 days; every other chart needs a free hoomuch account, and choosing one asks the visitor to
+  sign up and brings them back to it. The locked history isn't in the page: it comes from
+  `/api/p/<slug>/history`, for signed-in accounts only. They're the dashboard's figures
+  for those connections, worked out again after every sync. The owner can't type them in; the name,
+  description, website and founder details are theirs, and the page says so.
+- **`/p/<slug>.md`** is the same page as Markdown, for AI assistants.
+- **`/badge/<slug>.svg`** is a badge ("Verified MRR | $12,340") for a site or README. It turns grey
+  when the figures haven't been confirmed by a sync for 72 hours.
+- **`/u/<handle>`** is the founder's profile: their public products added up, and each one's
+  revenue, MRR and total. Publishing a product needs a founder profile, and the profile is public
+  while at least one of their products is.
+- **Photos and logos**, with the `MEDIA` bucket: a founder can upload a photo, and a product gets its
+  website's icon when it's saved with a website, or a logo its owner uploads. They're served from
+  your own domain at `/media/<key>` (so the pages' `img-src 'self'` still holds), checked by their
+  bytes (PNG, JPEG, WebP or GIF; ICO from a website; never SVG), at most 2 MB and 4096 pixels a side,
+  and stored without their metadata (a phone photo's location and camera details are taken out). A
+  browser with JavaScript crops and scales an upload to 400 pixels before sending it. An account can
+  make 20 changes in 15 minutes. They're deleted with the product or the account.
+
+- **`/explore`** lists the published products whose founders list them (a box on the publish form,
+  ticked by default), by MRR, growth or newest, with a search that runs as you type, a provider
+  filter, a Founders tab, and an "Add your product" button for visitors. A product
+  shows there once it has MRR, a sync in the last 72 hours and 30 days of revenue history. Once six
+  products qualify, the landing page shows the six growing fastest. `/sitemap.xml` lists them all
+  for search engines: submit it in Google Search Console and Bing Webmaster Tools.
+
+To take a product off Explore (spam, a name that breaks your rules), set `hidden_at`; its page and
+badge stay public, and its owner sees that it was taken off:
+
+```bash
+npx wrangler d1 execute DB --remote --command \
+  "UPDATE public_products SET hidden_at = unixepoch() * 1000 WHERE slug = 'the-slug'"
+```
+
+Total revenue starts where hoomuch's history does: the first sync reads 90 days back, so it isn't
+the business's lifetime revenue. Demo data and test-mode keys never count. Nothing is public until the
+owner ticks a confirmation and publishes, and unpublishing takes the page and badge down; a browser that loaded one in the last few
+minutes may still show its copy. Public pages and badges are rendered without the visitor's session,
+so the same response can be cached for everyone.
 
 ## Updating
 

@@ -14,6 +14,10 @@ import { base64UrlToBytes, bytesToBase64Url } from './crypto';
 const FLASH_COOKIE = 'hm_flash';
 /** A one-shot "throw confetti on the next page" marker (after sign-up). No message, no box. */
 const CELEBRATE_COOKIE = 'hm_celebrate';
+/** Where a sign-up was headed (`next`), kept while the account waits for its confirmation link. */
+const RETURN_COOKIE = 'hm_next';
+/** The longest `next` kept; carryNext (routes/auth.tsx) has already checked it's a same-site path. */
+const RETURN_MAX = 512;
 
 /** An Undo posts to one of our own paths: a single leading slash, then a plain path. */
 const UNDO_ACTION_RE = /^\/[a-z0-9][a-z0-9/_-]{0,95}$/i;
@@ -30,6 +34,29 @@ export function setFlash(c: Context<AppEnv>, type: FlashType, message: string, u
 export function setCelebrate(c: Context<AppEnv>): void {
   const { name, secure } = cookieSpec(c, CELEBRATE_COOKIE);
   setCookie(c, name, '1', { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: 60 });
+}
+
+/**
+ * Keeps `next` across the email confirmation, so a visitor who signed up from a public page's lock
+ * lands back on it once they confirm in this browser, not on an empty dashboard.
+ */
+export function rememberNext(c: Context<AppEnv>, next: string, maxAgeSeconds: number): void {
+  if (next.length > RETURN_MAX) return;
+  const { name, secure } = cookieSpec(c, RETURN_COOKIE);
+  setCookie(c, name, encodeURIComponent(next), { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: maxAgeSeconds });
+}
+
+/** The kept `next`, cleared as it's read; null when there's none. Pass it through safeNext. */
+export function takeNext(c: Context<AppEnv>): string | null {
+  const { name, secure } = cookieSpec(c, RETURN_COOKIE);
+  const raw = getCookie(c, name);
+  if (raw === undefined) return null;
+  deleteCookie(c, name, { path: '/', secure });
+  try {
+    return raw.length <= RETURN_MAX * 3 ? decodeURIComponent(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Reads (and clears) the flash cookie into c.var.flash, and the celebrate cookie into c.var.celebrate. */

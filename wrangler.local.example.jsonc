@@ -18,6 +18,10 @@
   // "workers_dev": false,
   // "preview_urls": false,
 
+  // Photos and logos on public pages: an R2 bucket (turn R2 on in your Cloudflare account first).
+  // See MEDIA in README.md.
+  // "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "hoomuch-media" }],
+
   // Any of the vars in wrangler.jsonc. See Configuration in README.md.
   // "vars": {
   //   "ALLOW_SIGNUP": "false",

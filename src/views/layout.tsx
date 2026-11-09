@@ -22,8 +22,9 @@ import { GitHubMark, Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
 import { IconLinkButton, LinkButton } from './components/ui';
 import { PagePayloadScript } from './page-root';
+import { useSignedIn } from './use-signed-in';
 
-type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
+type NavKey = 'dashboard' | 'connections' | 'transactions' | 'share' | 'settings' | 'explore';
 
 /** What every page needs from the request to draw the chrome. */
 export interface PageChrome {
@@ -31,6 +32,12 @@ export interface PageChrome {
   flash: FlashMsg | null;
   /** One confetti burst over the page (once, right after sign-up). */
   celebrate?: boolean;
+  /** The instance has public pages on (PUBLIC_PAGES): the nav offers Share. Only set when true. */
+  share?: boolean;
+  /** The instance has Explore (PUBLIC_PAGES): signed-out pages link to it. Only set when true. */
+  explore?: boolean;
+  /** The instance publishes a privacy policy and terms (lib/legal.ts): footers link them. Only set when true. */
+  legal?: boolean;
 }
 
 export interface LayoutProps extends PageChrome {
@@ -53,11 +60,22 @@ export interface LayoutProps extends PageChrome {
   /** Keep app pages out of search engines. */
   noindex?: boolean;
   /**
+   * Link previews (Open Graph and X's card) and the canonical URL, for pages meant to be shared.
+   * `url` and `image` are absolute; `title` defaults to the page title with the app name.
+   * `markdown` is the same page as Markdown, for AI assistants (`<link rel="alternate">`).
+   */
+  og?: { url: string; image: string; title?: string; markdown?: string };
+  /**
    * Public, personality-allowed pages (landing, 404): a "Log in" link in the signed-out header,
    * the soft brand glow behind the top of the page and the footer with the sleeping owl. Never
    * set it on settings, forms, errors or pricing.
    */
   marketing?: boolean;
+  /**
+   * With `marketing`: a serious zone (the privacy policy, the terms) that keeps the marketing
+   * header and footer, but not the owl (design/brief.md: never in privacy) or the moving light.
+   */
+  quiet?: boolean;
   /**
    * A still ray light with grain behind the page header (views/components/backdrop.tsx). The
    * top-level app pages (dashboard, connections list, transactions, settings). The connect form, a
@@ -90,6 +108,9 @@ const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: 'transactions', href: '/transactions', label: 'Transactions' },
 ];
 
+/** Public pages (SPEC F-21), only on instances that turn them on. */
+const SHARE_NAV: { key: NavKey; href: string; label: string } = { key: 'share', href: '/share', label: 'Share' };
+
 /** Shared horizontal frame so header, main and footer edges line up: 960px content box. */
 const FRAME = 'mx-auto w-full max-w-[60rem] px-4 sm:px-6';
 const FRAME_NARROW = 'mx-auto w-full max-w-[28rem] px-4 sm:px-6'; // 400px card at sm+
@@ -109,6 +130,9 @@ const NAV_LINK =
 
 export function Layout(props: LayoutProps) {
   const fullTitle = props.title ? `${props.title} · ${APP_NAME}` : APP_NAME;
+  const hinted = useSignedIn();
+  // A page meant to be shared (it has a canonical URL) is where Log in comes back to.
+  const loginHref = props.og ? `/login?next=${encodeURIComponent(new URL(props.og.url).pathname)}` : '/login';
   const narrow = props.width === 'narrow';
   const user = props.user;
   return (
@@ -119,6 +143,21 @@ export function Layout(props: LayoutProps) {
         <title>{fullTitle}</title>
         <meta name="description" content={props.description ?? DEFAULT_DESCRIPTION} />
         {props.noindex ? <meta name="robots" content="noindex" /> : null}
+        {props.og ? (
+          <>
+            <link rel="canonical" href={props.og.url} />
+            {props.og.markdown ? <link rel="alternate" type="text/markdown" href={props.og.markdown} /> : null}
+            <meta property="og:type" content="website" />
+            <meta property="og:site_name" content={APP_NAME} />
+            <meta property="og:title" content={props.og.title ?? fullTitle} />
+            <meta property="og:description" content={props.description ?? DEFAULT_DESCRIPTION} />
+            <meta property="og:url" content={props.og.url} />
+            <meta property="og:image" content={props.og.image} />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="630" />
+            <meta name="twitter:card" content="summary_large_image" />
+          </>
+        ) : null}
         {props.refresh ? (
           <meta
             httpEquiv="refresh"
@@ -146,7 +185,7 @@ export function Layout(props: LayoutProps) {
 
         {/* Light from above, behind the header: ray light and grain (Magic UI). Moving on marketing
             pages, still on the dashboard. */}
-        {props.marketing ? <HeroBackdrop /> : props.backdrop ? <QuietBackdrop /> : null}
+        {props.marketing && !props.quiet ? <HeroBackdrop /> : props.backdrop || props.quiet ? <QuietBackdrop /> : null}
 
         <header className={cn('border-b', props.marketing && 'border-transparent')}>
           <div className={`${FRAME} flex flex-wrap items-center gap-x-6`}>
@@ -164,7 +203,7 @@ export function Layout(props: LayoutProps) {
                   aria-label="Main"
                   className="order-last -mx-4 -mb-px flex w-[calc(100%+2rem)] flex-nowrap justify-between self-end overflow-x-auto px-1 sm:order-none sm:mx-0 sm:w-auto sm:justify-start sm:overflow-visible sm:px-0"
                 >
-                  {NAV.map((n) => (
+                  {(props.share ? [...NAV, SHARE_NAV] : NAV).map((n) => (
                     <a
                       key={n.key}
                       href={n.href}
@@ -176,9 +215,15 @@ export function Layout(props: LayoutProps) {
                     </a>
                   ))}
                 </nav>
-                {/* Same look and current-page marker as the nav, kept apart from the daily places.
-                    -mr-3 puts its text on the frame's right edge. */}
+                {/* Same look and current-page marker as the nav, kept apart from the daily places:
+                    Explore (the public side, when the instance has it) and Settings. -mr-3 puts
+                    the last one's text on the frame's right edge. */}
                 <div className="-mr-3 -mb-px ml-auto flex self-end">
+                  {props.share ? (
+                    <a href="/explore" data-slot="nav-link" className={NAV_LINK}>
+                      Explore
+                    </a>
+                  ) : null}
                   <a
                     href="/settings"
                     data-slot="nav-link"
@@ -192,12 +237,25 @@ export function Layout(props: LayoutProps) {
             ) : props.marketing ? (
               // Secondary, not primary: the page's own action ("See your MRR") is the one ink button.
               <div className="ml-auto flex items-center gap-2">
+                {props.explore ? (
+                  <a href="/explore" aria-current={props.nav === 'explore' ? 'page' : undefined} className="rounded-md px-2 py-1 text-body text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:text-foreground">
+                    Explore
+                  </a>
+                ) : null}
                 <IconLinkButton href={SOURCE_URL} label="hoomuch on GitHub">
                   <GitHubMark />
                 </IconLinkButton>
-                <LinkButton href="/login" variant="secondary">
-                  Log in
-                </LinkButton>
+                {/* A public page renders without the session; once hydrated, a browser that has one
+                    gets its way back to the app. Log in comes back to this page. */}
+                {hinted ? (
+                  <LinkButton href="/dashboard" variant="secondary">
+                    Dashboard
+                  </LinkButton>
+                ) : (
+                  <LinkButton href={loginHref} variant="secondary">
+                    Log in
+                  </LinkButton>
+                )}
               </div>
             ) : null}
           </div>
@@ -209,12 +267,19 @@ export function Layout(props: LayoutProps) {
         </main>
 
         {props.marketing ? (
-          <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} />
+          <MarketingFooter
+            note={props.footerNote}
+            signedIn={Boolean(user) || hinted}
+            loginHref={loginHref}
+            explore={Boolean(props.explore)}
+            legal={Boolean(props.legal)}
+            owl={!props.quiet}
+          />
         ) : (
           // The owl naps on the footer of the daily pages (dashboard, connections list,
           // transactions): the ones with the backdrop, minus Settings. Never on settings, connect
           // forms, a connection's page (keys, deletes), auth or error pages.
-          <AppFooter owl={Boolean(props.backdrop) && props.nav !== 'settings'} />
+          <AppFooter owl={Boolean(props.backdrop) && props.nav !== 'settings'} legal={Boolean(props.legal)} />
         )}
         {props.celebrate ? <Celebration /> : null}
         <PagePayloadScript />
@@ -275,12 +340,12 @@ function TrustLine() {
   );
 }
 
-function MarketingFooter(props: { note?: string; signedIn: boolean }) {
+function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: string; explore: boolean; legal: boolean; owl: boolean }) {
   return (
     // mt-*: room above the hairline for the owl, whatever section ends the page.
     <footer className="mt-12 border-t sm:mt-16">
       <div className={`${FRAME} relative`}>
-        <FooterOwl />
+        {props.owl ? <FooterOwl /> : null}
         <div className="flex flex-col gap-x-12 gap-y-5 py-10 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <FooterWordmark />
@@ -294,6 +359,11 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
               <li>
                 <FooterLink href="/#store">What we store</FooterLink>
               </li>
+              {props.explore ? (
+                <li>
+                  <FooterLink href="/explore">Explore</FooterLink>
+                </li>
+              ) : null}
               <li>
                 <FooterLink href={SELF_HOST_URL} external>
                   Self-host
@@ -303,7 +373,7 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
                 {props.signedIn ? (
                   <FooterLink href="/dashboard">Dashboard</FooterLink>
                 ) : (
-                  <FooterLink href="/login">Log in</FooterLink>
+                  <FooterLink href={props.loginHref}>Log in</FooterLink>
                 )}
               </li>
             </ul>
@@ -311,11 +381,14 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t py-5 text-caption text-muted-foreground">
           <TrustLine />
-          <p>
-            Open source under{' '}
-            <FooterLink href={LICENSE_URL} external>
-              AGPL-3.0
-            </FooterLink>
+          <p className="flex flex-wrap items-center gap-x-5 gap-y-1">
+            {props.legal ? <LegalLinks /> : null}
+            <span>
+              Open source under{' '}
+              <FooterLink href={LICENSE_URL} external>
+                AGPL-3.0
+              </FooterLink>
+            </span>
           </p>
         </div>
       </div>
@@ -323,7 +396,17 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
   );
 }
 
-function AppFooter(props: { owl: boolean }) {
+/** The privacy policy and terms, where the instance publishes them (lib/legal.ts). */
+function LegalLinks() {
+  return (
+    <>
+      <FooterLink href="/privacy">Privacy</FooterLink>
+      <FooterLink href="/terms">Terms</FooterLink>
+    </>
+  );
+}
+
+function AppFooter(props: { owl: boolean; legal: boolean }) {
   return (
     // mt-8 with the owl: room above the hairline so it never touches the last card.
     <footer className={cn('border-t', props.owl && 'mt-8')}>
@@ -340,6 +423,7 @@ function AppFooter(props: { owl: boolean }) {
             <FooterLink href={ISSUES_URL} external>
               Report an issue
             </FooterLink>
+            {props.legal ? <LegalLinks /> : null}
           </nav>
         </div>
         <TrustLine />

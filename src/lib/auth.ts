@@ -10,6 +10,7 @@ import type { AppEnv, Bindings, SessionUser } from '../env';
 import { hashPassword, randomId, randomToken, sha256Hex, verifyPassword } from './crypto';
 import { DAY, MINUTE, UTC, normalizeTimeZone } from './time';
 import { cookieSpec } from './cookies';
+import { SIGNED_IN_COOKIE } from './signed-in';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
 import { isDisposableEmail } from './disposable-email';
 import { VERIFY_PATH, verificationRequired } from './email-verification';
@@ -80,6 +81,17 @@ function setSessionCookie(c: Context<AppEnv>, token: string): void {
     path: '/',
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
+}
+
+/** The script-readable "signed in" hint (lib/signed-in.ts), alongside the session cookie. */
+function setSignedInHint(c: Context<AppEnv>): void {
+  const { name, secure } = cookieSpec(c, SIGNED_IN_COOKIE);
+  setCookie(c, name, '1', { httpOnly: false, sameSite: 'Lax', secure, path: '/', maxAge: Math.floor(SESSION_TTL_MS / 1000) });
+}
+
+function clearSignedInHint(c: Context<AppEnv>): void {
+  const { name, secure } = cookieSpec(c, SIGNED_IN_COOKIE);
+  deleteCookie(c, name, { path: '/', secure });
 }
 
 function readSessionToken(c: Context<AppEnv>): string | undefined {
@@ -216,6 +228,20 @@ export async function allowVerificationResend(env: Bindings, userId: string): Pr
   return (await reserveAttempt(env, dayKey, now, RESEND_DAILY_MAX, DAILY_WINDOW_MS)) ? 'ok' : 'tomorrow';
 }
 
+/**
+ * Photo and logo changes one account may make: uploads (an R2 write each) and website icon lookups
+ * (up to 20 requests to a site the owner names). Generous for a person, a wall for a script.
+ */
+const MEDIA_MAX_ATTEMPTS = 20;
+const MEDIA_DAILY_MAX = 100;
+
+/** Counts one photo or logo change against the account; false once it's over the limit. */
+export async function allowMediaChange(env: Bindings, userId: string): Promise<boolean> {
+  const now = Date.now();
+  if (!(await reserveAttempt(env, await sha256Hex(`media|${userId}`), now, MEDIA_MAX_ATTEMPTS))) return false;
+  return reserveAttempt(env, DAILY_KEY_PREFIX + (await sha256Hex(`media-day|${userId}`)), now, MEDIA_DAILY_MAX, DAILY_WINDOW_MS);
+}
+
 /** One bucket per user for re-entering the current password (change password, delete account). */
 function passwordCheckKey(userId: string): Promise<string> {
   return sha256Hex(`password-check|${userId}`);
@@ -334,6 +360,7 @@ export async function startSession(c: Context<AppEnv>, userId: string): Promise<
   const token = randomToken();
   await insertSession(c.env.DB, await sha256Hex(token), userId, Date.now() + SESSION_TTL_MS);
   setSessionCookie(c, token);
+  setSignedInHint(c);
 }
 
 export async function endSession(c: Context<AppEnv>): Promise<void> {
@@ -341,6 +368,7 @@ export async function endSession(c: Context<AppEnv>): Promise<void> {
   if (token) await deleteSession(c.env.DB, await sha256Hex(token));
   const { name, secure } = cookieSpec(c, SESSION_COOKIE);
   deleteCookie(c, name, { path: '/', secure });
+  clearSignedInHint(c);
   c.set('user', null);
 }
 
@@ -354,6 +382,7 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
   c.set('currencySource', 'default');
   c.set('timezoneSource', 'default');
   const token = readSessionToken(c);
+  let refreshed = false;
   if (token) {
     const sessionId = await sha256Hex(token);
     const now = Date.now();
@@ -377,9 +406,15 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
       if (row.expires_at - now < SESSION_REFRESH_BELOW_MS) {
         await extendSession(c.env.DB, sessionId, now + SESSION_TTL_MS);
         setSessionCookie(c, token);
+        refreshed = true;
       }
     }
   }
+  // Keep the hint in step with the session: renewed with it, added for a session from before it
+  // existed, dropped once the session is gone (expired, or ended in another browser).
+  const hinted = getCookie(c, cookieSpec(c, SIGNED_IN_COOKIE).name) !== undefined;
+  if (c.get('user') && (refreshed || !hinted)) setSignedInHint(c);
+  else if (!c.get('user') && hinted) clearSignedInHint(c);
   await next();
 });
 

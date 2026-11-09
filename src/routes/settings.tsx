@@ -1,12 +1,14 @@
 /** Settings: display currency, time zone, password change, account deletion. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
+import { mediaKeysOfUser } from '../db/public';
 import { deleteUser, updateUserCurrency, updateUserTimezone } from '../db/queries';
 import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { isSupportedCurrency, normalizeCurrency } from '../lib/money';
 import { normalizeTimeZone, timeZoneOptions, zoneLabel } from '../lib/time';
+import { deleteImages } from '../services/media';
 import { chrome, formLimit, readForm } from './util';
 import { renderPage } from '../views/render';
 
@@ -89,7 +91,10 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
         }, 422);
     }
 
+    // Their photo and logos go with the account: read the keys before the rows are gone.
+    const images = await mediaKeysOfUser(c.env.DB, user.id);
     await deleteUser(c.env.DB, user.id);
+    await deleteImages(c.env, images);
     await endSession(c);
     return redirectWithFlash(c, '/', 'info', 'Your account and all of its data were deleted.');
   });

@@ -9,10 +9,15 @@ import type { ComponentProps } from 'react';
 import { AuthPage } from './auth';
 import { ConnectionDetailPage } from './connection-detail';
 import { ConnectionsPage, NewConnectionPage, ProviderPickerPage } from './connections';
+import { ExplorePage } from './explore';
 import { DashboardPage } from './dashboard';
 import { NotFoundPage, ServerErrorPage } from './errors';
 import { LandingPage } from './landing';
+import { LegalPage } from './legal';
+import { PublicProductPage } from './public-product';
+import { PublicProfilePage } from './public-profile';
 import { SettingsPage } from './settings';
+import { SharePage } from './share';
 import { TransactionsPage } from './transactions';
 import { VerifyEmailPage } from './verify-email';
 
@@ -26,6 +31,11 @@ export const PAGES = {
   connectionDetail: ConnectionDetailPage,
   transactions: TransactionsPage,
   settings: SettingsPage,
+  share: SharePage,
+  publicProduct: PublicProductPage,
+  publicProfile: PublicProfilePage,
+  explore: ExplorePage,
+  legal: LegalPage,
   verifyEmail: VerifyEmailPage,
   notFound: NotFoundPage,
   serverError: ServerErrorPage,

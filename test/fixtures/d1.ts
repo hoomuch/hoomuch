@@ -20,6 +20,10 @@ import syncQueue from '../../migrations/0007_sync_queue.sql?raw';
 import webhooks from '../../migrations/0008_webhooks.sql?raw';
 import userTimezone from '../../migrations/0009_user_timezone.sql?raw';
 import transactionsCover from '../../migrations/0010_transactions_cover_index.sql?raw';
+import publicPages from '../../migrations/0011_public_pages.sql?raw';
+import publicProfiles from '../../migrations/0012_public_profiles.sql?raw';
+import publicExplore from '../../migrations/0013_public_explore.sql?raw';
+import media from '../../migrations/0014_media.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
 import { FakeQueue } from './queue';
@@ -112,6 +116,10 @@ export function createTestD1(): TestD1 {
   sqlite.exec(webhooks);
   sqlite.exec(userTimezone);
   sqlite.exec(transactionsCover);
+  sqlite.exec(publicPages);
+  sqlite.exec(publicProfiles);
+  sqlite.exec(publicExplore);
+  sqlite.exec(media);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {

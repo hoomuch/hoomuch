@@ -37,6 +37,24 @@ export interface Bindings {
   RESEND_API_KEY?: string;
   /** Sender for that mail, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. */
   MAIL_FROM?: string;
+  /**
+   * "true" turns on public pages (SPEC F-21): owners can publish a product's verified revenue at
+   * /p/<slug> with an embeddable badge. Anything else, the default, leaves them off.
+   */
+  PUBLIC_PAGES?: string;
+  /**
+   * R2 bucket for founders' photos and products' logos on public pages (`r2_buckets` in
+   * wrangler.jsonc; see lib/media.ts). Optional: without it there's no upload, no website icon,
+   * and every page shows initials.
+   */
+  MEDIA?: R2Bucket;
+  /**
+   * The privacy policy and terms at /privacy and /terms (lib/legal.ts): who runs this instance and
+   * where to write. Both set: the pages are served and every footer links them. They're
+   * hoomuch.com's texts (an individual in Türkiye); leave these empty and publish your own otherwise.
+   */
+  LEGAL_NAME?: string;
+  LEGAL_EMAIL?: string;
 }
 
 export interface SessionUser {

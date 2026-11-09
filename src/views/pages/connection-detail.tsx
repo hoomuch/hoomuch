@@ -8,7 +8,6 @@
  */
 
 import { ChevronDown } from 'lucide-react';
-import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard } from '@/components/ui/card';
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,6 +17,7 @@ import { getProviderMeta } from '../../providers/registry';
 import { StatusBadge, TestModeBadge } from '../components/badges';
 import { ProviderLogo } from '../components/provider-logos';
 import { ConnectionForm } from '../components/connection-form';
+import { CopyField } from '../components/copy-field';
 import { DangerZone } from '../components/danger-zone';
 import { RelativeTime } from '../components/relative-time';
 import {
@@ -35,7 +35,7 @@ import {
   TextLink,
 } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment } from 'react';
 import type { ProviderWebhookSetup } from '../../providers/types';
 import type { WebhookAction } from '../../services/webhooks';
 import { BackLink, describeConfig, formatDay, formatDuration, SyncNotice, type SyncState } from './shared';
@@ -379,7 +379,7 @@ function RealtimeCard(props: {
       }
     >
       <div className="grid max-w-prose gap-4 text-body">
-        <WebhookUrl url={url} />
+        <CopyField id="webhook-url" label="Webhook URL" value={url} />
         <ol className="grid list-decimal gap-1 pl-5">
           {setup.steps.map((step) => (
             <li key={step}>{step}</li>
@@ -408,40 +408,6 @@ function RealtimeCard(props: {
         </div>
       </div>
     </Card>
-  );
-}
-
-/** The webhook URL, selectable as text without JavaScript; a Copy button appears once hydrated. */
-function WebhookUrl(props: { url: string }) {
-  const [canCopy, setCanCopy] = useState(false);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => setCanCopy(typeof navigator !== 'undefined' && Boolean(navigator.clipboard)), []);
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <label htmlFor="webhook-url" className="sr-only">
-        Webhook URL
-      </label>
-      <input
-        id="webhook-url"
-        readOnly
-        value={props.url}
-        spellCheck={false}
-        onFocus={(e) => e.currentTarget.select()}
-        className="h-8.5 min-w-0 flex-1 rounded-lg border bg-muted/40 px-3 font-mono text-sm sm:h-7.5"
-      />
-      {canCopy ? (
-        <CossButton
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void navigator.clipboard.writeText(props.url).then(() => setCopied(true));
-          }}
-        >
-          {copied ? 'Copied' : 'Copy'}
-        </CossButton>
-      ) : null}
-    </div>
   );
 }
 

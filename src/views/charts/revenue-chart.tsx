@@ -133,9 +133,14 @@ export interface RevenueModel {
   series: RevenueSeries[];
   rows: RevenueRow[];
   allZero: boolean;
-  /** The rows are weeks. */
+  /** The rows are weeks (or longer). */
   weekly: boolean;
+  /** The rows are calendar months (a public page's "All time"). */
+  monthly: boolean;
 }
+
+/** Days from `a` to `b`, both 'YYYY-MM-DD'. */
+const spanDays = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86_400_000);
 
 /** Pure: resolves series, Other, and per-day stacks. Exported for tests. */
 export function revenueModel(days: RevenueDay[], connections: ConnectionSummary[]): RevenueModel {
@@ -185,7 +190,18 @@ export function revenueModel(days: RevenueDay[], connections: ConnectionSummary[
   }
 
   const allZero = rows.every((r) => r.values.every((v) => v === 0));
-  return { series, rows, allZero, weekly: rows.some((r) => r.to !== null) };
+  return {
+    series,
+    rows,
+    allZero,
+    weekly: rows.some((r) => r.to !== null),
+    monthly: rows.some((r) => r.to !== null && spanDays(r.day, r.to) >= 27),
+  };
+}
+
+/** "Daily", "Weekly" or "Monthly": what one row adds up. */
+function stepWord(m: Pick<RevenueModel, 'weekly' | 'monthly'>): string {
+  return m.monthly ? 'Monthly' : m.weekly ? 'Weekly' : 'Daily';
 }
 
 /** The SVG fill of a series: its brand hex, or the token behind its neutral class. */
@@ -209,10 +225,10 @@ function windowLabel(rows: RevenueRow[]): string {
 }
 
 function describe(model: RevenueModel, currency: string, line: boolean): string {
-  const { rows, series, weekly } = model;
+  const { rows, series, weekly, monthly } = model;
   if (rows.length === 0) return 'No revenue data for this period.';
-  const unit = weekly ? 'week' : 'day';
-  const per = weekly ? 'Weekly' : 'Daily';
+  const unit = monthly ? 'month' : weekly ? 'week' : 'day';
+  const per = stepWord(model);
   const range = `${windowLabel(rows)} (${plural(rows.length, unit, `${unit}s`)})`;
   if (model.allZero) return `${per} revenue, ${range}. No revenue in this period yet.`;
 
@@ -324,7 +340,7 @@ export function RevenueChart(props: RevenueChartProps) {
   const currency = props.currency;
   const line = props.variant === 'line';
   const model = revenueModel(props.series, props.connections);
-  const title = props.title ?? (model.weekly ? 'Weekly revenue' : 'Daily revenue');
+  const title = props.title ?? `${stepWord(model)} revenue`;
   const { rows, series, allZero } = model;
   const n = rows.length;
   const gap = bandGapRatio(n);
@@ -480,7 +496,7 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
   const cur = props.currency;
   const colTotals = series.map((s) => rows.reduce((acc, r) => acc + (r.values[s.col] ?? 0), 0));
   const grand = rows.reduce((acc, r) => acc + r.total, 0);
-  const caption = `${props.model.weekly ? 'Weekly' : 'Daily'} revenue by connection, ${windowLabel(rows)}, in ${cur.trim().toUpperCase()}.`;
+  const caption = `${stepWord(props.model)} revenue by connection, ${windowLabel(rows)}, in ${cur.trim().toUpperCase()}.`;
   return (
     <DataDetails
       id={props.id}
@@ -488,7 +504,7 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
       caption={caption}
       head={
         <TableRow>
-          <HeadCell>{props.model.weekly ? 'Week' : 'Date'}</HeadCell>
+          <HeadCell>{props.model.monthly ? 'Month' : props.model.weekly ? 'Week' : 'Date'}</HeadCell>
           {series.map((s) => (
             <HeadCell key={s.key} numeric>
               {s.name}

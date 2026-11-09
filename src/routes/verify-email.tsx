@@ -8,7 +8,7 @@
 
 import type { Hono } from 'hono';
 import type { AppEnv } from '../env';
-import { allowVerificationResend, currentUser, requireSignedIn } from '../lib/auth';
+import { allowVerificationResend, currentUser, requireSignedIn, safeNext } from '../lib/auth';
 import {
   checkLink,
   CONFIRM_PATH,
@@ -19,7 +19,7 @@ import {
   VERIFY_PATH,
   verificationRequired,
 } from '../lib/email-verification';
-import { redirectWithFlash, setCelebrate } from '../lib/flash';
+import { redirectWithFlash, setCelebrate, takeNext } from '../lib/flash';
 import { HOUR } from '../lib/time';
 import { renderPage } from '../views/render';
 import { chrome, formLimit, readForm, type AppContext } from './util';
@@ -86,9 +86,10 @@ export function registerVerifyEmailRoutes(app: Hono<AppEnv>): void {
       );
     }
     if (c.get('user')?.id === result.userId) {
-      // The welcome sign-up used to give: the empty dashboard and one confetti burst, no flash.
+      // The welcome sign-up used to give: one confetti burst, no flash, on the page they signed
+      // up from (a public page's lock) if there was one, or the empty dashboard.
       setCelebrate(c);
-      return c.redirect('/dashboard', 303);
+      return c.redirect(safeNext(takeNext(c)), 303);
     }
     // Opened in another browser or device. The link proves the address, not the password: log in.
     return redirectWithFlash(c, '/login', 'success', 'Email confirmed. Log in to continue.');

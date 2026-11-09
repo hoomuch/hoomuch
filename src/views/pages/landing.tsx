@@ -13,13 +13,16 @@
 import { Check, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { Frame } from '@/components/ui/frame';
+import type { ExploreItem } from '../../data/explore';
 import type { DashboardData } from '../../data/types';
+import { formatMoney } from '../../lib/money';
 import { getProviderMeta, PROVIDERS } from '../../providers/registry';
 import type { RevenueVariant } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
 import { KeyGuide } from '../components/connection-form';
 import { HorizonGlow } from '../components/horizon-glow';
 import { Owl } from '../components/mascot';
+import { ProductCard as PublicProductCard } from '../components/product-card';
 import { ProviderStrip } from '../components/provider-strip';
 import { RangeTabs } from '../components/range-tabs';
 import { Card, LinkButton } from '../components/ui';
@@ -36,6 +39,11 @@ export interface LandingPageProps {
   revenueVariant?: RevenueVariant;
   /** How often connections sync, in words ("every hour"). */
   cadence: string;
+  /**
+   * Products on Explore (SPEC F-23): the fastest growing, or the biggest when too few have grown.
+   * Null until enough real products qualify, so the page never shows a sparse or made-up gallery.
+   */
+  gallery?: { kind: 'growth' | 'mrr'; items: ExploreItem[] } | null;
 }
 
 /**
@@ -154,6 +162,9 @@ export function LandingPage(props: LandingPageProps) {
           </AlsoItem>
         </ul>
       </section>
+
+      {/* 1c. Real products, real numbers: founders who publish theirs (Explore). Only with enough of them. */}
+      {props.gallery ? <Gallery gallery={props.gallery} /> : null}
 
       {/* 2. Setup: the same three steps for every store, then the real connect form for one of
           them. The full-access keys stay named plainly: that's the trust move (brief §3.1.2). */}
@@ -306,5 +317,50 @@ function StoreItem(props: { never?: boolean; children?: ReactNode }) {
       )}
       <span>{props.children}</span>
     </li>
+  );
+}
+
+const usd = (minor: number) => formatMoney(minor, 'USD', { whole: true });
+
+/** Founders' published products, as cards to their pages, and the way to the rest. */
+function Gallery(props: { gallery: NonNullable<LandingPageProps['gallery']> }) {
+  const growth = props.gallery.kind === 'growth';
+  return (
+    <section aria-labelledby="gallery-title" className="mt-28 sm:mt-32">
+      <div className="mx-auto max-w-[40rem] text-center">
+        <h2 id="gallery-title" className={H2}>
+          {growth ? 'Growing this month' : 'Founders who show their numbers'}
+        </h2>
+        <p className={LEAD}>
+          {growth
+            ? 'Products whose founders publish their revenue on hoomuch, by how much their MRR grew in 30 days. Every figure is read from the payment provider.'
+            : 'Products whose founders publish their revenue on hoomuch. Every figure is read from the payment provider, none is typed in.'}
+        </p>
+      </div>
+      <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Three on a phone, so the strip stays a glance; the rest are a tap away on Explore. */}
+        {props.gallery.items.map((it, i) => (
+          <li key={it.slug} className={i >= 3 ? 'hidden min-w-0 sm:block' : 'min-w-0'}>
+            <PublicProductCard
+              href={`/p/${it.slug}`}
+              name={it.name}
+              tagline={it.tagline}
+              logo={it.logo}
+              byline={`by ${it.founder.name}`}
+              figures={[
+                { label: 'MRR', value: usd(it.mrr), deltaPct: it.growthPct },
+                { label: 'Revenue, 30d', value: usd(it.revenue30) },
+              ]}
+              providers={it.providers}
+            />
+          </li>
+        ))}
+      </ul>
+      <div className="mt-8 text-center">
+        <LinkButton href="/explore" variant="secondary">
+          See every product on Explore
+        </LinkButton>
+      </div>
+    </section>
   );
 }

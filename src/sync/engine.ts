@@ -23,6 +23,7 @@
 
 import type { Bindings } from '../env';
 import { parseConfig, type ConnectionRow } from '../db/queries';
+import { refreshStatsForConnection } from '../services/public-pages';
 import { decryptJson } from '../lib/crypto';
 import { MINUTE, UTC, normalizeTimeZone, zonedDayKey } from '../lib/time';
 import { createProviderContext } from '../providers/context';
@@ -255,8 +256,9 @@ export async function syncConnection(env: Bindings, connectionId: string, kind: 
     emit('error', 'sync_error', { phase: 'open_run', connectionId, kind, ...errorLogFields(err) });
   }
 
+  let result: SyncResult;
   try {
-    return await runLocked(env, row, kind, startedAt, runId);
+    result = await runLocked(env, row, kind, startedAt, runId);
   } catch (err) {
     // runLocked handles its own failures; this backstop still releases the lock.
     emit('error', 'sync_error', { phase: 'engine', connectionId, kind, ...errorLogFields(err) });
@@ -264,6 +266,10 @@ export async function syncConnection(env: Bindings, connectionId: string, kind: 
     await release(env.DB, row, startedAt, runId, error, row.revenue_cursor);
     return failed(error);
   }
+  // A published product's page reads stored figures (SPEC F-21): bring them up to date now that
+  // this connection has new ones. Never throws, and does nothing while public pages are off.
+  if (result.ok || result.snapshot) await refreshStatsForConnection(env, connectionId);
+  return result;
 }
 
 /** Marks the run failed without touching data or the cursor. Never throws. */
