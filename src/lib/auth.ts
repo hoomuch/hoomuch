@@ -228,6 +228,20 @@ export async function allowVerificationResend(env: Bindings, userId: string): Pr
   return (await reserveAttempt(env, dayKey, now, RESEND_DAILY_MAX, DAILY_WINDOW_MS)) ? 'ok' : 'tomorrow';
 }
 
+/**
+ * Photo and logo changes one account may make: uploads (an R2 write each) and website icon lookups
+ * (up to 20 requests to a site the owner names). Generous for a person, a wall for a script.
+ */
+const MEDIA_MAX_ATTEMPTS = 20;
+const MEDIA_DAILY_MAX = 100;
+
+/** Counts one photo or logo change against the account; false once it's over the limit. */
+export async function allowMediaChange(env: Bindings, userId: string): Promise<boolean> {
+  const now = Date.now();
+  if (!(await reserveAttempt(env, await sha256Hex(`media|${userId}`), now, MEDIA_MAX_ATTEMPTS))) return false;
+  return reserveAttempt(env, DAILY_KEY_PREFIX + (await sha256Hex(`media-day|${userId}`)), now, MEDIA_DAILY_MAX, DAILY_WINDOW_MS);
+}
+
 /** One bucket per user for re-entering the current password (change password, delete account). */
 function passwordCheckKey(userId: string): Promise<string> {
   return sha256Hex(`password-check|${userId}`);

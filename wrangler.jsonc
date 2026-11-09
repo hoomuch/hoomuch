@@ -85,6 +85,13 @@
     { "name": "RL_WEBHOOKS", "namespace_id": "730003", "simple": { "limit": 30, "period": 60 } }
   ],
 
+  // Founders' photos and products' logos on public pages (src/lib/media.ts): an R2 bucket, bound
+  // as MEDIA. Optional, and off here, because R2 has to be turned on in your Cloudflare account
+  // first. To use it, add this to wrangler.local.jsonc (see wrangler.local.example.jsonc); without a
+  // bucket_name, `wrangler deploy` creates the bucket for you:
+  //   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "hoomuch-media" }]
+  // Without it, pages show initials and nothing is uploaded or fetched.
+
   "observability": {
     "enabled": true
   }

@@ -42,6 +42,12 @@ export interface Bindings {
    * /p/<slug> with an embeddable badge. Anything else, the default, leaves them off.
    */
   PUBLIC_PAGES?: string;
+  /**
+   * R2 bucket for founders' photos and products' logos on public pages (`r2_buckets` in
+   * wrangler.jsonc; see lib/media.ts). Optional: without it there's no upload, no website icon,
+   * and every page shows initials.
+   */
+  MEDIA?: R2Bucket;
 }
 
 export interface SessionUser {

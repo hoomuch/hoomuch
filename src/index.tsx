@@ -82,10 +82,19 @@ const turnstilePageHeaders = secureHeaders(
  */
 const badgeHeaders = secureHeaders({ ...headerOptions(CSP), crossOriginResourcePolicy: 'cross-origin' });
 
+/**
+ * A stored photo or logo (routes/media.tsx), opened on its own: nothing may load or run, and it
+ * renders in a sandbox with an opaque origin. secureHeaders writes its CSP after the handler, so
+ * this is where the one for /media/ is set.
+ */
+const mediaHeaders = secureHeaders({ ...headerOptions(CSP), contentSecurityPolicy: { defaultSrc: ["'none'"], sandbox: [] } });
+
 app.use('*', (c, next) =>
   (c.req.path.startsWith('/badge/')
     ? badgeHeaders
-    : TURNSTILE_PAGES.has(c.req.path) && turnstileSiteKey(c.env)
+    : c.req.path.startsWith('/media/')
+      ? mediaHeaders
+      : TURNSTILE_PAGES.has(c.req.path) && turnstileSiteKey(c.env)
       ? turnstilePageHeaders
       : pageHeaders)(c, next),
 );

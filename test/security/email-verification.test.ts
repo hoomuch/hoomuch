@@ -481,6 +481,22 @@ describe('purgeAbandonedAccounts (cron)', () => {
     expect(t.rows("SELECT id FROM email_verifications WHERE user_id = 'abandoned'")).toEqual([]);
   });
 
+  it('leaves an account with a photo or a logo: something would be lost, and its images are in R2', async () => {
+    for (const id of ['with-photo', 'with-logo']) {
+      seedUser(t, { id });
+      t.exec('INSERT INTO email_verifications (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)', `${id}-0`, id, NOW - 1, 0);
+    }
+    t.exec(
+      `INSERT INTO public_profiles (user_id, handle, display_name, avatar_key, created_at, updated_at) VALUES ('with-photo', 'photo', 'P', ?, 0, 0)`,
+      `${'a'.repeat(32)}.png`,
+    );
+    t.exec(
+      `INSERT INTO public_products (id, user_id, slug, name, logo_key, logo_source, created_at, updated_at) VALUES ('p1', 'with-logo', 'logo', 'L', ?, 'upload', 0, 0)`,
+      `${'b'.repeat(32)}.png`,
+    );
+    expect(await purgeAbandonedAccounts(t.db, NOW)).toBe(0);
+  });
+
   it('runs in the scheduled handler', async () => {
     await signedUp();
     vi.setSystemTime(NOW + VERIFY_LINK_TTL_MS + MINUTE);

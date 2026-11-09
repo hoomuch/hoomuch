@@ -100,6 +100,7 @@ interval.
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
 | `RL_WEBHOOKS` | `ratelimits` in `wrangler.jsonc` | 30 a minute | Webhook calls per connection (see [Real-time updates](#real-time-updates)). Webhooks skip the per-network limits, because a provider sends every customer's calls from the same addresses. Its `namespace_id` must be unique too. |
 | `PUBLIC_PAGES` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. `"true"` lets owners publish a product's verified revenue at `/p/<slug>`, with a badge, a profile at `/u/<handle>` and a listing on `/explore` (see [Public pages](#public-pages)). |
+| `MEDIA` | `r2_buckets` in `wrangler.local.jsonc` | none (off) | Optional, with `PUBLIC_PAGES`. An [R2](https://developers.cloudflare.com/r2/) bucket for founders' photos and products' logos (see [Public pages](#public-pages)). Turn R2 on in your Cloudflare account, then add `"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "hoomuch-media" }]`; `wrangler deploy` creates the bucket if it's missing. Without it, pages show initials. |
 | `SYNC_QUEUE` | `queues` in `wrangler.jsonc` | queue `hoomuch-sync` | Required. Every sync runs in this queue's consumer, one connection at a time per invocation (up to 10 at once). `wrangler deploy` creates the queue if it's missing. |
 
 The cron schedule itself is `triggers.crons` in `wrangler.jsonc`. Each tick puts the connections that
@@ -203,6 +204,13 @@ say) and publishes it:
 - **`/u/<handle>`** is the founder's profile: their public products added up, and each one's
   revenue, MRR and total. Publishing a product needs a founder profile, and the profile is public
   while at least one of their products is.
+- **Photos and logos**, with the `MEDIA` bucket: a founder can upload a photo, and a product gets its
+  website's icon when it's saved with a website, or a logo its owner uploads. They're served from
+  your own domain at `/media/<key>` (so the pages' `img-src 'self'` still holds), checked by their
+  bytes (PNG, JPEG, WebP or GIF; ICO from a website; never SVG), at most 2 MB and 4096 pixels a side,
+  and stored without their metadata (a phone photo's location and camera details are taken out). A
+  browser with JavaScript crops and scales an upload to 400 pixels before sending it. An account can
+  make 20 changes in 15 minutes. They're deleted with the product or the account.
 
 - **`/explore`** lists the published products whose founders list them (a box on the publish form,
   ticked by default), by MRR, growth or newest, with a search that runs as you type, a provider

@@ -345,6 +345,7 @@ function Gallery(props: { gallery: NonNullable<LandingPageProps['gallery']> }) {
               href={`/p/${it.slug}`}
               name={it.name}
               tagline={it.tagline}
+              logo={it.logo}
               byline={`by ${it.founder.name}`}
               figures={[
                 { label: 'MRR', value: usd(it.mrr), deltaPct: it.growthPct },
