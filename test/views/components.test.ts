@@ -160,6 +160,32 @@ describe('Layout', () => {
     expect(out).toContain('max-w-[28rem]');
     expect(out).toContain('content="5;url=/dashboard?poll=1"');
   });
+
+  it('gives each page search engines index a title and description that fit in a result', async () => {
+    const chrome = { user: null, flash: null };
+    const demo = fixtureDashboard(30, 'full', FIXTURE_NOW);
+    const heads = [
+      await html(h(LandingPage, { chrome, signupOpen: true, demo, cadence: 'every hour' })),
+      await html(h(AuthPage, { chrome, mode: 'login', signupOpen: true })),
+      await html(h(AuthPage, { chrome, mode: 'signup', signupOpen: true })),
+    ].map((out) => ({
+      title: /<title>(.*?)<\/title>/.exec(out)?.[1] ?? '',
+      description: /<meta name="description" content="(.*?)"/.exec(out)?.[1] ?? '',
+      noindex: out.includes('name="robots" content="noindex"'),
+    }));
+    // A result shows about 600px of a title (60 to 65 characters) and about 155 of a description.
+    for (const head of heads) {
+      expect(head.noindex).toBe(false);
+      expect(head.title).toMatch(/ · hoomuch$/);
+      expect(head.title.length).toBeLessThanOrEqual(65);
+      expect(head.description.length).toBeGreaterThan(0);
+      expect(head.description.length).toBeLessThanOrEqual(160);
+    }
+    expect(new Set(heads.map((p) => p.description)).size).toBe(heads.length);
+    // A private instance's closed sign-up page has nothing to show in a result.
+    const closed = await html(h(AuthPage, { chrome, mode: 'signup', signupOpen: false }));
+    expect(closed).toContain('name="robots" content="noindex"');
+  });
 });
 
 describe('Flash', () => {
@@ -777,6 +803,8 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('Free until your MRR reaches $1,000.'); // the free tier leads the pricing
     expect(out).toContain('$9 per month'); // exact price, with its tax treatment
     expect(out).toContain('plus VAT or sales tax where it applies');
+
+    expect(out).toContain('<title>MRR dashboard for Stripe, RevenueCat and app stores · hoomuch</title>');
 
     const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: false, demo, cadence: 'every hour' }));
     expect(closed).not.toContain('href="/signup"');

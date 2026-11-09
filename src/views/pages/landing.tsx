@@ -89,8 +89,10 @@ export function LandingPage(props: LandingPageProps) {
   return (
     <Layout
       {...props.chrome}
-      title="One MRR for Stripe, Paddle, RevenueCat and the App Store"
-      description="Total MRR, ARR, subscriptions and trials from Stripe, Paddle, Lemon Squeezy, RevenueCat, the App Store, Google Play and more, on one read-only dashboard."
+      // What people search first, the brand last (the layout appends it): 61 characters in all,
+      // so the result shows it whole. The description names the rest of the stack (design/brief.md §3.1).
+      title="MRR dashboard for Stripe, RevenueCat and app stores"
+      description="Total MRR, ARR, subscriptions and trials from Stripe, Paddle, Lemon Squeezy, RevenueCat, the App Store, Google Play and more. Read-only and open source."
       marketing
       footerNote={`Syncs ${props.cadence}, so you can check less often.`}
     >
