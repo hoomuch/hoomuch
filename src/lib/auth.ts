@@ -10,6 +10,7 @@ import type { AppEnv, Bindings, SessionUser } from '../env';
 import { hashPassword, randomId, randomToken, sha256Hex, verifyPassword } from './crypto';
 import { DAY, MINUTE, UTC, normalizeTimeZone } from './time';
 import { cookieSpec } from './cookies';
+import { SIGNED_IN_COOKIE } from './signed-in';
 import { PASSWORD_MAX, PASSWORD_MIN } from './password-policy';
 import { isDisposableEmail } from './disposable-email';
 import { VERIFY_PATH, verificationRequired } from './email-verification';
@@ -80,6 +81,17 @@ function setSessionCookie(c: Context<AppEnv>, token: string): void {
     path: '/',
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   });
+}
+
+/** The script-readable "signed in" hint (lib/signed-in.ts), alongside the session cookie. */
+function setSignedInHint(c: Context<AppEnv>): void {
+  const { name, secure } = cookieSpec(c, SIGNED_IN_COOKIE);
+  setCookie(c, name, '1', { httpOnly: false, sameSite: 'Lax', secure, path: '/', maxAge: Math.floor(SESSION_TTL_MS / 1000) });
+}
+
+function clearSignedInHint(c: Context<AppEnv>): void {
+  const { name, secure } = cookieSpec(c, SIGNED_IN_COOKIE);
+  deleteCookie(c, name, { path: '/', secure });
 }
 
 function readSessionToken(c: Context<AppEnv>): string | undefined {
@@ -334,6 +346,7 @@ export async function startSession(c: Context<AppEnv>, userId: string): Promise<
   const token = randomToken();
   await insertSession(c.env.DB, await sha256Hex(token), userId, Date.now() + SESSION_TTL_MS);
   setSessionCookie(c, token);
+  setSignedInHint(c);
 }
 
 export async function endSession(c: Context<AppEnv>): Promise<void> {
@@ -341,6 +354,7 @@ export async function endSession(c: Context<AppEnv>): Promise<void> {
   if (token) await deleteSession(c.env.DB, await sha256Hex(token));
   const { name, secure } = cookieSpec(c, SESSION_COOKIE);
   deleteCookie(c, name, { path: '/', secure });
+  clearSignedInHint(c);
   c.set('user', null);
 }
 
@@ -354,6 +368,7 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
   c.set('currencySource', 'default');
   c.set('timezoneSource', 'default');
   const token = readSessionToken(c);
+  let refreshed = false;
   if (token) {
     const sessionId = await sha256Hex(token);
     const now = Date.now();
@@ -377,9 +392,15 @@ export const loadUser = createMiddleware<AppEnv>(async (c, next) => {
       if (row.expires_at - now < SESSION_REFRESH_BELOW_MS) {
         await extendSession(c.env.DB, sessionId, now + SESSION_TTL_MS);
         setSessionCookie(c, token);
+        refreshed = true;
       }
     }
   }
+  // Keep the hint in step with the session: renewed with it, added for a session from before it
+  // existed, dropped once the session is gone (expired, or ended in another browser).
+  const hinted = getCookie(c, cookieSpec(c, SIGNED_IN_COOKIE).name) !== undefined;
+  if (c.get('user') && (refreshed || !hinted)) setSignedInHint(c);
+  else if (!c.get('user') && hinted) clearSignedInHint(c);
   await next();
 });
 

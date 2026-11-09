@@ -24,8 +24,8 @@ import {
   verifyTurnstile,
   type BotAction,
 } from '../lib/bot-defense';
-import { sendVerificationLink, VERIFY_PATH, verificationRequired } from '../lib/email-verification';
-import { redirectWithFlash, setCelebrate } from '../lib/flash';
+import { sendVerificationLink, VERIFY_LINK_TTL_MS, VERIFY_PATH, verificationRequired } from '../lib/email-verification';
+import { redirectWithFlash, rememberNext, setCelebrate } from '../lib/flash';
 import { RATE_LIMIT_PERIOD_SECONDS, withinAuthLimit } from '../lib/rate-limit';
 import { parseRevenueVariant } from '../views/charts/revenue-chart';
 import { fixtureDashboard } from '../views/fixtures';
@@ -128,7 +128,9 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     }
     await startSession(c, result.userId);
     if (verificationRequired(c.env)) {
-      // Held at check-your-inbox until the mailed link is used; the welcome waits for that.
+      // Held at check-your-inbox until the mailed link is used; the welcome waits for that, and so
+      // does the page they signed up from (a public page's lock), kept for when they confirm.
+      if (next) rememberNext(c, next, Math.floor(VERIFY_LINK_TTL_MS / 1000));
       const user = { id: result.userId, email: normalizeEmail(email) };
       if (await sendVerificationLink(c.env, user, new URL(c.req.url).origin)) return c.redirect(VERIFY_PATH, 303);
       return redirectWithFlash(c, VERIFY_PATH, 'error', MAIL_FAILED_MESSAGE);

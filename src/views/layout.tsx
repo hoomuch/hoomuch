@@ -22,6 +22,7 @@ import { GitHubMark, Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
 import { IconLinkButton, LinkButton } from './components/ui';
 import { PagePayloadScript } from './page-root';
+import { useSignedIn } from './use-signed-in';
 
 type NavKey = 'dashboard' | 'connections' | 'transactions' | 'share' | 'settings' | 'explore';
 
@@ -122,6 +123,9 @@ const NAV_LINK =
 
 export function Layout(props: LayoutProps) {
   const fullTitle = props.title ? `${props.title} · ${APP_NAME}` : APP_NAME;
+  const hinted = useSignedIn();
+  // A page meant to be shared (it has a canonical URL) is where Log in comes back to.
+  const loginHref = props.og ? `/login?next=${encodeURIComponent(new URL(props.og.url).pathname)}` : '/login';
   const narrow = props.width === 'narrow';
   const user = props.user;
   return (
@@ -204,9 +208,15 @@ export function Layout(props: LayoutProps) {
                     </a>
                   ))}
                 </nav>
-                {/* Same look and current-page marker as the nav, kept apart from the daily places.
-                    -mr-3 puts its text on the frame's right edge. */}
+                {/* Same look and current-page marker as the nav, kept apart from the daily places:
+                    Explore (the public side, when the instance has it) and Settings. -mr-3 puts
+                    the last one's text on the frame's right edge. */}
                 <div className="-mr-3 -mb-px ml-auto flex self-end">
+                  {props.share ? (
+                    <a href="/explore" data-slot="nav-link" className={NAV_LINK}>
+                      Explore
+                    </a>
+                  ) : null}
                   <a
                     href="/settings"
                     data-slot="nav-link"
@@ -228,9 +238,17 @@ export function Layout(props: LayoutProps) {
                 <IconLinkButton href={SOURCE_URL} label="hoomuch on GitHub">
                   <GitHubMark />
                 </IconLinkButton>
-                <LinkButton href="/login" variant="secondary">
-                  Log in
-                </LinkButton>
+                {/* A public page renders without the session; once hydrated, a browser that has one
+                    gets its way back to the app. Log in comes back to this page. */}
+                {hinted ? (
+                  <LinkButton href="/dashboard" variant="secondary">
+                    Dashboard
+                  </LinkButton>
+                ) : (
+                  <LinkButton href={loginHref} variant="secondary">
+                    Log in
+                  </LinkButton>
+                )}
               </div>
             ) : null}
           </div>
@@ -242,7 +260,7 @@ export function Layout(props: LayoutProps) {
         </main>
 
         {props.marketing ? (
-          <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} explore={Boolean(props.explore)} />
+          <MarketingFooter note={props.footerNote} signedIn={Boolean(user) || hinted} loginHref={loginHref} explore={Boolean(props.explore)} />
         ) : (
           // The owl naps on the footer of the daily pages (dashboard, connections list,
           // transactions): the ones with the backdrop, minus Settings. Never on settings, connect
@@ -308,7 +326,7 @@ function TrustLine() {
   );
 }
 
-function MarketingFooter(props: { note?: string; signedIn: boolean; explore: boolean }) {
+function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: string; explore: boolean }) {
   return (
     // mt-*: room above the hairline for the owl, whatever section ends the page.
     <footer className="mt-12 border-t sm:mt-16">
@@ -341,7 +359,7 @@ function MarketingFooter(props: { note?: string; signedIn: boolean; explore: boo
                 {props.signedIn ? (
                   <FooterLink href="/dashboard">Dashboard</FooterLink>
                 ) : (
-                  <FooterLink href="/login">Log in</FooterLink>
+                  <FooterLink href={props.loginHref}>Log in</FooterLink>
                 )}
               </li>
             </ul>

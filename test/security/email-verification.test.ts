@@ -275,6 +275,20 @@ describe('the mailed link', () => {
     expect((await b.get('/verify-email')).headers.get('location')).toBe('/dashboard');
   });
 
+  it('comes back to the page the sign-up started from (a public page’s lock), once', async () => {
+    const b = new Browser();
+    const next = '/p/acme?chart=mrr&range=1y';
+    expect((await b.post('/signup', { email: EMAIL, password: PW, next })).headers.get('location')).toBe('/verify-email');
+    expect(b.has('__Host-hm_next')).toBe(true);
+    const res = await b.post('/verify-email/confirm', { token: mailedToken() });
+    expect(res.headers.get('location')).toBe(next);
+    expect(b.has('__Host-hm_celebrate')).toBe(true);
+    expect(b.has('__Host-hm_next')).toBe(false);
+    // Signed in, with the hint the public page reads to open its charts.
+    expect(b.has('__Host-hm_session')).toBe(true);
+    expect(b.has('__Host-hm_in')).toBe(true);
+  });
+
   it('confirms from another device without signing it in', async () => {
     const b = await signedUp();
     const phone = new Browser();

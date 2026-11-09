@@ -51,6 +51,12 @@ describe('cookies', () => {
       expect(c).toMatch(/HttpOnly/i);
       expect(c).toMatch(/SameSite=Lax/i);
     }
+    // The one a script may read: "1", the hint public pages use to offer Dashboard (lib/signed-in.ts).
+    const hint = set.find((h) => h.startsWith('__Host-hm_in='));
+    expect(hint).toMatch(/^__Host-hm_in=1; /);
+    expect(hint).not.toMatch(/HttpOnly/i);
+    expect(hint).toMatch(/SameSite=Lax/i);
+    expect(hint).toMatch(/Secure/);
 
     const cookie = set.map((h) => h.split(';')[0]).join('; ');
     const me = await app().request('https://hoomuch.example.com/me', { headers: { cookie } }, env, fakeCtx);
@@ -66,7 +72,7 @@ describe('cookies', () => {
     const env = await setup();
     const res = await app().request('http://hoomuch.example.com/in', { method: 'POST' }, env, fakeCtx);
     const set = res.headers.getSetCookie();
-    expect(set).toHaveLength(2); // session + flash; `every` alone would pass on none
+    expect(set).toHaveLength(3); // session + signed-in hint + flash; `every` alone would pass on none
     expect(set.every((h) => h.startsWith('__Host-') && /Secure/.test(h))).toBe(true);
   });
 
@@ -76,9 +82,25 @@ describe('cookies', () => {
     const set = res.headers.getSetCookie();
     expect(set.some((h) => h.startsWith('hm_session=') && !/Secure/.test(h))).toBe(true);
     // Local dev drops only Secure and the prefix; the other flags stay.
-    for (const c of set) {
+    for (const c of set.filter((h) => !h.startsWith('hm_in='))) {
       expect(c).toMatch(/HttpOnly/i);
       expect(c).toMatch(/SameSite=Lax/i);
     }
+    expect(set.some((h) => h.startsWith('hm_in=1;') && !/Secure|HttpOnly/i.test(h))).toBe(true);
+  });
+
+  it('keep the signed-in hint in step with the session', async () => {
+    const env = await setup();
+    const res = await app().request('https://hoomuch.example.com/in', { method: 'POST' }, env, fakeCtx);
+    const session = res.headers.getSetCookie().find((h) => h.startsWith('__Host-hm_session='))!.split(';')[0]!;
+    // A session from before the hint existed gets one on its next page.
+    const old = await app().request('https://hoomuch.example.com/me', { headers: { cookie: session } }, env, fakeCtx);
+    expect(old.headers.getSetCookie().some((h) => h.startsWith('__Host-hm_in=1;'))).toBe(true);
+    // A hint without a session (it ended in another browser) is dropped.
+    const stale = await app().request('https://hoomuch.example.com/me', { headers: { cookie: '__Host-hm_in=1' } }, env, fakeCtx);
+    expect(stale.headers.getSetCookie().some((h) => h.startsWith('__Host-hm_in=;') && /Max-Age=0/.test(h))).toBe(true);
+    // Both in step: nothing to send.
+    const fine = await app().request('https://hoomuch.example.com/me', { headers: { cookie: `${session}; __Host-hm_in=1` } }, env, fakeCtx);
+    expect(fine.headers.getSetCookie()).toEqual([]);
   });
 });
