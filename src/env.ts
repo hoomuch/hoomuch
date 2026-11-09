@@ -37,6 +37,11 @@ export interface Bindings {
   RESEND_API_KEY?: string;
   /** Sender for that mail, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. */
   MAIL_FROM?: string;
+  /**
+   * "true" turns on public pages (SPEC F-21): owners can publish a product's verified revenue at
+   * /p/<slug> with an embeddable badge. Anything else, the default, leaves them off.
+   */
+  PUBLIC_PAGES?: string;
 }
 
 export interface SessionUser {

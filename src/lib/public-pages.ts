@@ -1,0 +1,131 @@
+/**
+ * Public pages (SPEC F-21): the switch and the rules for what an owner types. Owner: Lead.
+ * Pure, so the share page in the browser can use the same rules as the server.
+ */
+
+import type { Bindings } from '../env';
+import { HOUR } from './time';
+
+/** Public pages are on only where the instance says so (`PUBLIC_PAGES=true`); off by default. */
+export function publicPagesEnabled(env: Pick<Bindings, 'PUBLIC_PAGES'> | undefined): boolean {
+  return env?.PUBLIC_PAGES?.trim() === 'true';
+}
+
+/** Products one account can have. */
+export const MAX_PRODUCTS = 10;
+
+/** A public page and its badge say "not updated" once its oldest connection's last sync is older than this. */
+export const STALE_AFTER_MS = 72 * HOUR;
+
+const SLUG_MIN = 3;
+export const SLUG_MAX = 40;
+export const NAME_MAX = 60;
+export const TAGLINE_MAX = 120;
+export const WEBSITE_MAX = 200;
+
+/** Lowercase letters and digits, hyphens inside: `acme`, `acme-app-2`. */
+const SLUG_PATTERN = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
+const SLUG_RE = new RegExp(`^${SLUG_PATTERN}$`);
+
+export function isValidSlug(slug: string): boolean {
+  return slug.length >= SLUG_MIN && slug.length <= SLUG_MAX && SLUG_RE.test(slug) && !slug.includes('--');
+}
+
+/**
+ * A slug suggested from a product name: "Acme Notes!" → "acme-notes". Letters outside a–z lose
+ * their accents where they have one ("Çiçek" → "cicek"), everything else becomes a hyphen. May
+ * still be too short; isValidSlug says.
+ */
+export function slugFromName(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/ı/g, 'i')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, SLUG_MAX)
+    .replace(/-+$/, '');
+}
+
+/** What the owner typed for a slug, lowercased and trimmed; no other changes, so a typo shows as invalid. */
+export function normalizeSlug(input: string): string {
+  return input.trim().toLowerCase();
+}
+
+/**
+ * The owner's website as an https URL without credentials, or null if it isn't one. A bare
+ * "acme.com" gets https:// in front.
+ */
+export function normalizeWebsite(input: string): string | null {
+  const raw = input.trim();
+  if (raw === '' || raw.length > WEBSITE_MAX) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  let url: URL;
+  try {
+    url = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || !url.hostname.includes('.')) return null;
+  const out = url.toString();
+  return out.length > WEBSITE_MAX ? null : out;
+}
+
+// ---------- profiles (SPEC F-22) ----------
+
+export const HANDLE_MAX = 30;
+export const DISPLAY_NAME_MAX = 60;
+export const BIO_MAX = 160;
+
+const HANDLE_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
+
+/** Handles nobody gets: they'd pass for hoomuch itself. */
+const RESERVED_HANDLES = new Set([
+  'admin', 'administrator', 'api', 'app', 'billing', 'help', 'hoomuch', 'mod', 'moderator', 'official',
+  'root', 'security', 'staff', 'support', 'system', 'team', 'www',
+]);
+
+export function isValidHandle(handle: string): boolean {
+  return handle.length >= 3 && handle.length <= HANDLE_MAX && HANDLE_RE.test(handle) && !RESERVED_HANDLES.has(handle);
+}
+
+/**
+ * An X (Twitter) username from what the owner typed: "@acme", "acme" or an x.com / twitter.com
+ * profile URL. Null when it isn't one (1 to 15 letters, digits or underscores).
+ */
+export function normalizeXHandle(input: string): string | null {
+  let v = input.trim();
+  const url = /^(?:https?:\/\/)?(?:www\.)?(?:x|twitter)\.com\/([^/?#]+)\/?(?:[?#].*)?$/i.exec(v);
+  if (url) v = url[1]!;
+  v = v.replace(/^@/, '');
+  return /^[A-Za-z0-9_]{1,15}$/.test(v) ? v : null;
+}
+
+/**
+ * Whether a connection's figures can count on a public page: never the demo data, never a
+ * test-mode key (Stripe `sk_test_`, Paddle sandbox…), whose money isn't real.
+ */
+export function countsPublicly(provider: string, testMode: boolean): boolean {
+  return provider !== 'demo' && !testMode;
+}
+
+// ---------- Explore (SPEC F-23) ----------
+
+/** Revenue history a product needs before Explore lists it, so a fresh account can't fake its way in. */
+export const EXPLORE_MIN_HISTORY_DAYS = 30;
+/** Growth ranks only products at this MRR or more (USD cents): from $5, +900% means nothing. */
+export const EXPLORE_GROWTH_MIN_MRR = 10_000;
+/** Products Explore lists at most, per view. */
+export const EXPLORE_LIMIT = 100;
+/** The landing page shows its strip only once this many products qualify, and this many in it. */
+export const EXPLORE_LANDING_MIN = 6;
+
+/** Longest Explore search kept; anything past it is cut. */
+export const EXPLORE_QUERY_MAX = 60;
+
+export type ExploreSort = 'mrr' | 'growth' | 'new';
+
+export function parseExploreSort(v: string | undefined | null): ExploreSort {
+  return v === 'growth' || v === 'new' ? v : 'mrr';
+}

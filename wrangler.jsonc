@@ -67,7 +67,10 @@
     // Email verification: who the sign-up confirmation mail comes from, on a domain verified in
     // Resend, e.g. "hoomuch <hello@example.com>". It's on once the RESEND_API_KEY secret is set;
     // without that secret, nothing is mailed and new accounts don't need confirming.
-    "MAIL_FROM": ""
+    "MAIL_FROM": "",
+    // Public pages: "true" lets owners publish a product's verified revenue at /p/<slug>, with an
+    // embeddable badge at /badge/<slug>.svg. Empty (the default) leaves them off.
+    "PUBLIC_PAGES": ""
   },
 
   // Per-network request limits, checked before any D1 work (src/lib/rate-limit.ts). Counts are per

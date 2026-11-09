@@ -137,6 +137,13 @@ it('read models on the seeded database', async () => {
         },
       },
     );
+    // A public product's figures (SPEC F-21), worked out after each sync of one of its connections:
+    // here every connection of the persona as one product. Versions without public pages have no
+    // such case (bench:ab copies this file into the base checkout), so it's only added where it runs.
+    if ('getProductStats' in dashboardModule) {
+      const stats = (dashboardModule as { getProductStats: typeof import('../src/data/dashboard').getProductStats }).getProductStats;
+      cases.push({ name: `${P}/public:stats`, run: () => stats(env.DB, { id: u.userId, timeZone: u.timeZone }, new Set(u.connectionIds)) });
+    }
   }
 
   const results: Record<string, CaseResult> = {};

@@ -23,6 +23,7 @@ import { ProviderError, type ProviderId, type ProviderMeta, type VerifyResult } 
 import { SYNC_LOCK_STALE_MS, syncConnection, type SyncResult } from '../sync/engine';
 import { QUEUED_STALE_MS, enqueueSync } from '../sync/queue';
 import { acquireSyncLock } from '../sync/repo';
+import { productBeforeDelete, refreshProductStats, refreshStatsForConnection } from './public-pages';
 
 export const MAX_CONNECTIONS_PER_USER = 25;
 const MANUAL_SYNC_COOLDOWN_MS = 60_000;
@@ -247,6 +248,8 @@ export async function rotateCredentials(
       await env.DB.prepare('UPDATE connections SET revenue_cursor = NULL WHERE id = ? AND user_id = ?').bind(id, userId).run();
     } else {
       await purgeSyncedData(env.DB, userId, id);
+      // The old account's figures are gone: a public page stops showing them now, not at the next sync.
+      await refreshStatsForConnection(env, id);
     }
     const apiKey = v.credentials['apiKey'];
     released = await updateConnectionCredentials(env.DB, userId, id, {
@@ -279,8 +282,12 @@ export async function rotateCredentials(
 export async function deleteConnection(env: Bindings, userId: string, id: string): Promise<boolean> {
   const row = await getConnection(env.DB, userId, id);
   if (!row) return false;
+  const product = await productBeforeDelete(env, id);
   await purgeTransactions(env.DB, id);
-  return deleteConnectionRow(env.DB, userId, id);
+  const deleted = await deleteConnectionRow(env.DB, userId, id);
+  // Its public product, if any, now adds up one connection fewer.
+  if (deleted && product) await refreshProductStats(env, product);
+  return deleted;
 }
 
 export const SYNC_QUEUED_MESSAGE = 'A sync is already on its way for this connection.';

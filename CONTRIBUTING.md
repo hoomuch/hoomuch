@@ -274,6 +274,10 @@ These keep the product what it is. Pull requests that break them will be asked t
   `src/components/ui`), and wrap them in `src/views/components/ui.tsx` only to add hoomuch's rules.
 - **The dashboard reads only from D1.** Provider APIs are called from the sync engine, never while
   rendering a page.
+- **Public pages show only what the owner published.** `/p/` (and its `.md`), `/u/`, `/badge/`,
+  `/explore` and `/sitemap.xml` render without the visitor's session (no cookie read or set, nothing
+  of the visitor's in the page), so they can be cached for everyone, and each reads the figures
+  stored when a sync finished, never the read models. Demo data and test-mode keys never count.
 
 ## Adding a provider
 

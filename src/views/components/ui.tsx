@@ -354,11 +354,14 @@ export function LinkButton(props: {
   large?: boolean;
   block?: boolean;
   className?: string;
+  /** For a link off the site, e.g. "nofollow ugc noopener noreferrer" with target "_blank". */
+  rel?: string;
+  target?: '_blank';
   children?: ReactNode;
 }) {
   return (
     <CossButton
-      render={<a href={props.href} />}
+      render={<a href={props.href} rel={props.rel} target={props.target} />}
       variant={COSS_VARIANT[props.variant ?? 'primary']}
       size={sizeOf(props.small, props.large)}
       className={cn(props.block && 'w-full motion-safe:active:scale-[0.985]', props.className)}
@@ -544,6 +547,39 @@ export function ConfirmCheckbox(props: { name?: string; label: ReactNode; error?
       </Label>
       {props.error && errId ? <FieldError id={errId} message={props.error} /> : null}
     </div>
+  );
+}
+
+/**
+ * One choice in a group of checkboxes that post under the same name ("connections" → each checked
+ * value). Not required; the whole line is the click target, as with ConfirmCheckbox.
+ */
+export function CheckboxOption(props: {
+  id: string;
+  name: string;
+  value: string;
+  label: ReactNode;
+  /** A quieter second line, e.g. why it can't be picked. */
+  hint?: ReactNode;
+  defaultChecked?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    // Disabled: the whole line fades, its logo or icon too, so it can't pass for a choice.
+    <Label className={cn('items-start gap-2.5 font-normal', props.disabled && 'cursor-not-allowed opacity-50')}>
+      <Checkbox
+        id={props.id}
+        name={props.name}
+        value={props.value}
+        defaultChecked={props.defaultChecked}
+        disabled={props.disabled}
+        className="mt-px"
+      />
+      <span className="min-w-0">
+        <span className="block wrap-break-word">{props.label}</span>
+        {props.hint ? <span className="block text-caption text-muted-foreground">{props.hint}</span> : null}
+      </span>
+    </Label>
   );
 }
 

@@ -8,6 +8,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import type { ConnectionSummary } from '../data/types';
 import type { AppEnv } from '../env';
+import { publicPagesEnabled } from '../lib/public-pages';
 import type { PageChrome } from '../views/layout';
 import type { SyncState } from '../views/pages/shared';
 
@@ -18,6 +19,10 @@ export function chrome(c: AppContext): PageChrome {
   const chrome: PageChrome = { user: c.get('user') ?? null, flash: c.get('flash') ?? null };
   // Only when set, so every other page's payload stays exactly as it was.
   if (c.get('celebrate')) chrome.celebrate = true;
+  if (publicPagesEnabled(c.env)) {
+    if (chrome.user) chrome.share = true;
+    else chrome.explore = true;
+  }
   return chrome;
 }
 
@@ -30,10 +35,12 @@ export const formLimit = bodyLimit({
 });
 
 export interface FormFields {
-  /** Trimmed string value, capped at `max` characters ('' when absent or a File). */
+  /** Trimmed string value, capped at `max` characters ('' when absent or a File). The last one if repeated. */
   text(name: string, max?: number): string;
   /** Untrimmed value (passwords, API keys), capped at `max` characters. */
   secret(name: string, max?: number): string;
+  /** Every value posted under `name` (checkbox groups), trimmed, at most `limit` of them. */
+  all(name: string, max?: number, limit?: number): string[];
 }
 
 /**
@@ -41,19 +48,22 @@ export interface FormFields {
  * A malformed body is the client's fault: 400, not a logged 500.
  */
 export async function readForm(c: AppContext): Promise<FormFields> {
-  let body: Awaited<ReturnType<typeof c.req.parseBody>>;
+  let body: Record<string, unknown>;
   try {
-    body = await c.req.parseBody();
+    body = await c.req.parseBody({ all: true });
   } catch {
     throw new HTTPException(400, { message: 'Malformed form body.' });
   }
-  const values = new Map<string, string>();
+  const values = new Map<string, string[]>();
   for (const [k, v] of Object.entries(body)) {
-    if (typeof v === 'string') values.set(k, v);
+    const list = (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === 'string');
+    if (list.length > 0) values.set(k, list);
   }
+  const last = (name: string) => values.get(name)?.at(-1) ?? '';
   return {
-    text: (name, max = 256) => (values.get(name) ?? '').trim().slice(0, max),
-    secret: (name, max = 1024) => (values.get(name) ?? '').slice(0, max),
+    text: (name, max = 256) => last(name).trim().slice(0, max),
+    secret: (name, max = 1024) => last(name).slice(0, max),
+    all: (name, max = 256, limit = 50) => (values.get(name) ?? []).slice(0, limit).map((v) => v.trim().slice(0, max)),
   };
 }
 

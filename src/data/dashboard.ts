@@ -10,6 +10,7 @@
 import type { Bindings, SessionUser } from '../env';
 import { connectionsStatement, type ConnectionView } from '../db/queries';
 import { normalizeCurrency, parseMoneyMap } from '../lib/money';
+import { countsPublicly } from '../lib/public-pages';
 import { addDays, dayNumberToKeySql, dayRange, UTC, zonedDayKey } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
@@ -27,11 +28,14 @@ import {
   type ConnectionSummary,
   type DashboardData,
   type Kpi,
+  lastRevenueDay,
   type MrrDay,
   type ProductBreakdown,
   type ProductMrrBreakdown,
   type ProductMrrRow,
   type ProductRow,
+  PUBLIC_SERIES_DAYS,
+  type PublicProductStats,
   revenueInSteps,
   revenueStep,
   type RangeDays,
@@ -125,8 +129,18 @@ export async function getDashboardPage(
   };
 }
 
-/** The dashboard as statements for a page's batch (ReadModelQuery); getDashboardData runs it alone. */
-function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays, now: number): ReadModelQuery<DashboardData> {
+/**
+ * The dashboard as statements for a page's batch (ReadModelQuery); getDashboardData runs it alone.
+ * `include` narrows it to some of the user's connections (a public product, productStatsQuery):
+ * the statements stay the dashboard's, and `build` drops the other connections' rows.
+ */
+function dashboardQuery(
+  db: D1Database,
+  user: Pick<SessionUser, 'id' | 'baseCurrency' | 'timeZone'>,
+  rangeDays: RangeDays,
+  now: number,
+  include?: (c: ConnectionView) => boolean,
+): ReadModelQuery<DashboardData> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   // Days run midnight to midnight in the user's zone (SPEC §6).
   const tz = user.timeZone || UTC;
@@ -186,8 +200,11 @@ function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays,
         .bind(...productDays.dayNumber.binds, user.id, productDays.lo, productDays.hi),
       fxHistoryStatement(db, user.id, currency, prevStart, today),
     ],
-    build: ([windowR, latestR, beforeR, revR, productR, histR], conns, fxRows) => {
-      const productRows = rowsOf<ProductDayRow>(productR);
+    build: ([windowR, latestR, beforeR, revR, productR, histR], allConns, fxRows) => {
+      const conns = include ? allConns.filter(include) : allConns;
+      const ids = include ? new Set(conns.map((c) => c.id)) : null;
+      const own = <T extends { connection_id: string }>(rows: T[]): T[] => (ids ? rows.filter((r) => ids.has(r.connection_id)) : rows);
+      const productRows = own(rowsOf<ProductDayRow>(productR));
       const fx = latestFx(fxRows);
       return buildDashboard({
         now,
@@ -198,10 +215,10 @@ function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays,
         prevStart,
         rangeDays,
         conns,
-        windowSnaps: rowsOf<SnapRow>(windowR),
-        latestSnaps: rowsOf<SnapRow>(latestR),
-        beforeSnaps: rowsOf<SnapRow>(beforeR),
-        revRows: [...rowsOf<RevRow>(revR), ...revenueFromProducts(productRows, conns)],
+        windowSnaps: own(rowsOf<SnapRow>(windowR)),
+        latestSnaps: own(rowsOf<SnapRow>(latestR)),
+        beforeSnaps: own(rowsOf<SnapRow>(beforeR)),
+        revRows: [...own(rowsOf<RevRow>(revR)), ...revenueFromProducts(productRows, conns)],
         productRows,
         fx,
         // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
@@ -209,6 +226,162 @@ function dashboardQuery(db: D1Database, user: SessionUser, rangeDays: RangeDays,
       });
     },
   };
+}
+
+/**
+ * A published product's figures (SPEC F-21): the dashboard narrowed to the product's connections
+ * that count publicly, in USD, over 30 days, plus the MRR chart over PUBLIC_SERIES_DAYS. Null when
+ * no connection counts or none has a snapshot yet. Run when a sync finishes, not per request: the
+ * public page reads the stored result. One D1 round trip.
+ */
+export async function getProductStats(
+  db: D1Database,
+  owner: { id: string; timeZone: string },
+  connectionIds: ReadonlySet<string>,
+  now: number = Date.now(),
+): Promise<PublicProductStats | null> {
+  const q = productStatsQuery(db, owner, connectionIds, now);
+  const [connsR, fxR, ...results] = await db.batch([connectionsStatement(db, owner.id), db.prepare(LATEST_FX_SQL), ...q.statements]);
+  return q.build(results, rowsOf<ConnectionView>(connsR), rowsOf<FxRow>(fxR));
+}
+
+/** How far back the rates for a product's total revenue are read; older days take the oldest of them. */
+const TOTAL_FX_DAYS = 800;
+
+function productStatsQuery(
+  db: D1Database,
+  owner: { id: string; timeZone: string },
+  connectionIds: ReadonlySet<string>,
+  now: number,
+): ReadModelQuery<PublicProductStats | null> {
+  const user = { id: owner.id, baseCurrency: 'USD', timeZone: owner.timeZone };
+  const include = (c: ConnectionView) => connectionIds.has(c.id) && countsPublicly(c.provider, c.test_mode === 1);
+  // The figures over 30 days, daily revenue over 90, and the year: weekly revenue and daily MRR.
+  const month = dashboardQuery(db, user, 30, now, include);
+  const quarter = dashboardQuery(db, user, PUBLIC_SERIES_DAYS, now, include);
+  const year = dashboardQuery(db, user, 364, now, include);
+  const n = month.statements.length;
+  const today = zonedDayKey(now, owner.timeZone || UTC);
+  // Each connection's first snapshot: a seek on the primary key per connection.
+  const firstDays = db
+    .prepare(
+      `SELECT c.id AS connection_id, (SELECT MIN(x.day) FROM snapshots x WHERE x.connection_id = c.id) AS first_day
+         FROM connections c WHERE c.user_id = ?`,
+    )
+    .bind(owner.id);
+  // All the revenue history held, for the total and the months: one row per connection, day and
+  // currency. Its days are UTC (or the provider's own); totals and months don't regroup them.
+  const allRevenue = db
+    .prepare(
+      `SELECT d.connection_id, d.day, d.currency, d.gross - d.refunds AS net
+         FROM daily_revenue d JOIN connections c ON c.id = d.connection_id
+        WHERE c.user_id = ?`,
+    )
+    .bind(owner.id);
+  // Rates for those days: a day before the stored history takes the oldest rate (SPEC §6 "Döviz").
+  const totalFx = fxHistoryStatement(db, owner.id, 'USD', addDays(today, -TOTAL_FX_DAYS), today);
+  // Each connection's last snapshot of every month: a range seek on the primary key per row.
+  const monthEnds = db
+    .prepare(
+      `SELECT s.connection_id, s.day, s.mrr FROM snapshots s JOIN connections c ON c.id = s.connection_id
+        WHERE c.user_id = ?1 AND s.day <= ?2
+          AND s.day = (SELECT MAX(x.day) FROM snapshots x WHERE x.connection_id = s.connection_id
+                         AND x.day >= substr(s.day, 1, 7) || '-01' AND x.day <= substr(s.day, 1, 7) || '-31' AND x.day <= ?2)`,
+    )
+    .bind(owner.id, today);
+  return {
+    statements: [...month.statements, ...quarter.statements, ...year.statements, firstDays, allRevenue, totalFx, monthEnds],
+    build: (results, allConns, fxRows) => {
+      const conns = allConns.filter(include);
+      const ids = new Set(conns.map((c) => c.id));
+      const [firstR, revenueR, fxR, monthEndR] = results.slice(n * 3);
+      const since =
+        rowsOf<{ connection_id: string; first_day: string | null }>(firstR)
+          .filter((r) => ids.has(r.connection_id) && r.first_day)
+          .map((r) => r.first_day!)
+          .sort()[0] ?? null;
+      if (conns.length === 0 || since === null) return null;
+      const m = month.build(results.slice(0, n), allConns, fxRows);
+      const q = quarter.build(results.slice(n, n * 2), allConns, fxRows);
+      const y = year.build(results.slice(n * 2, n * 3), allConns, fxRows);
+      const synced = conns.map((x) => x.last_synced_at).filter((t): t is number => t !== null);
+
+      // Revenue: the total held, and by calendar month, each day at its own rate.
+      const cv = new FxConverter('USD', latestFx(fxRows), new FxHistory(rowsOf<FxRow>(fxR)));
+      let revenueTotal = 0;
+      let revenueSince: string | null = null;
+      const byMonth = new Map<string, number>();
+      for (const r of rowsOf<{ connection_id: string; day: string; currency: string; net: number }>(revenueR)) {
+        if (!ids.has(r.connection_id) || r.day > today) continue;
+        const net = cv.amountOn(r.net, r.currency, r.day);
+        revenueTotal += net;
+        byMonth.set(r.day.slice(0, 7), (byMonth.get(r.day.slice(0, 7)) ?? 0) + net);
+        if (revenueSince === null || r.day < revenueSince) revenueSince = r.day;
+      }
+      const revenueMonthly = revenueSince ? monthsOf(revenueSince, today).map((mo) => ({ ...mo, total: byMonth.get(mo.day.slice(0, 7)) ?? 0 })) : [];
+
+      // MRR at each month's end: every connection's latest snapshot by then, at the latest rates.
+      const ends = rowsOf<{ connection_id: string; day: string; mrr: string }>(monthEndR)
+        .filter((r) => ids.has(r.connection_id))
+        .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+      const latest = new Map<string, number>();
+      const mrrMonthly: MrrDay[] = [];
+      for (const r of ends) {
+        latest.set(r.connection_id, cv.map(parseMoneyMap(r.mrr)));
+        const total = [...latest.values()].reduce((a, b) => a + b, 0);
+        const last = mrrMonthly.at(-1);
+        if (last && last.day.slice(0, 7) === r.day.slice(0, 7)) {
+          last.day = r.day;
+          last.total = total;
+        } else mrrMonthly.push({ day: r.day, total });
+      }
+
+      return {
+        v: 1,
+        currency: 'USD',
+        mrr: m.kpis.mrr,
+        activeSubscriptions: m.kpis.activeSubscriptions,
+        revenue: m.kpis.revenue,
+        history: {
+          today,
+          revenueDaily: q.revenueSeries.map((d) => ({ day: d.day, total: d.total })),
+          revenueWeekly: y.revenueSeries.map((d) => ({ day: d.day, ...(d.to ? { to: d.to } : {}), total: d.total })),
+          revenueMonthly,
+          mrrDaily: y.mrrSeries,
+          mrrMonthly,
+        },
+        revenueTotal,
+        revenueSince,
+        providers: [...new Set(m.breakdown.map((b) => b.provider))],
+        since,
+        syncedAt: synced.length > 0 ? Math.min(...synced) : null,
+        estimated: m.warnings.length > 0,
+        revenuePartial: m.breakdown.some((b) => b.revenue === null),
+        missingFx: [...new Set([...m.fx.missing, ...q.fx.missing, ...y.fx.missing, ...cv.missing])].sort(),
+        computedAt: now,
+      };
+    },
+  };
+}
+
+/** Calendar months from `from`'s to `to`'s, each as its first and last day (clipped to the two). */
+function monthsOf(from: string, to: string): Array<{ day: string; to: string }> {
+  const out: Array<{ day: string; to: string }> = [];
+  let cur = `${from.slice(0, 7)}-01`;
+  while (cur <= to) {
+    const next = addMonthsToDay(cur, 1);
+    const last = addDays(next, -1);
+    out.push({ day: cur < from ? from : cur, to: last > to ? to : last });
+    cur = next;
+  }
+  return out;
+}
+
+/** 'YYYY-MM-01' plus `n` months. */
+function addMonthsToDay(firstOfMonth: string, n: number): string {
+  const d = new Date(`${firstOfMonth}T00:00:00.000Z`);
+  d.setUTCMonth(d.getUTCMonth() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 /**

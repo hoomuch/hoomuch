@@ -1,6 +1,8 @@
 /** Landing, sign-up, log-in, log-out. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
+import { getLandingGallery } from '../data/explore';
+import { publicPagesEnabled } from '../lib/public-pages';
 import type { AppEnv } from '../env';
 import {
   authenticate,
@@ -73,16 +75,19 @@ function carryNext(v: string | undefined | null): string | null {
 }
 
 export function registerAuthRoutes(app: Hono<AppEnv>): void {
-  app.get('/', (c) => {
+  app.get('/', async (c) => {
     if (c.get('user')) return c.redirect('/dashboard', 303);
     // The live preview: deterministic demo numbers dated to today, rendered by the real components.
     const demo = fixtureDashboard(parseRange(c.req.query('range')), 'full', Date.now());
+    // Real products from Explore (SPEC F-23), where public pages are on: one indexed read.
+    const gallery = publicPagesEnabled(c.env) ? await getLandingGallery(c.env.DB) : null;
     return renderPage(c, 'landing', {
         chrome: chrome(c),
         signupOpen: signupAllowed(c.env),
         demo,
         revenueVariant: parseRevenueVariant(c.req.query('revenue')),
         cadence: syncCadence(c.env.SYNC_INTERVAL_MINUTES),
+        gallery,
       });
   });
 

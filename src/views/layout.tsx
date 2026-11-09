@@ -23,7 +23,7 @@ import { Owl } from './components/mascot';
 import { IconLinkButton, LinkButton } from './components/ui';
 import { PagePayloadScript } from './page-root';
 
-type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
+type NavKey = 'dashboard' | 'connections' | 'transactions' | 'share' | 'settings' | 'explore';
 
 /** What every page needs from the request to draw the chrome. */
 export interface PageChrome {
@@ -31,6 +31,10 @@ export interface PageChrome {
   flash: FlashMsg | null;
   /** One confetti burst over the page (once, right after sign-up). */
   celebrate?: boolean;
+  /** The instance has public pages on (PUBLIC_PAGES): the nav offers Share. Only set when true. */
+  share?: boolean;
+  /** The instance has Explore (PUBLIC_PAGES): signed-out pages link to it. Only set when true. */
+  explore?: boolean;
 }
 
 export interface LayoutProps extends PageChrome {
@@ -52,6 +56,12 @@ export interface LayoutProps extends PageChrome {
   refresh?: { seconds: number; url?: string; stopUrl?: string };
   /** Keep app pages out of search engines. */
   noindex?: boolean;
+  /**
+   * Link previews (Open Graph and X's card) and the canonical URL, for pages meant to be shared.
+   * `url` and `image` are absolute; `title` defaults to the page title with the app name.
+   * `markdown` is the same page as Markdown, for AI assistants (`<link rel="alternate">`).
+   */
+  og?: { url: string; image: string; title?: string; markdown?: string };
   /**
    * Public, personality-allowed pages (landing, 404): a "Log in" link in the signed-out header,
    * the soft brand glow behind the top of the page and the footer with the sleeping owl. Never
@@ -90,6 +100,9 @@ const NAV: { key: NavKey; href: string; label: string }[] = [
   { key: 'transactions', href: '/transactions', label: 'Transactions' },
 ];
 
+/** Public pages (SPEC F-21), only on instances that turn them on. */
+const SHARE_NAV: { key: NavKey; href: string; label: string } = { key: 'share', href: '/share', label: 'Share' };
+
 /** Shared horizontal frame so header, main and footer edges line up: 960px content box. */
 const FRAME = 'mx-auto w-full max-w-[60rem] px-4 sm:px-6';
 const FRAME_NARROW = 'mx-auto w-full max-w-[28rem] px-4 sm:px-6'; // 400px card at sm+
@@ -119,6 +132,21 @@ export function Layout(props: LayoutProps) {
         <title>{fullTitle}</title>
         <meta name="description" content={props.description ?? DEFAULT_DESCRIPTION} />
         {props.noindex ? <meta name="robots" content="noindex" /> : null}
+        {props.og ? (
+          <>
+            <link rel="canonical" href={props.og.url} />
+            {props.og.markdown ? <link rel="alternate" type="text/markdown" href={props.og.markdown} /> : null}
+            <meta property="og:type" content="website" />
+            <meta property="og:site_name" content={APP_NAME} />
+            <meta property="og:title" content={props.og.title ?? fullTitle} />
+            <meta property="og:description" content={props.description ?? DEFAULT_DESCRIPTION} />
+            <meta property="og:url" content={props.og.url} />
+            <meta property="og:image" content={props.og.image} />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="630" />
+            <meta name="twitter:card" content="summary_large_image" />
+          </>
+        ) : null}
         {props.refresh ? (
           <meta
             httpEquiv="refresh"
@@ -164,7 +192,7 @@ export function Layout(props: LayoutProps) {
                   aria-label="Main"
                   className="order-last -mx-4 -mb-px flex w-[calc(100%+2rem)] flex-nowrap justify-between self-end overflow-x-auto px-1 sm:order-none sm:mx-0 sm:w-auto sm:justify-start sm:overflow-visible sm:px-0"
                 >
-                  {NAV.map((n) => (
+                  {(props.share ? [...NAV, SHARE_NAV] : NAV).map((n) => (
                     <a
                       key={n.key}
                       href={n.href}
@@ -192,6 +220,11 @@ export function Layout(props: LayoutProps) {
             ) : props.marketing ? (
               // Secondary, not primary: the page's own action ("See your MRR") is the one ink button.
               <div className="ml-auto flex items-center gap-2">
+                {props.explore ? (
+                  <a href="/explore" aria-current={props.nav === 'explore' ? 'page' : undefined} className="rounded-md px-2 py-1 text-body text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:text-foreground">
+                    Explore
+                  </a>
+                ) : null}
                 <IconLinkButton href={SOURCE_URL} label="hoomuch on GitHub">
                   <GitHubMark />
                 </IconLinkButton>
@@ -209,7 +242,7 @@ export function Layout(props: LayoutProps) {
         </main>
 
         {props.marketing ? (
-          <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} />
+          <MarketingFooter note={props.footerNote} signedIn={Boolean(user)} explore={Boolean(props.explore)} />
         ) : (
           // The owl naps on the footer of the daily pages (dashboard, connections list,
           // transactions): the ones with the backdrop, minus Settings. Never on settings, connect
@@ -275,7 +308,7 @@ function TrustLine() {
   );
 }
 
-function MarketingFooter(props: { note?: string; signedIn: boolean }) {
+function MarketingFooter(props: { note?: string; signedIn: boolean; explore: boolean }) {
   return (
     // mt-*: room above the hairline for the owl, whatever section ends the page.
     <footer className="mt-12 border-t sm:mt-16">
@@ -294,6 +327,11 @@ function MarketingFooter(props: { note?: string; signedIn: boolean }) {
               <li>
                 <FooterLink href="/#store">What we store</FooterLink>
               </li>
+              {props.explore ? (
+                <li>
+                  <FooterLink href="/explore">Explore</FooterLink>
+                </li>
+              ) : null}
               <li>
                 <FooterLink href={SELF_HOST_URL} external>
                   Self-host
