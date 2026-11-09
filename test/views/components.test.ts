@@ -740,11 +740,14 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('href="/login"'); // signed-out header link
     expect(out).not.toContain('NEEDS REAL DATA');
     expect(out).not.toContain('Why this exists'); // no founder note until it's real
-    expect(out).not.toContain('>Pricing<'); // no pricing until it's real
+    expect(out).toContain('Free until your MRR reaches $1,000.'); // the free tier leads the pricing
+    expect(out).toContain('$9 per month'); // exact price, with its tax treatment
+    expect(out).toContain('plus VAT or sales tax where it applies');
 
     const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: false, demo, cadence: 'every hour' }));
     expect(closed).not.toContain('href="/signup"');
     expect(closed).not.toContain('No key handy?');
+    expect(closed).not.toContain('id="pricing-title"'); // a private instance doesn't advertise hoomuch.com
   });
 
   it('finds a milestone crossed in the last 7 days and still held, never one it can’t see crossed', () => {

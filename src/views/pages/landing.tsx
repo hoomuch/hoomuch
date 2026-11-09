@@ -6,8 +6,8 @@
  * setup section renders the real Stripe key guide from the provider registry.
  *
  * Personality lives in the hero, the owl and the footer only. "What we store" stays literal.
- * The founder note and pricing render only once FOUNDER_NOTE / PRICING hold real content:
- * nothing invented ships.
+ * The founder note renders only once FOUNDER_NOTE holds real content: nothing invented ships.
+ * Pricing shows only while sign-up is open, so a private instance doesn't advertise hoomuch.com.
  */
 
 import { Check, X } from 'lucide-react';
@@ -42,10 +42,29 @@ export interface LandingPageProps {
 const FOUNDER_NOTE: { paragraphs: string[]; name: string; role: string } | null = null;
 
 /**
- * [NEEDS REAL DATA] Fill in to show pricing. Exact prices with currency and tax treatment; no
- * "starting at", strikethroughs or countdowns (design/brief.md §3.1.5).
+ * hoomuch.com's plans. Exact prices with currency and tax treatment; no "starting at",
+ * strikethroughs or countdowns (design/brief.md §3.1.5).
  */
-const PRICING: { plan: string; price: string; includes: string }[] | null = null;
+const PRICING: { plan: string; price: string; includes: string }[] = [
+  {
+    plan: 'Under $1,000 MRR',
+    price: 'Free',
+    includes:
+      'Every provider and every feature on hoomuch.com, with no limit on connections. Free during the beta and after it.',
+  },
+  {
+    plan: '$1,000 MRR and up',
+    price: '$9 per month',
+    includes:
+      'Free while the beta lasts, with no card needed. After it, $9 per month or $90 per year, plus VAT or sales tax where it applies. We email you 30 days before the beta ends.',
+  },
+  {
+    plan: 'Self-host',
+    price: 'Free',
+    includes:
+      'Every feature, on your own Cloudflare account. Open source under AGPL-3.0. Cloudflare’s Workers Paid plan ($5 per month) is recommended for production.',
+  },
+];
 
 const SECTION = 'mx-auto mt-28 max-w-[40rem] sm:mt-32';
 const H2 = 'font-heading text-section-sm sm:text-section';
@@ -204,20 +223,20 @@ export function LandingPage(props: LandingPageProps) {
         </section>
       ) : null}
 
-      {/* 5. Pricing (literal): only with real numbers */}
-      {PRICING ? (
+      {/* 5. Pricing (literal): hoomuch.com's plans, so only where anyone can sign up */}
+      {props.signupOpen ? (
         <section aria-labelledby="pricing-title" className={SECTION}>
           <h2 id="pricing-title" className={H2}>
-            Pricing
+            Free until your MRR reaches $1,000.
           </h2>
           <dl className="mt-8 divide-y border-y text-lead">
             {PRICING.map((p) => (
-              <div key={p.plan} className="grid gap-1 py-5 sm:grid-cols-[10rem_1fr] sm:gap-6">
+              <div key={p.plan} className="grid gap-1 py-5 sm:grid-cols-[12rem_1fr] sm:gap-6">
                 <dt className="font-semibold">
                   {p.plan}
                   <span className="block font-normal tabular-nums">{p.price}</span>
                 </dt>
-                <dd className="text-muted-foreground">{p.includes}</dd>
+                <dd className="text-pretty text-muted-foreground">{p.includes}</dd>
               </div>
             ))}
           </dl>
