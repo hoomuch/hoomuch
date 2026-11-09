@@ -24,6 +24,8 @@ import {
   setPublished,
   exploreBlocker,
   updateProduct,
+  updateProductDetails,
+  type DetailFields,
   type ProductFields,
   type ProfileFields,
 } from '../db/public';
@@ -49,6 +51,7 @@ import {
   EXPLORE_QUERY_MAX,
   parseExploreSort,
   publicPagesEnabled,
+  searchIndexable,
   SLUG_MAX,
   STORE_LINK_MAX,
   slugFromName,
@@ -56,7 +59,36 @@ import {
   TAGLINE_MAX,
   WEBSITE_MAX,
 } from '../lib/public-pages';
+import { isCountryCode } from '../lib/countries';
+import { isSupportedCurrency } from '../lib/money';
 import { legalOperator } from '../lib/legal';
+import {
+  AUDIENCE_MAX,
+  CHANNELS,
+  CHANNELS_MAX,
+  contactIn,
+  isFounded,
+  MARKETS,
+  MARKETS_MAX,
+  MORE_MAX,
+  normalizeDetails,
+  parseFounded,
+  parseProductDetails,
+  PRICING_MAX,
+  PROBLEM_MAX,
+  serializeProductDetails,
+  TEAM_SIZE_MAX,
+  TECH,
+  TECH_MAX,
+  DESCRIPTION_MAX,
+  MESSAGE_MAX,
+  parsePlanPrice,
+  PLAN_NAME_MAX,
+  PLAN_NOTE_MAX,
+  PLAN_PERIODS,
+  PLANS_MAX,
+  type PricePlan,
+} from '../lib/product-details';
 import { mediaUrl } from '../lib/media';
 import { checkUpload, deleteImages, mediaEnabled, putImage, refreshSiteIcon, replaceLogo } from '../services/media';
 import { uploadLimit } from './media';
@@ -64,7 +96,16 @@ import { refreshProductStats } from '../services/public-pages';
 import { isProviderId } from '../providers/types';
 import { badgeSvg } from '../views/badge';
 import { productMarkdown } from '../views/markdown';
-import type { ProfileFormErrors, ProfileFormValues, ShareFormErrors, ShareFormValues, SharePageProps, ShareView } from '../views/pages/share';
+import type {
+  DetailsFormErrors,
+  DetailsFormValues,
+  ProfileFormErrors,
+  ProfileFormValues,
+  ShareFormErrors,
+  ShareFormValues,
+  SharePageProps,
+  ShareView,
+} from '../views/pages/share';
 import { renderPage } from '../views/render';
 import { chrome, formLimit, readForm, type AppContext, type FormFields } from './util';
 
@@ -96,6 +137,12 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     const product = await getProduct(c.env.DB, currentUser(c).id, c.req.param('id'));
     if (!product) return c.notFound();
     return renderShare(c, { view: { kind: 'edit', id: product.id } });
+  });
+
+  app.get('/share/products/:id/details', enabled, requireUser, async (c) => {
+    const product = await getProduct(c.env.DB, currentUser(c).id, c.req.param('id'));
+    if (!product) return c.notFound();
+    return renderShare(c, { view: { kind: 'details', id: product.id } });
   });
 
   // The new-product form may carry a logo (multipart), so its body can be an image's size.
@@ -173,6 +220,9 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (!product) return c.notFound();
     const form = await readForm(c);
     const back = `/share/products/${id}`;
+    if (product.removed_at !== null) {
+      return redirectWithFlash(c, back, 'error', 'This product was taken down by the people who run this site, so it can’t be published again.');
+    }
     if (form.text('confirm', 8) !== 'yes') {
       return redirectWithFlash(c, back, 'error', 'Tick the box to confirm these figures can be public, then publish.');
     }
@@ -225,6 +275,23 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (!product || !deleted) return c.notFound();
     await deleteImages(c.env, [deleted.logo_key]);
     return redirectWithFlash(c, '/share', 'success', `Deleted ${product.name}. Its page and badge are down.`);
+  });
+
+  // What the owner tells visitors: founded, country and the About section (not part of the figures).
+  app.post('/share/products/:id/details', enabled, requireUser, formLimit, async (c) => {
+    const user = currentUser(c);
+    const product = await getProduct(c.env.DB, user.id, c.req.param('id'));
+    if (!product) return c.notFound();
+    const input = readDetails(await readForm(c), Date.now());
+    if (!input.fields) {
+      return renderShare(c, {
+        view: { kind: 'details', id: product.id },
+        detailsForm: { values: input.values, fieldErrors: input.errors, error: FIX_BELOW },
+        status: 422,
+      });
+    }
+    if (!(await updateProductDetails(c.env.DB, user.id, product.id, input.fields, Date.now()))) return c.notFound();
+    return redirectWithFlash(c, `/share/products/${product.id}`, 'success', product.published_at !== null ? 'Saved. Its public page shows the change within a few minutes.' : 'Saved.');
   });
 
   app.post('/share/profile', enabled, requireUser, formLimit, async (c) => {
@@ -285,8 +352,11 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     if (!isValidHandle(handle)) return c.notFound();
     const found = await getPublishedProfileByHandle(c.env.DB, handle);
     const media = mediaEnabled(c.env);
+    const now = Date.now();
+    let indexable = false;
     const products = (found?.products ?? []).flatMap((p) => {
       const stats = parsePublicStats(p.stats);
+      if (stats && searchIndexable(stats.revenueSince ?? stats.since, p.hidden_at !== null, now)) indexable = true;
       return stats ? [{ slug: p.slug, name: p.name, tagline: p.tagline, logo: media ? mediaUrl(p.logo_key) : null, stats: publicFigures(stats) }] : [];
     });
     if (!found || products.length === 0) return c.notFound();
@@ -305,7 +375,9 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
       url: `${origin}/u/${found.handle}`,
       image: `${origin}${OG_IMAGE}`,
       signupOpen: signupAllowed(c.env),
-      ...(legalOperator(c.env) ? { legal: true } : {}),
+      // Indexed once one of its products is (lib/public-pages.ts searchIndexable).
+      ...(indexable ? {} : { noindex: true }),
+      ...publicChrome(c),
     });
   });
 
@@ -328,14 +400,21 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
       appStoreUrl: row.app_store_url,
       playStoreUrl: row.play_store_url,
       logo: media ? mediaUrl(row.logo_key) : null,
+      founded: isFounded(row.founded) ? row.founded : null,
+      country: row.country && isCountryCode(row.country) ? row.country : null,
+      details: parseProductDetails(row.details),
     };
     const owner =
       row.owner_handle && row.owner_name
         ? { handle: row.owner_handle, name: row.owner_name, x: row.owner_x, avatar: media ? mediaUrl(row.owner_avatar) : null }
         : null;
     c.header('Cache-Control', `public, max-age=${PAGE_MAX_AGE}`);
+    const indexable = searchIndexable(stats.revenueSince ?? stats.since, row.hidden_at !== null, Date.now());
     if (asMarkdown) {
-      return c.body(productMarkdown({ origin, product, owner, stats }), 200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+      return c.body(productMarkdown({ origin, product, owner, stats }), 200, {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        ...(indexable ? {} : { 'X-Robots-Tag': 'noindex' }),
+      });
     }
     const metric = c.req.query('chart');
     const range = c.req.query('range');
@@ -352,7 +431,8 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
         range: (PUBLIC_RANGES as readonly string[]).includes(range ?? '') ? (range as PublicRange) : '30d',
       },
       signupOpen: signupAllowed(c.env),
-      ...(legalOperator(c.env) ? { legal: true } : {}),
+      ...(indexable ? {} : { noindex: true }),
+      ...publicChrome(c),
     });
   });
 
@@ -385,6 +465,15 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
       'Cache-Control': `public, max-age=${stats ? BADGE_MAX_AGE : 60}`,
     });
   });
+}
+
+/**
+ * What a public page says about the instance: that it publishes legal pages, and where to report a
+ * page (the operator's address, LEGAL_EMAIL), when it names one.
+ */
+function publicChrome(c: Context<AppEnv>): { legal?: true; reportTo?: string } {
+  const operator = legalOperator(c.env);
+  return operator ? { legal: true, reportTo: operator.email } : {};
 }
 
 /** An Explore view from its URL (?tab, ?sort, ?provider, ?q), whatever is in it. */
@@ -471,11 +560,109 @@ function readProfile(form: FormFields): { values: ProfileFormValues; errors: Pro
   return { values, errors, fields: { handle, displayName: values.displayName, bio: values.bio || null, website, xHandle } };
 }
 
+/** Why owner text was turned back, by what was in it. */
+const CONTACT_ERROR: Record<'link' | 'email' | 'phone', string> = {
+  link: 'Take the link out: add your website or store pages to the product instead, where visitors find them.',
+  email: 'Take the email address out: visitors reach you from your profile, and nobody else’s address belongs here.',
+  phone: 'Take the phone number out: visitors reach you from your profile.',
+};
+
+/** The details form, read and checked. `fields` is set only when everything is valid. */
+function readDetails(form: FormFields, now: number): { values: DetailsFormValues; errors: DetailsFormErrors; fields?: DetailFields } {
+  // Plan rows are numbered (plan_0_name…); an empty one is left out, so the rest move up.
+  const rows = Array.from({ length: PLANS_MAX }, (_, i) => ({
+    name: form.text(`plan_${i}_name`, PLAN_NAME_MAX),
+    price: form.text(`plan_${i}_price`, 20),
+    currency: form.text(`plan_${i}_currency`, 8).toUpperCase() || 'USD',
+    period: form.text(`plan_${i}_period`, 8) || 'month',
+    note: form.text(`plan_${i}_note`, PLAN_NOTE_MAX),
+  })).filter((r) => r.name || r.price || r.note);
+  const values: DetailsFormValues = {
+    foundedYear: form.text('founded_year', 8),
+    foundedMonth: form.text('founded_month', 8),
+    country: form.text('country', 8),
+    teamSize: form.text('team_size', 12),
+    funding: form.text('funding', 32),
+    message: form.text('message', MESSAGE_MAX),
+    description: form.text('description', DESCRIPTION_MAX),
+    problem: form.text('problem', PROBLEM_MAX),
+    audience: form.text('audience', AUDIENCE_MAX),
+    model: form.text('model', 32),
+    plans: rows,
+    pricing: form.text('pricing', PRICING_MAX),
+    markets: form.all('markets', 32, 64),
+    tech: form.all('tech', 32, 128),
+    channels: form.all('channels', 32, 64),
+    more: form.text('more', MORE_MAX),
+  };
+  const errors: DetailsFormErrors = {};
+  // No links, addresses or numbers in what the founder writes: the page sends no one anywhere but
+  // the product's own links (lib/product-details.ts contactIn).
+  for (const field of ['message', 'description', 'problem', 'audience', 'pricing', 'more'] as const) {
+    const found = contactIn(values[field]);
+    if (found) errors[field] = CONTACT_ERROR[found];
+  }
+  const founded = parseFounded(values.foundedYear, values.foundedMonth, now);
+  if ('error' in founded) errors.founded = founded.error;
+  const country = values.country.toUpperCase();
+  if (country && !isCountryCode(country)) errors.country = 'Pick a country from the list.';
+  const team = values.teamSize.replace(/[\s,.]/g, '');
+  const teamSize = team ? Number(team) : null;
+  if (team && (!/^\d{1,5}$/.test(team) || teamSize! < 1 || teamSize! > TEAM_SIZE_MAX)) {
+    errors.teamSize = `Enter a number from 1 to ${TEAM_SIZE_MAX.toLocaleString('en-US')}.`;
+  }
+  const plans: PricePlan[] = [];
+  const planErrors: Record<number, string> = {};
+  rows.forEach((r, i) => {
+    const period = PLAN_PERIODS.find((x) => x.id === r.period)?.id ?? 'month';
+    const found = contactIn(`${r.name} ${r.note}`);
+    if (found) planErrors[i] = CONTACT_ERROR[found];
+    else if (!isSupportedCurrency(r.currency)) planErrors[i] = 'Pick a currency from the list.';
+    else if (!r.name) planErrors[i] = 'Name the plan, like Pro or Monthly.';
+    else if (period === 'free') plans.push({ name: r.name, period, price: 0, currency: r.currency, note: r.note || null });
+    else if (!r.price) planErrors[i] = 'Add its price, or make it a free plan.';
+    else {
+      const price = parsePlanPrice(r.price, r.currency);
+      if ('error' in price) planErrors[i] = price.error;
+      else plans.push({ name: r.name, period, price: price.value, currency: r.currency, note: r.note || null });
+    }
+  });
+  if (Object.keys(planErrors).length > 0) errors.plans = planErrors;
+  const details = normalizeDetails({
+    message: values.message,
+    description: values.description,
+    problem: values.problem,
+    audience: values.audience,
+    model: values.model,
+    plans,
+    pricing: values.pricing,
+    teamSize,
+    funding: values.funding,
+    markets: values.markets,
+    tech: values.tech,
+    channels: values.channels,
+    more: values.more,
+  });
+  // Counted before the list's limit cuts it: too many picks are turned back, not dropped quietly.
+  const known = (picked: readonly string[], list: readonly { id: string }[]) => picked.filter((id) => list.some((x) => x.id === id)).length;
+  if (known(values.markets, MARKETS) > MARKETS_MAX) errors.markets = `Pick up to ${MARKETS_MAX}.`;
+  if (known(values.tech, TECH) > TECH_MAX) errors.tech = `Pick up to ${TECH_MAX}.`;
+  if (known(values.channels, CHANNELS) > CHANNELS_MAX) errors.channels = `Pick up to ${CHANNELS_MAX}.`;
+  if (Object.keys(errors).length > 0 || 'error' in founded) return { values, errors };
+  return { values, errors, fields: { founded: founded.value, country: country || null, details: serializeProductDetails(details) } };
+}
+
 async function renderShare(
   c: AppContext,
-  opts: { view?: ShareView; form?: SharePageProps['form']; profileForm?: SharePageProps['profileForm']; status?: 422 } = {},
+  opts: {
+    view?: ShareView;
+    form?: SharePageProps['form'];
+    profileForm?: SharePageProps['profileForm'];
+    detailsForm?: SharePageProps['detailsForm'];
+    status?: 422;
+  } = {},
 ): Promise<Response> {
-  const { view, form, profileForm, status } = opts;
+  const { view, form, profileForm, detailsForm, status } = opts;
   const user = currentUser(c);
   const [conns, { products, links }, profile] = await Promise.all([
     listConnections(c.env.DB, user.id),
@@ -483,6 +670,9 @@ async function renderShare(
     getProfile(c.env.DB, user.id),
   ]);
   const productOf = new Map(links.map((l) => [l.connection_id, l.product_id]));
+  // The share images of the product in view, while it's published: its stored figures' history.
+  const viewed = view?.kind === 'product' ? products.find((p) => p.id === view.id && p.published_at !== null) : undefined;
+  const viewedStats = viewed ? parsePublicStats(viewed.stats) : null;
   const linked = new Map<string, string[]>();
   for (const l of links) linked.set(l.product_id, [...(linked.get(l.product_id) ?? []), l.connection_id]);
   const eligible = conns.filter((x) => countsPublicly(x.provider, x.test_mode === 1));
@@ -505,7 +695,8 @@ async function renderShare(
         appStoreUrl: p.app_store_url,
         playStoreUrl: p.play_store_url,
         connectionIds: linked.get(p.id) ?? [],
-        published: p.published_at !== null,
+        published: p.published_at !== null && p.removed_at === null,
+        removed: p.removed_at !== null,
         mrr: parsePublicStats(p.stats)?.mrr.value ?? null,
         statsAt: p.stats_at,
         listed: p.listed === 1,
@@ -513,11 +704,15 @@ async function renderShare(
         explore: p.listed === 1 && p.published_at !== null ? exploreBlocker(p, now) : null,
         logo: image(p.logo_key),
         logoSource: media && p.logo_key ? p.logo_source : null,
+        founded: isFounded(p.founded) ? p.founded : null,
+        country: p.country && isCountryCode(p.country) ? p.country : null,
+        details: parseProductDetails(p.details),
       })),
       connections: eligible.map((x) => ({ id: x.id, name: x.name, provider: x.provider, productId: productOf.get(x.id) ?? null })),
       excluded: conns.filter((x) => !countsPublicly(x.provider, x.test_mode === 1)).map((x) => x.name),
       maxProducts: MAX_PRODUCTS,
       ...(media ? { media } : {}),
+      ...(legalOperator(c.env) ? { operatorEmail: legalOperator(c.env)!.email } : {}),
       form,
       profile: profile
         ? {
@@ -530,6 +725,19 @@ async function renderShare(
           }
         : null,
       profileForm,
+      detailsForm,
+      ...(viewed && viewedStats
+        ? {
+            cards: {
+              productId: viewed.id,
+              today: viewedStats.history.today,
+              daily: viewedStats.history.revenueDaily,
+              weekly: viewedStats.history.revenueWeekly,
+              revenue: viewedStats.revenue.value,
+              revenueTotal: viewedStats.revenueTotal,
+            },
+          }
+        : {}),
     },
     status,
   );

@@ -8,7 +8,21 @@
  */
 
 import type { PublicProductStats } from '../data/types';
+import { countryName } from '../lib/countries';
 import { formatMoney, formatNumber } from '../lib/money';
+import {
+  CHANNELS,
+  describePlan,
+  formatFounded,
+  FUNDING,
+  groupPlans,
+  labelOf,
+  MARKETS,
+  MODELS,
+  TECH,
+  yearlySaving,
+  type ProductDetails,
+} from '../lib/product-details';
 import { getProviderMeta } from '../providers/registry';
 
 /** Owner-typed text on one line, without Markdown that could pass for structure. */
@@ -24,7 +38,17 @@ const pct = (p: number | null) => (p === null ? 'no earlier data' : `${p >= 0 ? 
 
 export function productMarkdown(p: {
   origin: string;
-  product: { slug: string; name: string; tagline: string | null; website: string | null; appStoreUrl?: string | null; playStoreUrl?: string | null };
+  product: {
+    slug: string;
+    name: string;
+    tagline: string | null;
+    website: string | null;
+    appStoreUrl?: string | null;
+    playStoreUrl?: string | null;
+    founded?: string | null;
+    country?: string | null;
+    details?: ProductDetails;
+  };
   owner: { handle: string; name: string; x: string | null } | null;
   stats: PublicProductStats;
 }): string {
@@ -72,7 +96,36 @@ export function productMarkdown(p: {
           ...(owner.x ? [`- Founder on X: https://x.com/${owner.x}`] : []),
         ]
       : []),
+    ...(product.founded ? [`- Founded: ${formatFounded(product.founded)}`] : []),
+    ...(countryName(product.country) ? [`- Country: ${countryName(product.country)}`] : []),
+    ...(product.details ? detailLines(product.details) : []),
     '',
   ];
   return lines.join('\n');
+}
+
+/** The About section, one line each; tags by their labels. */
+function detailLines(d: ProductDetails): string[] {
+  const tags = (ids: readonly string[], list: readonly { id: string; label: string }[]) => ids.map((id) => labelOf(list, id)).join(', ');
+  return [
+    ...(d.message ? [`- Message from the founder: ${plain(d.message)}`] : []),
+    ...(d.description ? [`- What it does: ${plain(d.description)}`] : []),
+    ...(d.problem ? [`- Problem it solves: ${plain(d.problem)}`] : []),
+    ...(d.audience ? [`- Who it's for: ${plain(d.audience)}`] : []),
+    ...(d.model ? [`- Business model: ${labelOf(MODELS, d.model)}`] : []),
+    ...groupPlans(d.plans).map((p) => {
+      const read = describePlan(p);
+      const saving = yearlySaving(p, d.plans);
+      const price = read.unit ? `${read.price} ${read.unit.replace('/ ', 'a ')}` : read.price;
+      const extra = [read.compare, saving ? `saves ${saving}% against monthly` : null, p.note ? plain(p.note) : null].filter(Boolean);
+      return `- Plan: ${plain(p.name)}, ${price}${extra.length > 0 ? ` (${extra.join('; ')})` : ''}`;
+    }),
+    ...(d.pricing ? [`- Pricing: ${plain(d.pricing)}`] : []),
+    ...(d.teamSize !== null ? [`- Team: ${formatNumber(d.teamSize)} ${d.teamSize === 1 ? 'person' : 'people'}`] : []),
+    ...(d.funding ? [`- Funding: ${labelOf(FUNDING, d.funding)}`] : []),
+    ...(d.markets.length > 0 ? [`- Market: ${tags(d.markets, MARKETS)}`] : []),
+    ...(d.tech.length > 0 ? [`- Tech stack: ${tags(d.tech, TECH)}`] : []),
+    ...(d.channels.length > 0 ? [`- Marketing channels: ${tags(d.channels, CHANNELS)}`] : []),
+    ...(d.more ? [`- Anything else: ${plain(d.more)}`] : []),
+  ];
 }

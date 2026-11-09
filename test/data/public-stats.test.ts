@@ -87,12 +87,17 @@ describe('getProductStats', () => {
     expect(stats!.mrr.value).toBe(50_000 + 10_000);
     expect(stats!.currency).toBe('USD');
 
-    const dash90 = await getDashboardData(testEnv(t.db), u2, PUBLIC_SERIES_DAYS);
+    const dash90 = await getDashboardData(testEnv(t.db), u2, 90);
     const dash364 = await getDashboardData(testEnv(t.db), u2, 364);
     const h = stats!.history;
     expect(h.today).toBe(TODAY);
-    expect(h.revenueDaily).toEqual(dash90.revenueSeries.map((d) => ({ day: d.day, total: d.total })));
+    // A year of days (the calendar image), ending today; the last 90 are the dashboard's own.
+    expect(h.revenueDaily).toHaveLength(PUBLIC_SERIES_DAYS);
+    expect(h.revenueDaily[0]!.day).toBe(addDays(TODAY, -(PUBLIC_SERIES_DAYS - 1)));
+    expect(h.revenueDaily.slice(-90)).toEqual(dash90.revenueSeries.map((d) => ({ day: d.day, total: d.total })));
+    // The weeks are the year's dashboard, and the days added up.
     expect(h.revenueWeekly).toEqual(dash364.revenueSeries.map((d) => ({ day: d.day, to: d.to, total: d.total })));
+    expect(h.revenueWeekly.reduce((a, w) => a + w.total, 0)).toBe(h.revenueDaily.reduce((a, d) => a + d.total, 0));
     expect(h.mrrDaily).toEqual(dash364.mrrSeries);
     // Everything held, each EUR day at its rate (only one on file, so that one): 61 days back here.
     let total = 0;

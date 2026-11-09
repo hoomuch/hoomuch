@@ -371,8 +371,11 @@ export interface ConnectionDetail extends ConnectionSummary {
 
 // ---------- public pages (SPEC F-21) ----------
 
-/** The days a public product's daily revenue series spans, ending on the owner's today. */
-export const PUBLIC_SERIES_DAYS = 90;
+/**
+ * The days a public product's daily revenue series spans, ending on the owner's today: 52 weeks,
+ * for the year's calendar image (views/components/share-cards).
+ */
+export const PUBLIC_SERIES_DAYS = 364;
 
 /** What a public chart can show (SPEC F-21). */
 export const PUBLIC_METRICS = ['revenue', 'mrr'] as const;

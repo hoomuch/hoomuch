@@ -132,6 +132,7 @@ line above it.
 | `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
 | `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
 | `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
+| `npm run icons:update` | Rebuilds the brand marks on public pages' tech stack and channel tags (`public/brand-icons.svg`) from Simple Icons |
 | `npm run bench:ab` | Read-model benchmark: `main` against your working tree on production-sized data; fails on a p95 regression over 10% (see *Performance*) |
 | `npm run bench:e2e` | End-to-end load test with k6 against `wrangler dev`; `-- --profile smoke\|load\|stress\|spike\|soak` |
 
@@ -152,7 +153,7 @@ src/
   client/entry.tsx   browser entry: hydrates the page the server rendered
   styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
 migrations/          D1 schema
-scripts/             client build, the commit-msg check, the domain list refresh, the security scan, deploy:local
+scripts/             client build, the commit-msg check, the domain list and brand icon refreshes, the security scan, deploy:local
 test/                Vitest suites and API fixtures
 bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases

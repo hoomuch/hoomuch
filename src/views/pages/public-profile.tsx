@@ -19,7 +19,7 @@ import { STAT_CELL, StatGrid, VerifiedNote } from '../components/public-stats';
 import { ShareButtons } from '../components/share-sheet';
 import { Layout } from '../layout';
 import { useNow } from '../page-root';
-import { ShowYourOwn } from './public-product';
+import { ReportLink, ShowYourOwn } from './public-product';
 import { formatDay } from './shared';
 
 export interface PublicProfilePageProps {
@@ -32,6 +32,10 @@ export interface PublicProfilePageProps {
   signupOpen: boolean;
   /** The instance publishes a privacy policy and terms: the footer links them. */
   legal?: boolean;
+  /** Search engines are asked not to index it yet (lib/public-pages.ts searchIndexable). */
+  noindex?: boolean;
+  /** Where to report the page: the instance operator's address, when it names one. */
+  reportTo?: string;
 }
 
 /** Rendered without the visitor's session; only served where public pages, Explore included, are on. */
@@ -62,6 +66,7 @@ export function PublicProfilePage(props: PublicProfilePageProps) {
     <Layout
       {...NO_CHROME}
       legal={props.legal}
+      noindex={props.noindex}
       title={title}
       description={`${usd(revenue.value)} revenue in the last 30 days across ${count}, read from their payment providers by hoomuch.`}
       og={{ url: props.url, image: props.image, title }}
@@ -170,6 +175,8 @@ export function PublicProfilePage(props: PublicProfilePageProps) {
           Read from each product’s payment providers with read-only API keys.
         </VerifiedNote>
       </div>
+
+      {props.reportTo ? <ReportLink to={props.reportTo} url={props.url} /> : null}
 
       <ShowYourOwn signupOpen={props.signupOpen} />
     </Layout>

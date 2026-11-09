@@ -133,6 +133,8 @@ export async function getDashboardPage(
  * The dashboard as statements for a page's batch (ReadModelQuery); getDashboardData runs it alone.
  * `include` narrows it to some of the user's connections (a public product, productStatsQuery):
  * the statements stay the dashboard's, and `build` drops the other connections' rows.
+ * `dailyRevenue` keeps the revenue series a day per entry over the year too (productStatsQuery
+ * stores both); the page's own year is in weeks.
  */
 function dashboardQuery(
   db: D1Database,
@@ -140,6 +142,7 @@ function dashboardQuery(
   rangeDays: RangeDays,
   now: number,
   include?: (c: ConnectionView) => boolean,
+  opts: { dailyRevenue?: boolean } = {},
 ): ReadModelQuery<DashboardData> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   // Days run midnight to midnight in the user's zone (SPEC §6).
@@ -214,6 +217,7 @@ function dashboardQuery(
         start,
         prevStart,
         rangeDays,
+        revenueStepDays: opts.dailyRevenue ? 1 : revenueStep(rangeDays),
         conns,
         windowSnaps: own(rowsOf<SnapRow>(windowR)),
         latestSnaps: own(rowsOf<SnapRow>(latestR)),
@@ -230,7 +234,7 @@ function dashboardQuery(
 
 /**
  * A published product's figures (SPEC F-21): the dashboard narrowed to the product's connections
- * that count publicly, in USD, over 30 days, plus the MRR chart over PUBLIC_SERIES_DAYS. Null when
+ * that count publicly, in USD, over 30 days, plus the chart history over PUBLIC_SERIES_DAYS. Null when
  * no connection counts or none has a snapshot yet. Run when a sync finishes, not per request: the
  * public page reads the stored result. One D1 round trip.
  */
@@ -256,10 +260,9 @@ function productStatsQuery(
 ): ReadModelQuery<PublicProductStats | null> {
   const user = { id: owner.id, baseCurrency: 'USD', timeZone: owner.timeZone };
   const include = (c: ConnectionView) => connectionIds.has(c.id) && countsPublicly(c.provider, c.test_mode === 1);
-  // The figures over 30 days, daily revenue over 90, and the year: weekly revenue and daily MRR.
+  // The figures over 30 days, and the year: daily revenue (weeks are summed from it) and daily MRR.
   const month = dashboardQuery(db, user, 30, now, include);
-  const quarter = dashboardQuery(db, user, PUBLIC_SERIES_DAYS, now, include);
-  const year = dashboardQuery(db, user, 364, now, include);
+  const year = dashboardQuery(db, user, PUBLIC_SERIES_DAYS, now, include, { dailyRevenue: true });
   const n = month.statements.length;
   const today = zonedDayKey(now, owner.timeZone || UTC);
   // Each connection's first snapshot: a seek on the primary key per connection.
@@ -290,11 +293,11 @@ function productStatsQuery(
     )
     .bind(owner.id, today);
   return {
-    statements: [...month.statements, ...quarter.statements, ...year.statements, firstDays, allRevenue, totalFx, monthEnds],
+    statements: [...month.statements, ...year.statements, firstDays, allRevenue, totalFx, monthEnds],
     build: (results, allConns, fxRows) => {
       const conns = allConns.filter(include);
       const ids = new Set(conns.map((c) => c.id));
-      const [firstR, revenueR, fxR, monthEndR] = results.slice(n * 3);
+      const [firstR, revenueR, fxR, monthEndR] = results.slice(n * 2);
       const since =
         rowsOf<{ connection_id: string; first_day: string | null }>(firstR)
           .filter((r) => ids.has(r.connection_id) && r.first_day)
@@ -302,8 +305,7 @@ function productStatsQuery(
           .sort()[0] ?? null;
       if (conns.length === 0 || since === null) return null;
       const m = month.build(results.slice(0, n), allConns, fxRows);
-      const q = quarter.build(results.slice(n, n * 2), allConns, fxRows);
-      const y = year.build(results.slice(n * 2, n * 3), allConns, fxRows);
+      const y = year.build(results.slice(n, n * 2), allConns, fxRows);
       const synced = conns.map((x) => x.last_synced_at).filter((t): t is number => t !== null);
 
       // Revenue: the total held, and by calendar month, each day at its own rate.
@@ -344,8 +346,8 @@ function productStatsQuery(
         revenue: m.kpis.revenue,
         history: {
           today,
-          revenueDaily: q.revenueSeries.map((d) => ({ day: d.day, total: d.total })),
-          revenueWeekly: y.revenueSeries.map((d) => ({ day: d.day, ...(d.to ? { to: d.to } : {}), total: d.total })),
+          revenueDaily: y.revenueSeries.map((d) => ({ day: d.day, total: d.total })),
+          revenueWeekly: revenueInSteps(y.revenueSeries, 7).map((d) => ({ day: d.day, ...(d.to ? { to: d.to } : {}), total: d.total })),
           revenueMonthly,
           mrrDaily: y.mrrSeries,
           mrrMonthly,
@@ -357,7 +359,7 @@ function productStatsQuery(
         syncedAt: synced.length > 0 ? Math.min(...synced) : null,
         estimated: m.warnings.length > 0,
         revenuePartial: m.breakdown.some((b) => b.revenue === null),
-        missingFx: [...new Set([...m.fx.missing, ...q.fx.missing, ...y.fx.missing, ...cv.missing])].sort(),
+        missingFx: [...new Set([...m.fx.missing, ...y.fx.missing, ...cv.missing])].sort(),
         computedAt: now,
       };
     },
@@ -413,6 +415,8 @@ function buildDashboard(p: {
   start: string;
   prevStart: string;
   rangeDays: RangeDays;
+  /** Days per revenue entry: 1, or 7 for the dashboard's year. */
+  revenueStepDays: number;
   conns: readonly ConnectionView[];
   windowSnaps: SnapRow[];
   latestSnaps: SnapRow[];
@@ -422,7 +426,8 @@ function buildDashboard(p: {
   fx: FxTable | null;
   cv: FxConverter;
 }): DashboardData {
-  const { now, currency, tz, today, start, prevStart, rangeDays, conns, windowSnaps, latestSnaps, beforeSnaps, revRows, productRows, fx, cv } = p;
+  const { now, currency, tz, today, start, prevStart, rangeDays, revenueStepDays, conns, windowSnaps, latestSnaps, beforeSnaps, revRows, productRows, fx, cv } =
+    p;
 
   const days = dayRange(start, today);
   const revenueSeries: RevenueDay[] = days.map((day) => ({ day, total: 0, byConnection: {} }));
@@ -590,7 +595,7 @@ function buildDashboard(p: {
     products,
     productMrr,
     // The year's bars are weeks: summed here, so the page carries 52 entries rather than 364.
-    revenueSeries: revenueInSteps(revenueSeries, revenueStep(rangeDays)),
+    revenueSeries: revenueInSteps(revenueSeries, revenueStepDays),
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
     days: { timeZone: tz, otherZones: otherDayZones(conns, tz) },

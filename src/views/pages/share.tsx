@@ -6,29 +6,75 @@
  * links, what's public) with Edit profile beside the name and the profile's link with one-tap posts
  * under it; the products below as a list. A product's view leads with sharing it (link, posts,
  * badge) or, while it's a draft, with publishing it; its details, unpublish and delete wait behind
- * Edit. Every action is a plain POST form. Nothing is public until the owner ticks the confirmation
- * and publishes.
+ * Edit, and what the page says about it (founded, country, the About section) behind its own form.
+ * Every action is a plain POST form. Nothing is public until the owner ticks the confirmation and
+ * publishes.
  */
 
 import { ArrowUpRight, ChevronRight, ImagePlus, Link2, Pencil, Plus, UserRound } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard } from '@/components/ui/card';
+import type { RevenuePoint } from '../../data/types';
 import type { ProviderId } from '../../providers/types';
-import { formatMoney } from '../../lib/money';
+import { COUNTRIES, countryName } from '../../lib/countries';
+import { formatMoney, SUPPORTED_CURRENCIES, toMajor } from '../../lib/money';
+import {
+  AUDIENCE_MAX,
+  CHANNELS,
+  CHANNELS_MAX,
+  DESCRIPTION_MAX,
+  FOUNDED_MIN_YEAR,
+  MESSAGE_MAX,
+  FOUNDED_MONTHS,
+  formatFounded,
+  FUNDING,
+  MARKETS,
+  MARKETS_MAX,
+  MODELS,
+  MORE_MAX,
+  PLAN_NAME_MAX,
+  PLAN_NOTE_MAX,
+  PLAN_PERIODS,
+  PLANS_MAX,
+  PRICING_MAX,
+  PROBLEM_MAX,
+  TECH,
+  TECH_GROUPS,
+  TECH_MAX,
+  type ProductDetails,
+} from '../../lib/product-details';
 import { cn } from '../../lib/utils';
 import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, STORE_LINK_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
 import { Avatar, ProductTile } from '../components/avatar';
 import { CopyField } from '../components/copy-field';
 import { ImageField, ImageUploadCard } from '../components/image-upload';
+import { TagIcon } from '../components/product-about';
 import { EmptyState } from '../components/empty-state';
 import { XMark } from '../components/icons';
 import { ProviderLogo } from '../components/provider-logos';
 import { RelativeTime } from '../components/relative-time';
+import type { CardData } from '../components/share-cards/layout';
+import { ShareCards } from '../components/share-cards/share-cards';
 import { ShareSheet } from '../components/share-sheet';
-import { Button, Card, CheckboxOption, ConfirmCheckbox, Field, FormError, LinkButton, PageHeader, TextLink } from '../components/ui';
+import {
+  Alert,
+  Button,
+  Card,
+  CheckboxOption,
+  ChipCheckbox,
+  ConfirmCheckbox,
+  Field,
+  FormError,
+  LinkButton,
+  PageHeader,
+  SelectField,
+  TextareaField,
+  TextLink,
+} from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
+import { useNow } from '../page-root';
 
 interface ShareProduct {
   id: string;
@@ -41,6 +87,8 @@ interface ShareProduct {
   playStoreUrl: string | null;
   connectionIds: string[];
   published: boolean;
+  /** The operator took its page down (migration 0017): it can't be published again. */
+  removed: boolean;
   /** MRR in USD from the stored figures; null before there are any. */
   mrr: number | null;
   /** When the stored figures were worked out. */
@@ -54,6 +102,10 @@ interface ShareProduct {
   /** The logo's URL (lib/media.ts), and where it came from; null for initials. */
   logo: string | null;
   logoSource: 'site' | 'upload' | null;
+  /** What its page says about it, the owner's words: 'YYYY' or 'YYYY-MM', an ISO country code, the About section. */
+  founded: string | null;
+  country: string | null;
+  details: ProductDetails;
 }
 
 /** Why a listed product isn't on Explore yet, in the owner's terms. */
@@ -93,6 +145,45 @@ export interface ShareFormErrors {
   connections?: string;
 }
 
+/** The details form as typed (lib/product-details.ts checks it). */
+export interface DetailsFormValues {
+  foundedYear: string;
+  foundedMonth: string;
+  country: string;
+  teamSize: string;
+  funding: string;
+  message: string;
+  description: string;
+  problem: string;
+  audience: string;
+  model: string;
+  /** The plan rows that had anything in them, as typed. */
+  plans: Array<{ name: string; price: string; currency: string; period: string; note: string }>;
+  pricing: string;
+  markets: string[];
+  tech: string[];
+  channels: string[];
+  more: string;
+}
+
+export interface DetailsFormErrors {
+  /** A link, address or number in the founder's text (lib/product-details.ts contactIn). */
+  message?: string;
+  description?: string;
+  problem?: string;
+  audience?: string;
+  pricing?: string;
+  more?: string;
+  founded?: string;
+  country?: string;
+  teamSize?: string;
+  /** By the row's place in `DetailsFormValues.plans`. */
+  plans?: Record<number, string>;
+  markets?: string;
+  tech?: string;
+  channels?: string;
+}
+
 export interface ProfileFormValues {
   handle: string;
   displayName: string;
@@ -110,14 +201,16 @@ export interface ProfileFormErrors {
 
 /**
  * Which of the Share views: the overview (/share), the profile form (/share/profile), a new product
- * (/share/new), a product's own view (/share/products/:id) and its form (/share/products/:id/edit).
+ * (/share/new), a product's own view (/share/products/:id), its form (/share/products/:id/edit) and
+ * what its page says about it (/share/products/:id/details).
  */
 export type ShareView =
   | { kind: 'overview' }
   | { kind: 'profile' }
   | { kind: 'new' }
   | { kind: 'product'; id: string }
-  | { kind: 'edit'; id: string };
+  | { kind: 'edit'; id: string }
+  | { kind: 'details'; id: string };
 
 type Profile = {
   handle: string;
@@ -142,18 +235,27 @@ export interface SharePageProps {
   maxProducts: number;
   /** Photos and logos can be added (the instance has the MEDIA binding). */
   media?: boolean;
+  /** The operator's address (LEGAL_EMAIL), for an owner whose page was taken down. */
+  operatorEmail?: string;
   /** A failed create or edit, re-rendered with 422. `productId` null is the new-product form. */
   form?: { productId: string | null; values: ShareFormValues; error?: string | null; fieldErrors?: ShareFormErrors };
   /** The founder profile (SPEC F-22), null before they save one; publishing a product needs it. */
   profile?: Profile | null;
   /** A failed profile save, re-rendered with 422. */
   profileForm?: { values: ProfileFormValues; error?: string | null; fieldErrors?: ProfileFormErrors };
+  /** A failed details save, re-rendered with 422 (on the details view's product). */
+  detailsForm?: { values: DetailsFormValues; error?: string | null; fieldErrors?: DetailsFormErrors };
+  /**
+   * What the share images of the product in view are made from (its stored figures and their
+   * history, the owner's own): sent with a published product's own view only.
+   */
+  cards?: { productId: string; today: string; daily: RevenuePoint[]; weekly: RevenuePoint[]; revenue: number; revenueTotal: number };
 }
 
 export function SharePage(props: SharePageProps) {
   const view = props.view ?? { kind: 'overview' };
-  const product = view.kind === 'product' || view.kind === 'edit' ? props.products.find((p) => p.id === view.id) : undefined;
-  const error = Boolean(props.form || props.profileForm);
+  const product = view.kind === 'product' || view.kind === 'edit' || view.kind === 'details' ? props.products.find((p) => p.id === view.id) : undefined;
+  const error = Boolean(props.form || props.profileForm || props.detailsForm);
   const title =
     view.kind === 'profile'
       ? props.profile
@@ -164,7 +266,9 @@ export function SharePage(props: SharePageProps) {
         : product
           ? view.kind === 'edit'
             ? `Edit ${product.name}`
-            : product.name
+            : view.kind === 'details'
+              ? `About ${product.name}`
+              : product.name
           : 'Share';
   return (
     <Layout {...props.chrome} title={`${error ? 'Error: ' : ''}${title}`} nav="share" noindex backdrop>
@@ -176,6 +280,8 @@ export function SharePage(props: SharePageProps) {
           <NewProductView {...props} />
         ) : product && view.kind === 'edit' ? (
           <EditProductView {...props} product={product} />
+        ) : product && view.kind === 'details' ? (
+          <DetailsView {...props} product={product} />
         ) : product ? (
           <ProductView {...props} product={product} />
         ) : (
@@ -371,8 +477,14 @@ function Products(props: SharePageProps) {
               <ProductTile name={p.name} src={p.logo} className="size-9 text-caption" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-semibold">{p.name}</span>
-                <span className={cn('block truncate text-caption', !p.published && p.mrr !== null ? 'text-brand' : 'text-muted-foreground')}>
-                  {p.published ? `${strip(props.origin)}/p/${p.slug}` : p.mrr !== null ? 'Ready to publish' : 'Waiting for its first sync'}
+                <span className={cn('block truncate text-caption', !p.published && !p.removed && p.mrr !== null ? 'text-brand' : 'text-muted-foreground')}>
+                  {p.removed
+                    ? 'Taken down by this site'
+                    : p.published
+                      ? `${strip(props.origin)}/p/${p.slug}`
+                      : p.mrr !== null
+                        ? 'Ready to publish'
+                        : 'Waiting for its first sync'}
                 </span>
               </span>
               <span className="hidden text-muted-foreground tabular-nums sm:inline">{p.mrr !== null ? `${usd(p.mrr)} MRR` : null}</span>
@@ -387,6 +499,7 @@ function Products(props: SharePageProps) {
 }
 
 function Status(props: { product: ShareProduct }) {
+  if (props.product.removed) return <Badge variant="error">Taken down</Badge>;
   return props.product.published ? <Badge variant="success">Public</Badge> : <Badge variant="outline">Draft</Badge>;
 }
 
@@ -493,9 +606,28 @@ function ProductView(props: SharePageProps & { product: ShareProduct }) {
             <Card title="Share" description="Post it, or send the link.">
               <ShareSheet id={`link-${p.id}`} url={page} title={p.name} text={productPost(p)} />
             </Card>
+            {props.cards?.productId === p.id && p.mrr !== null ? (
+              <Card title="Share as an image" description="Its figure, revenue chart or revenue calendar, to post with the link.">
+                <ShareCards
+                  data={{
+                    slug: p.slug,
+                    name: p.name,
+                    logo: p.logo,
+                    host: strip(props.origin),
+                    mrr: p.mrr,
+                    revenue: props.cards.revenue,
+                    revenueTotal: props.cards.revenueTotal,
+                    today: props.cards.today,
+                    daily: props.cards.daily,
+                    weekly: props.cards.weekly,
+                  } satisfies CardData}
+                />
+              </Card>
+            ) : null}
             <Card title="Badge" description="For your site or README. It links to the page.">
               <BadgeCopy product={p} origin={props.origin} />
             </Card>
+            <AboutCard product={p} />
             <form method="post" action={`${base}/listing`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
               <p className="text-body text-muted-foreground">
                 {!p.listed ? (
@@ -514,6 +646,17 @@ function ProductView(props: SharePageProps & { product: ShareProduct }) {
               </Button>
             </form>
           </>
+        ) : p.removed ? (
+          // Taken down by the operator: no publish form, and the reason to ask them about it.
+          <Alert tone="error" title="Taken down">
+            The people who run this site took this product’s page down, so its page and badge are gone and it can’t be published
+            again.{' '}
+            {props.operatorEmail ? (
+              <>
+                If you think that’s a mistake, write to <TextLink href={`mailto:${props.operatorEmail}`}>{props.operatorEmail}</TextLink>.
+              </>
+            ) : null}
+          </Alert>
         ) : (
           <Card
             title="Publish"
@@ -522,8 +665,368 @@ function ProductView(props: SharePageProps & { product: ShareProduct }) {
             <PublishForm product={p} hasProfile={Boolean(props.profile)} />
           </Card>
         )}
+        {p.published ? null : <AboutCard product={p} />}
       </div>
     </>
+  );
+}
+
+/** The parts of the details the summary counts: message, what it does, problem, audience, pricing, team, funding, markets, tech, channels, anything else. */
+const DETAIL_PARTS = 11;
+
+/** What the page says about the product beyond its figures: what's filled in, and the way to the form. */
+function AboutCard(props: { product: ShareProduct }) {
+  const p = props.product;
+  const d = p.details;
+  const filled = [
+    d.message,
+    d.description,
+    d.problem,
+    d.audience || d.model,
+    d.plans.length || d.pricing,
+    d.teamSize,
+    d.funding,
+    d.markets.length,
+    d.tech.length,
+    d.channels.length,
+    d.more,
+  ].filter(Boolean).length;
+  const facts = [p.founded ? `Founded ${formatFounded(p.founded)}` : null, countryName(p.country)].filter((x): x is string => x !== null);
+  const any = facts.length > 0 || filled > 0;
+  return (
+    <Card
+      title="About the product"
+      description={
+        any
+          ? [...facts, filled > 0 ? `${filled} of ${DETAIL_PARTS} details filled in` : null].filter(Boolean).join(' · ')
+          : 'When it was founded, where, what it solves, who it’s for, its tech stack and more. Its page shows them under About, as your words.'
+      }
+      actions={
+        <LinkButton href={`/share/products/${p.id}/details`} variant="secondary" small>
+          {any ? <Pencil /> : <Plus />}
+          {any ? 'Edit details' : 'Add details'}
+        </LinkButton>
+      }
+    />
+  );
+}
+
+/** The details' own page: founded, country and the About section, every field optional. */
+function DetailsView(props: SharePageProps & { product: ShareProduct }) {
+  const p = props.product;
+  const base = `/share/products/${p.id}`;
+  return (
+    <>
+      <PageHeader
+        back={{ href: base, label: p.name }}
+        title="About the product"
+        description="Its public page shows these as your words, apart from the figures hoomuch checks. Every field is optional. Links, email addresses and phone numbers stay out of them: your website and store pages have their own fields."
+      />
+      <Card>
+        <DetailsForm product={p} failed={props.detailsForm} action={`${base}/details`} cancel={base} />
+      </Card>
+    </>
+  );
+}
+
+const NOT_SET = { value: '', label: 'Not set' };
+
+/**
+ * The details, in the order the page answers a visitor's questions: what it is, how it makes money,
+ * how it finds customers, how it's built, and the company behind it.
+ */
+function DetailsForm(props: { product: ShareProduct; failed?: SharePageProps['detailsForm']; action: string; cancel: string }) {
+  const p = props.product;
+  const d = p.details;
+  const thisYear = new Date(useNow()).getUTCFullYear();
+  const v: DetailsFormValues = props.failed?.values ?? {
+    foundedYear: p.founded?.slice(0, 4) ?? '',
+    foundedMonth: p.founded?.slice(5, 7) ?? '',
+    country: p.country ?? '',
+    teamSize: d.teamSize !== null ? String(d.teamSize) : '',
+    funding: d.funding ?? '',
+    message: d.message ?? '',
+    description: d.description ?? '',
+    problem: d.problem ?? '',
+    audience: d.audience ?? '',
+    model: d.model ?? '',
+    plans: d.plans.map((x) => ({
+      name: x.name,
+      price: x.period === 'free' ? '' : String(toMajor(x.price, x.currency)),
+      currency: x.currency,
+      period: x.period,
+      note: x.note ?? '',
+    })),
+    pricing: d.pricing ?? '',
+    markets: d.markets,
+    tech: d.tech,
+    channels: d.channels,
+    more: d.more ?? '',
+  };
+  const errors = props.failed?.fieldErrors ?? {};
+  // A long form: the summary stays on top, and takes focus unless a text field can (the pickers can't).
+  const focus = errors.teamSize ? 'team' : props.failed ? 'form' : null;
+  const years = Array.from({ length: thisYear - FOUNDED_MIN_YEAR + 1 }, (_, i) => String(thisYear - i));
+  return (
+    <form method="post" action={props.action}>
+      <FormError message={props.failed?.error} autoFocus={focus === 'form'} />
+      <FormPart title="A message from you" description="It opens the About section, with your name and photo.">
+        <TextareaField
+          id="details-message"
+          name="message"
+          label="Message to visitors"
+          maxLength={MESSAGE_MAX}
+          value={v.message}
+          rows={4}
+          placeholder="Why you built it, where it’s going, and what you’d like from the people reading this."
+          help={`In your own voice. Up to ${MESSAGE_MAX} characters.`}
+          error={errors.message}
+        />
+      </FormPart>
+      <FormPart title="What it is">
+        <TextareaField
+          id="details-description"
+          name="description"
+          label="What it does"
+          maxLength={DESCRIPTION_MAX}
+          value={v.description}
+          help="A few sentences: what it is and what people use it for. The line under its name says it in one."
+          error={errors.description}
+        />
+        <TextareaField id="details-problem" name="problem" label="Problem it solves" maxLength={PROBLEM_MAX} value={v.problem} error={errors.problem} />
+        <TextareaField id="details-audience" name="audience" label="Who it’s for" maxLength={AUDIENCE_MAX} value={v.audience} rows={2} error={errors.audience} />
+        <SelectField id="details-model" name="model" label="Sells to" options={[NOT_SET, ...MODELS.map((m) => ({ value: m.id, label: m.label }))]} value={v.model} />
+        <ChipGroup
+          name="markets"
+          kind="market"
+          legend="Market"
+          max={MARKETS_MAX}
+          groups={[{ id: 'all', label: '', items: MARKETS }]}
+          picked={v.markets}
+          error={errors.markets}
+        />
+      </FormPart>
+      <FormPart
+        title="How it makes money"
+        description="One row for each way to pay, as on your pricing page: a monthly and a yearly plan are two rows. A yearly plan shows what it saves against the monthly one with the same name."
+      >
+        <PlanRows initial={v.plans} errors={errors.plans} />
+        <Field
+          id="details-pricing"
+          name="pricing"
+          label="Anything else about pricing"
+          maxLength={PRICING_MAX}
+          value={v.pricing}
+          placeholder="Prints are priced per object, delivered."
+          error={errors.pricing}
+        />
+      </FormPart>
+      <FormPart title="How it finds customers">
+        <ChipGroup
+          name="channels"
+          kind="channel"
+          legend="Marketing channels"
+          max={CHANNELS_MAX}
+          groups={[{ id: 'all', label: '', items: CHANNELS }]}
+          picked={v.channels}
+          error={errors.channels}
+        />
+      </FormPart>
+      <FormPart title="How it’s built">
+        <ChipGroup
+          name="tech"
+          kind="tech"
+          legend="Tech stack"
+          max={TECH_MAX}
+          groups={TECH_GROUPS.map((g) => ({ id: g.id, label: g.label, items: TECH.filter((t) => t.group === g.id) }))}
+          picked={v.tech}
+          error={errors.tech}
+        />
+      </FormPart>
+      <FormPart title="The company">
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <SelectField
+            id="details-founded-year"
+            name="founded_year"
+            label="Year founded"
+            options={[NOT_SET, ...years.map((y) => ({ value: y, label: y }))]}
+            value={v.foundedYear}
+            error={errors.founded}
+          />
+          <SelectField
+            id="details-founded-month"
+            name="founded_month"
+            label="Month founded"
+            options={[NOT_SET, ...FOUNDED_MONTHS]}
+            value={v.foundedMonth}
+          />
+        </div>
+        <SelectField
+          id="details-country"
+          name="country"
+          label="Country"
+          // Names alone, so typing one jumps to it in the list (a flag in front would hide the name).
+          options={[NOT_SET, ...COUNTRIES.map((c) => ({ value: c.code, label: c.name }))]}
+          value={v.country}
+          error={errors.country}
+          help="Where it’s made: where you or the company are."
+        />
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <Field
+            id="details-team"
+            name="team_size"
+            label="Team size"
+            inputMode="numeric"
+            maxLength={6}
+            value={v.teamSize}
+            placeholder="1"
+            autoFocus={focus === 'team'}
+            error={errors.teamSize}
+          />
+          <SelectField id="details-funding" name="funding" label="Funding" options={[NOT_SET, ...FUNDING.map((f) => ({ value: f.id, label: f.label }))]} value={v.funding} />
+        </div>
+      </FormPart>
+      <TextareaField id="details-more" name="more" label="Anything else" maxLength={MORE_MAX} value={v.more} help={`Up to ${MORE_MAX} characters.`} error={errors.more} />
+      <FormActions submitLabel="Save details" cancel={props.cancel} />
+    </form>
+  );
+}
+
+type PlanRow = DetailsFormValues['plans'][number];
+
+const CURRENCY_OPTIONS = SUPPORTED_CURRENCIES.map((c) => ({ value: c, label: c }));
+const PERIOD_OPTIONS = PLAN_PERIODS.map((x) => ({ value: x.id, label: x.label }));
+
+/** The rows to start with: the plans there are, then room for more (a monthly and a yearly one when there are none). */
+function startRows(initial: readonly PlanRow[]): PlanRow[] {
+  const empty = (period: string): PlanRow => ({ name: '', price: '', currency: initial[0]?.currency ?? 'USD', period, note: '' });
+  const rows = [...initial];
+  if (rows.length === 0) rows.push(empty('month'), empty('year'));
+  else if (rows.length < PLANS_MAX) rows.push(empty('month'));
+  return rows;
+}
+
+/**
+ * The pricing plans, a row each. Before hydration the form carries these rows and an empty one,
+ * and a saved form comes back with another empty row; after it, "Add a plan" and "Remove" change
+ * the rows in place. A row left empty is left out.
+ */
+function PlanRows(props: { initial: readonly PlanRow[]; errors?: Record<number, string> }) {
+  const [rows, setRows] = useState(() => startRows(props.initial).map((row, key) => ({ key, row })));
+  const [nextKey, setNextKey] = useState(PLANS_MAX + 1);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const add = () => {
+    setRows((r) => [...r, { key: nextKey, row: { name: '', price: '', currency: r[0]?.row.currency || 'USD', period: 'month', note: '' } }]);
+    setNextKey((k) => k + 1);
+  };
+  return (
+    <div className="mb-5 grid gap-3">
+      {rows.map(({ key, row }, i) => {
+        const id = (field: string) => `details-plan-${key}-${field}`;
+        const error = props.errors?.[i];
+        // Examples on a new row only: on a filled one they'd read as values.
+        const fresh = !row.name && !row.price && !row.note;
+        return (
+          <fieldset key={key} className="rounded-xl border px-4 pt-3" data-invalid={error ? '' : undefined}>
+            <legend className="sr-only">Plan {i + 1}</legend>
+            <div className="mb-3 flex min-h-8 items-center justify-between gap-4">
+              <p aria-hidden="true" className="text-caption font-medium text-muted-foreground">
+                Plan {i + 1}
+              </p>
+              {mounted && rows.length > 1 ? (
+                <CossButton type="button" variant="ghost" size="sm" onClick={() => setRows((r) => r.filter((x) => x.key !== key))}>
+                  Remove
+                </CossButton>
+              ) : null}
+            </div>
+            <div className="grid gap-x-3 sm:grid-cols-2">
+              <Field id={id('name')} name={`plan_${i}_name`} label="Name" maxLength={PLAN_NAME_MAX} value={row.name} placeholder={fresh ? 'Pro' : undefined} hideOptional />
+              <SelectField id={id('period')} name={`plan_${i}_period`} label="Billing" options={PERIOD_OPTIONS} value={row.period} />
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_6.5rem] gap-x-3">
+                <Field id={id('price')} name={`plan_${i}_price`} label="Price" inputMode="decimal" maxLength={12} value={row.price} placeholder={fresh ? '29' : undefined} hideOptional />
+                <SelectField id={id('currency')} name={`plan_${i}_currency`} label="Currency" options={CURRENCY_OPTIONS} value={row.currency} narrow />
+              </div>
+              <Field id={id('note')} name={`plan_${i}_note`} label="Note" maxLength={PLAN_NOTE_MAX} value={row.note} placeholder={fresh ? '2,500 credits a month' : undefined} />
+            </div>
+            {error ? <p className="-mt-1 mb-3 text-caption text-destructive-foreground">{error}</p> : null}
+          </fieldset>
+        );
+      })}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="text-caption text-muted-foreground">Leave a row empty to leave it out. A free plan needs no price.</p>
+        {mounted && rows.length < PLANS_MAX ? (
+          <CossButton type="button" variant="outline" size="sm" onClick={add}>
+            <Plus />
+            Add a plan
+          </CossButton>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** A part of a long form, under a small heading, with what it's for when that needs saying. */
+function FormPart(props: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <fieldset className="mb-6 border-b pb-2">
+      <legend className="mb-1 font-heading text-base">{props.title}</legend>
+      {props.description ? <p className="mb-4 text-caption text-pretty text-muted-foreground">{props.description}</p> : <div className="mb-3" />}
+      {props.children}
+    </fieldset>
+  );
+}
+
+/**
+ * Tags from a fixed list as chips (native checkboxes, so it works before hydration), in groups
+ * when the list has them. The limit is said up front; the server turns back too many.
+ */
+function ChipGroup(props: {
+  name: string;
+  kind: 'market' | 'channel' | 'tech';
+  legend: string;
+  max: number;
+  groups: ReadonlyArray<{ id: string; label: string; items: ReadonlyArray<{ id: string; label: string }> }>;
+  picked: readonly string[];
+  error?: string;
+}) {
+  const picked = new Set(props.picked);
+  const id = `details-${props.name}`;
+  return (
+    <fieldset className="mb-5" aria-describedby={`${id}-rule${props.error ? ` ${id}-error` : ''}`} data-invalid={props.error ? '' : undefined}>
+      <legend className="text-body font-medium">
+        {props.legend}
+        <span className="font-normal text-faint"> (optional)</span>
+      </legend>
+      <p id={`${id}-rule`} className="mt-1 mb-3 text-caption text-muted-foreground">
+        Up to {props.max}.
+      </p>
+      <div className="grid gap-3">
+        {props.groups.map((g) => (
+          <div key={g.id}>
+            {g.label ? <p className="mb-2 text-caption font-medium text-muted-foreground">{g.label}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              {g.items.map((item) => (
+                <ChipCheckbox
+                  key={item.id}
+                  id={`${id}-${item.id}`}
+                  name={props.name}
+                  value={item.id}
+                  label={item.label}
+                  icon={<TagIcon kind={props.kind} id={item.id} />}
+                  defaultChecked={picked.has(item.id)}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {props.error ? (
+        <p id={`${id}-error`} className="mt-2 text-caption text-destructive-foreground">
+          {props.error}
+        </p>
+      ) : null}
+    </fieldset>
   );
 }
 
