@@ -14,12 +14,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { CalendarMonth, ConnectionSummary, DashboardData, MrrDay } from '../../data/types';
+import { lastRevenueDay, rangeSpan, revenueStep, type CalendarMonth, type ConnectionSummary, type DashboardData, type MrrDay } from '../../data/types';
 import { formatMoney, formatNumber, toMinor } from '../../lib/money';
-import { addDays, dayKey, HOUR, MINUTE, zoneLabel } from '../../lib/time';
+import { addDays, dayKey, dayRange, HOUR, MINUTE, zoneLabel } from '../../lib/time';
 import { cn } from '../../lib/utils';
 import { MrrChart } from '../charts/mrr-chart';
-import { RevenueChart } from '../charts/revenue-chart';
+import { RevenueChart, REVENUE_VARIANTS, type RevenueVariant } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
 import { CalendarCard } from '../components/calendar-card';
 import { EmptyState } from '../components/empty-state';
@@ -28,7 +28,7 @@ import { Owl, type OwlPose } from '../components/mascot';
 import { ProductMrrTable, ProductTable } from '../components/product-table';
 import { RangeTabs } from '../components/range-tabs';
 import { RelativeTime } from '../components/relative-time';
-import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, TextLink } from '../components/ui';
+import { Alert, Button, Card, LinkButton, LinkSubmit, PageHeader, SegmentedLinks, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 import { useNow, useTimeZone } from '../page-root';
 import { formatDay, formatWhen, listNames, SyncNotice, type SyncState } from './shared';
@@ -42,6 +42,8 @@ export interface DashboardPageProps {
   sync: SyncState | null;
   /** Range tab links; defaults to "/dashboard". */
   basePath?: string;
+  /** The revenue card's chart (`?revenue=`, remembered). Default: bars. */
+  revenueVariant?: RevenueVariant;
   /** How often connections sync, in words ("every hour"). */
   cadence?: string;
   /** A healthy connection whose last sync is older than this reads as stale. Default: 120. */
@@ -320,9 +322,10 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; o
   const { data } = props;
   const cur = data.currency;
   const k = data.kpis;
-  const days = data.rangeDays;
+  const span = rangeSpan(data.rangeDays);
   // The series ends on the user's local today.
-  const milestone = recentMilestone(data.mrrSeries, cur, data.revenueSeries.at(-1)?.day ?? dayKey(data.generatedAt));
+  const today = lastRevenueDay(data.revenueSeries) ?? dayKey(data.generatedAt);
+  const milestone = recentMilestone(data.mrrSeries, cur, today);
   const owl = props.owl ? mrrOwl({ milestone, deltaPct: k.mrr.deltaPct, notes: props.notes ?? [] }) : null;
   return (
     <CossCard render={<section aria-label="MRR" />} className={cn('min-w-0', props.className)}>
@@ -334,7 +337,7 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; o
               label="MRR"
               value={formatMoney(k.mrr.value, cur, { whole: true })}
               deltaPct={k.mrr.deltaPct}
-              deltaLabel={`vs. ${days} days ago`}
+              deltaLabel={`vs. ${span} ago`}
               hint={`${formatMoney(k.arr.value, cur, { whole: true })} ARR`}
             />
             {milestone !== null ? (
@@ -348,9 +351,10 @@ export function MrrCard(props: { data: DashboardData; notes?: DashboardNote[]; o
           </div>
           <MrrChart
             series={data.mrrSeries}
-            windowDays={data.revenueSeries.map((d) => d.day)}
+            windowDays={data.revenueSeries.length > 0 ? dayRange(data.revenueSeries[0]!.day, today) : []}
             currency={cur}
-            title={`MRR, last ${days} days`}
+            title={`MRR, last ${span}`}
+            weekly={revenueStep(data.rangeDays) === 7}
           />
         </div>
         {props.notes && props.notes.length > 0 ? <NoteList notes={props.notes} /> : null}
@@ -364,7 +368,7 @@ export function SecondaryStats(props: { data: DashboardData; className?: string 
   const { data } = props;
   const cur = data.currency;
   const k = data.kpis;
-  const days = data.rangeDays;
+  const span = rangeSpan(data.rangeDays);
   return (
     <section aria-label="Subscriptions, trials and revenue" className={props.className}>
       <CossCard className="grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
@@ -373,7 +377,7 @@ export function SecondaryStats(props: { data: DashboardData; className?: string 
           label="Active subscriptions"
           value={formatNumber(k.activeSubscriptions.value)}
           deltaPct={k.activeSubscriptions.deltaPct}
-          deltaLabel={`vs. ${days} days ago`}
+          deltaLabel={`vs. ${span} ago`}
         />
         <KpiStat
           inlineDelta
@@ -381,19 +385,19 @@ export function SecondaryStats(props: { data: DashboardData; className?: string 
           label="Active trials"
           value={formatNumber(k.activeTrials.value)}
           deltaPct={k.activeTrials.deltaPct}
-          deltaLabel={`vs. ${days} days ago`}
+          deltaLabel={`vs. ${span} ago`}
         />
         <KpiStat
           inlineDelta
-          label={`Revenue, ${days} days`}
+          label={`Revenue, ${span}`}
           value={formatMoney(k.revenue.value, cur, { whole: true })}
           deltaPct={k.revenue.deltaPct}
-          deltaLabel={`vs. the previous ${days} days`}
+          deltaLabel={`vs. the previous ${span}`}
         />
       </CossCard>
       {/* Each delta already speaks its comparison; this is the visual version of the same. */}
       <p aria-hidden="true" className="mt-2 text-caption text-muted-foreground">
-        Changes compare with {days} days ago. Revenue compares with the {days} days before.
+        Changes compare with {span} ago. Revenue compares with the {span} before.
       </p>
     </section>
   );
@@ -418,17 +422,35 @@ function revenueNotes(data: DashboardData, where = 'in these bars or in Revenue 
     });
 }
 
-/** Revenue per day, the card. Shared with the landing demo. */
-export function RevenueCard(props: { data: DashboardData; className?: string }) {
+/**
+ * Revenue per day, or per week for the year, the card: stacked bars by connection or the total as
+ * a line, picked by links (`?revenue=`) that keep the range and land back on the card. Shared with
+ * the landing demo, whose `basePath` is "/".
+ */
+export function RevenueCard(props: { data: DashboardData; variant?: RevenueVariant; basePath?: string; className?: string }) {
   const { data } = props;
+  const variant = props.variant ?? 'bars';
+  const base = props.basePath ?? '/dashboard';
   const notes = revenueNotes(data);
   return (
     <Card
-      title="Revenue per day"
-      description={`Charges minus refunds, before fees. Last ${data.rangeDays} days.`}
-      className={props.className}
+      id="revenue"
+      title={revenueStep(data.rangeDays) === 7 ? 'Revenue per week' : 'Revenue per day'}
+      description={`Charges minus refunds, before fees. Last ${rangeSpan(data.rangeDays)}.`}
+      actions={
+        <SegmentedLinks
+          label="Revenue chart"
+          items={REVENUE_VARIANTS.map((v) => ({
+            key: v,
+            href: `${base}?range=${data.rangeDays}&revenue=${v}#revenue`,
+            current: v === variant,
+            label: v === 'bars' ? 'Bars' : 'Line',
+          }))}
+        />
+      }
+      className={cn('scroll-mt-6', props.className)}
     >
-      <RevenueChart series={data.revenueSeries} connections={data.breakdown} currency={data.currency} />
+      <RevenueChart series={data.revenueSeries} connections={data.breakdown} currency={data.currency} variant={variant} />
       {notes.length > 0 ? <NoteList notes={notes} /> : null}
     </Card>
   );
@@ -459,7 +481,7 @@ export function ProductCard(props: { data: DashboardData }) {
   } else if (products.rows.length === 0 && products.unnamed.revenue === 0) {
     // With nothing counted at all (28-day totals only), the notes below say why.
     const counted = data.breakdown.some((b) => b.revenue !== null);
-    revenue = <p className={text}>{counted ? `No sales in the last ${data.rangeDays} days.` : 'No revenue to split by product.'}</p>;
+    revenue = <p className={text}>{counted ? `No sales in the last ${rangeSpan(data.rangeDays)}.` : 'No revenue to split by product.'}</p>;
   } else {
     revenue = <ProductTable products={products} currency={data.currency} rangeDays={data.rangeDays} />;
     if (products.unnamedProviders.length > 0) {
@@ -492,7 +514,7 @@ export function ProductCard(props: { data: DashboardData }) {
       ) : null}
       {revenue ? (
         <div className={both ? 'mt-6' : undefined}>
-          {both ? <h3 className="px-3 pb-2 font-semibold">{`Revenue, last ${data.rangeDays} days`}</h3> : null}
+          {both ? <h3 className="px-3 pb-2 font-semibold">{`Revenue, last ${rangeSpan(data.rangeDays)}`}</h3> : null}
           {revenue}
         </div>
       ) : null}
@@ -731,7 +753,7 @@ export function DashboardPage(props: DashboardPageProps) {
 
         <ProductCard data={data} />
 
-        <RevenueCard data={data} />
+        <RevenueCard data={data} variant={props.revenueVariant} basePath={props.basePath} />
 
         {props.calendar ? (
           <CalendarCard

@@ -60,7 +60,7 @@ Under the `load` profile (expected load), against `wrangler dev` on a developer 
 
 | Endpoint | Request | p95 | p99 |
 |---|---|---:|---:|
-| `dashboard` | `/dashboard?range=7\|30\|90` | 250 ms | 500 ms |
+| `dashboard` | `/dashboard?range=7\|30\|90\|364` | 250 ms | 500 ms |
 | `dashboard_month` | `/dashboard?month=…` (calendar month 1–6 back) | 250 ms | 500 ms |
 | `transactions` | `/transactions` | 100 ms | 200 ms |
 | `transactions_deep` | `/transactions?page=2…40` | 150 ms | 300 ms |

@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ConnectionSummary, MrrDay, RevenueDay } from '../../src/data/types';
 import { CHART_HEIGHT, INITIAL_DIMENSION, TICK_MARGIN, yAxisWidth } from '../../src/views/charts/frame';
-import { MrrChart, mrrPoints, type MrrChartProps } from '../../src/views/charts/mrr-chart';
+import { MrrChart, mrrPoints, weekEnds, type MrrChartProps } from '../../src/views/charts/mrr-chart';
 import { RevenueChart, revenueModel, type RevenueChartProps } from '../../src/views/charts/revenue-chart';
 import {
   bandGapRatio,
@@ -406,6 +406,61 @@ describe('RevenueChart', () => {
     });
   }
 
+  it('server-renders the year as 52 weekly bars, named by their first and last day', () => {
+    const d = fixtureDashboard(364, 'full');
+    expect(d.revenueSeries).toHaveLength(52);
+    const html = revenue({ series: d.revenueSeries, connections: d.breakdown, currency: d.currency });
+    expectSafe(html);
+    expectTable(html);
+    expect(imageOf(html).name).toBe('Weekly revenue');
+    // One row per week + the totals row; Week + 3 connections + Total.
+    expect(count(html, 'scope="row"')).toBe(52 + 1);
+    expect(html).toContain('>Week</th>');
+    const last = d.revenueSeries.at(-1)!;
+    expect(last.to).toBe('2026-11-05');
+    expect(html).toContain(`<time dateTime="${last.day}">Oct 30 – Nov 5</time>`);
+    const desc = descOf(html);
+    expect(desc).toMatch(/^Weekly revenue \(charges minus refunds\), Nov 7, 2025 – Nov 5, 2026 \(52 weeks\)/);
+    expect(desc).toContain('Highest week');
+    expect(desc).toContain('latest Oct 30 – Nov 5');
+    expect(captionOf(html)).toBe('Weekly revenue by connection, Nov 7, 2025 – Nov 5, 2026, in USD.');
+    // The weeks add up to the revenue KPI, like the days do.
+    expect(d.revenueSeries.reduce((s, r) => s + r.total, 0)).toBe(d.kpis.revenue.value);
+  });
+
+  it('line: the total as one line, no legend, the same table, and a description that says so', () => {
+    const d = fixtureDashboard(30, 'full');
+    const bars = revenue({ series: d.revenueSeries, connections: d.breakdown, currency: d.currency });
+    const html = revenue({ series: d.revenueSeries, connections: d.breakdown, currency: d.currency, variant: 'line' });
+    expectSafe(html);
+    expectTable(html);
+    expect(imageOf(html).name).toBe('Daily revenue');
+    // One series: the card title names it, so no legend; hovering and the table split it.
+    expect(html).not.toContain('aria-label="Legend"');
+    const desc = descOf(html);
+    expect(desc).toContain(`as one line of the total; the table splits it by connection: ${d.breakdown.map((c) => c.name).join(', ')}.`);
+    expect(desc).not.toContain('stacked');
+    // The "Show data" table is the bars' table, row for row.
+    const table = (s: string) => s.slice(s.indexOf('<table'), s.indexOf('</table>')).replace(/ id="[^"]+"/g, '');
+    expect(table(html)).toBe(table(bars));
+    // Its own chart id, so a page never has two charts with one id.
+    const describedBy = (s: string) => s.match(/aria-describedby="([^"]+)"/)![1];
+    expect(describedBy(html)).not.toBe(describedBy(bars));
+
+    // The year's weeks draw as a line too.
+    const year = fixtureDashboard(364, 'full');
+    const weekly = revenue({ series: year.revenueSeries, connections: year.breakdown, currency: 'USD', variant: 'line' });
+    expect(imageOf(weekly).name).toBe('Weekly revenue');
+    expect(count(weekly, 'scope="row"')).toBe(52 + 1);
+
+    // All-zero: the same calm message and no table.
+    const empty = fixtureDashboard(30, 'empty');
+    const none = revenue({ series: empty.revenueSeries, connections: [], currency: 'USD', variant: 'line' });
+    expectSafe(none);
+    expect(none).toContain('No revenue in this period yet.');
+    expect(none).not.toContain('<table');
+  });
+
   it('renders a single connection without a legend', () => {
     const d = fixtureDashboard(30, 'single');
     const html = revenue({ series: d.revenueSeries, connections: d.breakdown, currency: 'USD', title: 'Revenue' });
@@ -582,6 +637,33 @@ describe('MrrChart', () => {
       expect(captionOf(html)).toMatch(/^MRR by day, .+, in USD\.$/);
     });
   }
+
+  it('weekly: the year’s table lists each week’s last snapshot, the description every day', () => {
+    const d = fixtureDashboard(364, 'full');
+    const win = days(364);
+    const html = mrr({ series: d.mrrSeries, windowDays: win, currency: 'USD', weekly: true });
+    expectSafe(html);
+    expectTable(html);
+    expect(count(html, 'scope="row"')).toBe(52);
+    // Weeks end on the window's 7th, 14th, … day: the same weeks as the revenue bars.
+    const ends = weekEnds(mrrPoints(d.mrrSeries, win).points);
+    expect(ends.map((p) => p.day)).toEqual(d.revenueSeries.map((r) => r.to));
+    expect(html).toContain('<time dateTime="2026-11-05">Nov 5</time>');
+    expect(html).not.toContain('<time dateTime="2026-11-04">');
+    expect(captionOf(html)).toBe('MRR at the end of each week, Nov 13, 2025 – Nov 5, 2026, in USD. Each week shows its last snapshot.');
+    expect(descOf(html)).toContain('(364 days)');
+    expect(descOf(html)).toContain('A snapshot every day.');
+
+    // A week without a snapshot is left out, and the caption says so.
+    // Days 15 and 20 are both in the third week (days 14–20); its later one stands for it.
+    const sparse = weekEnds(mrrPoints([{ day: win[0]!, total: 1 }, { day: win[15]!, total: 2 }, { day: win[20]!, total: 3 }], win).points);
+    expect(sparse.map((p) => [p.i, p.value])).toEqual([
+      [0, 1],
+      [20, 3],
+    ]);
+    const gap = mrr({ series: [{ day: win[0]!, total: 1 }, { day: win[363]!, total: 2 }], windowDays: win, currency: 'USD', weekly: true });
+    expect(captionOf(gap)).toContain('Weeks without a snapshot are left out.');
+  });
 
   it('sparse history sits at the right end of the window, with a note', () => {
     const d = fixtureDashboard(30, 'sparse');

@@ -11,6 +11,7 @@
  *   its own magnitude.
  * - 0 points → calm empty message; 1 point → a dot + a note; 2+ → line and a last-value dot.
  * - The server renders the description, notes and "Show data" table; the plot paints after hydration.
+ *   With `weekly` (the year), the table lists each week's last snapshot; the line stays daily.
  */
 
 import { CartesianGrid, Line, LineChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts';
@@ -56,6 +57,11 @@ export interface MrrChartProps {
   currency: string;
   /** Accessible title; defaults to "MRR trend". */
   title?: string;
+  /**
+   * "Show data" lists each 7-day step's last snapshot, steps counted from the window's first day
+   * (the year's weeks, like its revenue bars): 52 rows rather than 364. The line stays daily.
+   */
+  weekly?: boolean;
 }
 
 export interface MrrPoint {
@@ -79,6 +85,17 @@ export function mrrPoints(series: MrrDay[], windowDays: string[]): { domain: str
     byDay.set(d.day, { day: d.day, i, value: finite(d.total) });
   }
   return { domain, points: [...byDay.values()].sort((a, b) => a.i - b.i) };
+}
+
+/** Each 7-day step's last point, steps counted from the domain's first day. Exported for tests. */
+export function weekEnds(points: MrrPoint[]): MrrPoint[] {
+  const out: MrrPoint[] = [];
+  for (const p of points) {
+    const prev = out.at(-1);
+    if (prev && Math.floor(prev.i / 7) === Math.floor(p.i / 7)) out[out.length - 1] = p;
+    else out.push(p);
+  }
+  return out;
 }
 
 function describe(domain: string[], points: MrrPoint[], scale: NiceScale, currency: string): string {
@@ -249,17 +266,21 @@ export function MrrChart(props: MrrChartProps) {
         </LineChart>
       </ChartFrame>
       {note ? <ChartNote>{note}</ChartNote> : null}
-      {empty ? null : <MrrTable domain={domain} points={points} currency={currency} id={`${id}-data`} label={title} />}
+      {empty ? null : (
+        <MrrTable domain={domain} points={points} weekly={props.weekly ?? false} currency={currency} id={`${id}-data`} label={title} />
+      )}
     </figure>
   );
 }
 
-function MrrTable(props: { domain: string[]; points: MrrPoint[]; currency: string; id: string; label: string }) {
-  const { points, currency } = props;
-  const sparse = points.length < props.domain.length;
+function MrrTable(props: { domain: string[]; points: MrrPoint[]; weekly: boolean; currency: string; id: string; label: string }) {
+  const { currency, weekly } = props;
+  const points = weekly ? weekEnds(props.points) : props.points;
+  const sparse = points.length < (weekly ? Math.ceil(props.domain.length / 7) : props.domain.length);
   const caption =
-    `MRR by day, ${dayRangeLabel(points[0]!.day, points[points.length - 1]!.day)}, in ${currency.trim().toUpperCase()}.` +
-    (sparse ? ' Days without a snapshot are left out.' : '');
+    `${weekly ? 'MRR at the end of each week' : 'MRR by day'}, ${dayRangeLabel(points[0]!.day, points[points.length - 1]!.day)}, in ${currency.trim().toUpperCase()}.` +
+    (weekly ? ' Each week shows its last snapshot.' : '') +
+    (sparse ? ` ${weekly ? 'Weeks' : 'Days'} without a snapshot are left out.` : '');
   return (
     <DataDetails
       id={props.id}

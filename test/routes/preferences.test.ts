@@ -114,6 +114,28 @@ describe('remembered choices', () => {
     expect(bare).toMatch(/<a\b(?=[^>]*href="\/dashboard\?range=90")(?=[^>]*aria-current="page")/);
     const explicit = await htmlOf(await get('/dashboard?range=7', [remembered!]));
     expect(explicit).toMatch(/<a\b(?=[^>]*href="\/dashboard\?range=7")(?=[^>]*aria-current="page")/);
+    // The year is remembered too; a range that isn't offered is neither shown nor remembered.
+    const year = await get('/dashboard?range=364');
+    expect(cookie(year, 'hm_range')).toBe('__Host-hm_range=364');
+    expect(await htmlOf(year)).toContain('Revenue per week');
+    const odd = await get('/dashboard?range=365', [remembered!]);
+    expect(cookie(odd, 'hm_range')).toBeNull();
+    expect(await htmlOf(odd)).toMatch(/<a\b(?=[^>]*href="\/dashboard\?range=90")(?=[^>]*aria-current="page")/);
+  });
+
+  it('brings back the revenue chart’s bars or line; ?revenue= wins, anything else is bars', async () => {
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe', lastSyncedAt: NOW });
+    snap('a', { USD: 100_000 });
+    const set = await get('/dashboard?range=30&revenue=line');
+    const remembered = cookie(set, 'hm_revenue');
+    expect(remembered).toBe('__Host-hm_revenue=line');
+    const current = (v: string) => new RegExp(`<a\\b(?=[^>]*href="/dashboard\\?range=30&amp;revenue=${v}#revenue")(?=[^>]*aria-current="page")`);
+    expect(await htmlOf(await get('/dashboard', [remembered!]))).toMatch(current('line'));
+    expect(await htmlOf(await get('/dashboard?revenue=bars', [remembered!]))).toMatch(current('bars'));
+    const odd = await get('/dashboard?revenue=pie', [remembered!]);
+    expect(cookie(odd, 'hm_revenue')).toBeNull();
+    expect(await htmlOf(odd)).toMatch(current('line'));
+    expect(await htmlOf(await get('/dashboard'))).toMatch(current('bars'));
   });
 
   it('brings back the last transactions filter, with "All" as an explicit choice', async () => {

@@ -13,9 +13,24 @@
  *   day total. A connection without a valid hex colour is drawn in var(--series-neutral).
  * - All-zero → only the $0 baseline and a calm message. The legend (more than one series) is
  *   server HTML, like the description and the "Show data" table; the plot paints after hydration.
+ * - Entries with a `to` are weeks (the year's window): one bar each, named by their first and last day.
+ * - `variant="line"`: the day's (or week's) total as one line on a zero-based scale, with a dot per
+ *   point while they have room (a month or less); hovering splits it by connection, and the table
+ *   below is the same. One series, so no legend: the card title names it.
  */
 
-import { Bar, BarChart, CartesianGrid, ReferenceLine, XAxis, YAxis, type BarShapeProps, type TooltipContentProps } from 'recharts';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+  type BarShapeProps,
+  type TooltipContentProps,
+} from 'recharts';
 import { ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import type { ConnectionSummary, RevenueDay } from '../../data/types';
 import { TableRowHeader } from '../components/ui';
@@ -53,15 +68,31 @@ import {
 } from './scale';
 
 export interface RevenueChartProps {
-  /** Exactly rangeDays entries, oldest → newest, zero-filled. */
+  /** One entry per day, or per week (entries with `to`), oldest → newest, zero-filled. */
   series: RevenueDay[];
   /** Colour + name per connection (BreakdownRow[] works too). Order = stacking order, bottom first. */
   connections: ConnectionSummary[];
   /** Display currency of every amount. */
   currency: string;
-  /** Accessible title; defaults to "Daily revenue". */
+  /** Accessible title; defaults to "Daily revenue" ("Weekly revenue" for weeks). */
   title?: string;
+  /** Stacked bars by connection (default), or the total as a line. */
+  variant?: RevenueVariant;
 }
+
+/** How the revenue card draws its series (`?revenue=`, remembered like the range). */
+export const REVENUE_VARIANTS = ['bars', 'line'] as const;
+export type RevenueVariant = (typeof REVENUE_VARIANTS)[number];
+
+/** A `?revenue=` value, or bars for anything else. */
+export function parseRevenueVariant(v: string | undefined | null): RevenueVariant {
+  return v === 'line' ? 'line' : 'bars';
+}
+
+/** The line's dots, one per point, while the points are at most this many (a month). */
+const LINE_DOTS_MAX = 31;
+/** Room right of the line's last point for its dot (r 4 + a 2px ring). */
+const DOT_ROOM = 6;
 
 /** Vertical gap between stacked segments, in CSS px. */
 const SEGMENT_GAP = 1;
@@ -88,6 +119,8 @@ export interface RevenueSeries {
 
 interface RevenueRow {
   day: string;
+  /** The week's last day; null for a single day. */
+  to: string | null;
   total: number;
   /** Net per series column (connections in order, then Other). */
   values: number[];
@@ -100,6 +133,8 @@ export interface RevenueModel {
   series: RevenueSeries[];
   rows: RevenueRow[];
   allZero: boolean;
+  /** The rows are weeks. */
+  weekly: boolean;
 }
 
 /** Pure: resolves series, Other, and per-day stacks. Exported for tests. */
@@ -132,7 +167,7 @@ export function revenueModel(days: RevenueDay[], connections: ConnectionSummary[
       if (v > 0) pos += v;
       else if (v < 0) neg += v;
     }
-    return { day: d.day, total, values, pos, neg };
+    return { day: d.day, to: d.to ?? null, total, values, pos, neg };
   });
 
   const validColors = conns.map((c) => (isHexColor(c.color) ? c.color.trim() : ''));
@@ -150,7 +185,7 @@ export function revenueModel(days: RevenueDay[], connections: ConnectionSummary[
   }
 
   const allZero = rows.every((r) => r.values.every((v) => v === 0));
-  return { series, rows, allZero };
+  return { series, rows, allZero, weekly: rows.some((r) => r.to !== null) };
 }
 
 /** The SVG fill of a series: its brand hex, or the token behind its neutral class. */
@@ -162,11 +197,24 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
-function describe(model: RevenueModel, currency: string): string {
-  const { rows, series } = model;
+/** The row's day, or its week as "Nov 3 – Nov 9": short, for labels and table rows. */
+function rowLabel(r: RevenueRow): string {
+  return r.to ? `${shortDay(r.day)} – ${shortDay(r.to)}` : shortDay(r.day);
+}
+
+/** The whole window, first day to last ("Oct 7 – Nov 5, 2026"). */
+function windowLabel(rows: RevenueRow[]): string {
+  const last = rows[rows.length - 1]!;
+  return dayRangeLabel(rows[0]!.day, last.to ?? last.day);
+}
+
+function describe(model: RevenueModel, currency: string, line: boolean): string {
+  const { rows, series, weekly } = model;
   if (rows.length === 0) return 'No revenue data for this period.';
-  const range = `${dayRangeLabel(rows[0]!.day, rows[rows.length - 1]!.day)} (${plural(rows.length, 'day', 'days')})`;
-  if (model.allZero) return `Daily revenue, ${range}. No revenue in this period yet.`;
+  const unit = weekly ? 'week' : 'day';
+  const per = weekly ? 'Weekly' : 'Daily';
+  const range = `${windowLabel(rows)} (${plural(rows.length, unit, `${unit}s`)})`;
+  if (model.allZero) return `${per} revenue, ${range}. No revenue in this period yet.`;
 
   let sum = 0;
   let hi = rows[0]!;
@@ -180,12 +228,16 @@ function describe(model: RevenueModel, currency: string): string {
   }
   const last = rows[rows.length - 1]!;
   const parts = [
-    `Daily revenue (charges minus refunds), ${range}` +
-      (series.length > 1 ? `, stacked by connection: ${series.map((s) => s.name).join(', ')}.` : '.'),
+    `${per} revenue (charges minus refunds), ${range}` +
+      (series.length <= 1
+        ? '.'
+        : line
+          ? `, as one line of the total; the table splits it by connection: ${series.map((s) => s.name).join(', ')}.`
+          : `, stacked by connection: ${series.map((s) => s.name).join(', ')}.`),
     `Total ${money(sum, currency)}.`,
-    `Highest day ${shortDay(hi.day)} at ${money(hi.total, currency)}; lowest day ${shortDay(lo.day)} at ${money(lo.total, currency)}; latest ${shortDay(last.day)} at ${money(last.total, currency)}.`,
+    `Highest ${unit} ${rowLabel(hi)} at ${money(hi.total, currency)}; lowest ${unit} ${rowLabel(lo)} at ${money(lo.total, currency)}; latest ${rowLabel(last)} at ${money(last.total, currency)}.`,
   ];
-  if (negDays > 0) parts.push(`${plural(negDays, 'day', 'days')} had more refunds than charges and ${negDays === 1 ? 'goes' : 'go'} below zero.`);
+  if (negDays > 0) parts.push(`${plural(negDays, unit, `${unit}s`)} had more refunds than charges and ${negDays === 1 ? 'goes' : 'go'} below zero.`);
   return parts.join(' ');
 }
 
@@ -254,7 +306,7 @@ function revenueTooltip(series: RevenueSeries[], currency: string) {
       <ChartTooltipContent
         active
         payload={[total, ...parts] as unknown as TooltipContentProps['payload']}
-        labelFormatter={() => longDay(d.row.day)}
+        labelFormatter={() => (d.row.to ? dayRangeLabel(d.row.day, d.row.to) : longDay(d.row.day))}
         formatter={(value, _name, item) => {
           const s = byKey.get(String(item.dataKey));
           return s ? (
@@ -269,18 +321,22 @@ function revenueTooltip(series: RevenueSeries[], currency: string) {
 }
 
 export function RevenueChart(props: RevenueChartProps) {
-  const title = props.title ?? 'Daily revenue';
   const currency = props.currency;
+  const line = props.variant === 'line';
   const model = revenueModel(props.series, props.connections);
+  const title = props.title ?? (model.weekly ? 'Weekly revenue' : 'Daily revenue');
   const { rows, series, allZero } = model;
   const n = rows.length;
   const gap = bandGapRatio(n);
 
+  // Bars stack each day's positive and negative parts apart; the line plots the day's total.
   let maxPos = 0;
   let minNeg = 0;
   for (const r of rows) {
-    if (r.pos > maxPos) maxPos = r.pos;
-    if (r.neg < minNeg) minNeg = r.neg;
+    const hi = line ? r.total : r.pos;
+    const lo = line ? r.total : r.neg;
+    if (hi > maxPos) maxPos = hi;
+    if (lo < minNeg) minNeg = lo;
   }
   const scale = revenueScale(minNeg, maxPos, currency);
   const labels = tickLabels(scale.ticks, currency);
@@ -291,77 +347,128 @@ export function RevenueChart(props: RevenueChartProps) {
 
   const id = chartId(
     'rev',
-    `${title}|${currency}|${series.map((s) => s.key).join(',')}|${rows.map((r) => `${r.day}:${r.total}`).join(',')}`,
+    `${line ? 'line|' : ''}${title}|${currency}|${series.map((s) => s.key).join(',')}|${rows.map((r) => `${r.day}:${r.total}`).join(',')}`,
   );
-  const desc = describe(model, currency);
+  const desc = describe(model, currency, line);
   const data = toData(model);
+  // The ends are the window's: the first entry's first day, the last entry's last day (today).
+  const xLabel = (i: number) => (rows[i] ? shortDay(i === n - 1 ? (rows[i].to ?? rows[i].day) : rows[i].day) : '');
+  const yAxis = (
+    <YAxis
+      type="number"
+      domain={[scale.min, scale.max]}
+      // All-zero data gives Recharts no domain, and it would drop the axis and the baseline.
+      allowDataOverflow={allZero}
+      ticks={yTicks}
+      interval={0}
+      axisLine={false}
+      tickLine={false}
+      tickSize={0}
+      tickMargin={TICK_MARGIN}
+      width={yAxisWidth(yLabels)}
+      tick={{ fill: AXIS_TEXT_FILL }}
+      tickFormatter={(v: number) => labelOf.get(v) ?? money(v, currency, { compact: true })}
+    />
+  );
+  const grid = allZero ? null : <CartesianGrid vertical={false} horizontalValues={scale.ticks.filter((t) => t !== 0)} stroke="var(--border)" />;
+  const baseline = <ReferenceLine y={0} stroke="var(--input)" ifOverflow="visible" />;
+  const dot = { r: 4, fill: 'var(--brand)', stroke: 'var(--background)', strokeWidth: 2 };
 
   return (
     <figure className="w-full min-w-0">
-      {series.length > 1 && !allZero ? (
+      {series.length > 1 && !allZero && !line ? (
         <Legend
           items={series.map((s) => ({ name: s.name, color: s.color, opacity: s.opacity, neutralClass: s.neutralClass }))}
         />
       ) : null}
       <ChartFrame id={id} title={title} description={desc} message={allZero ? 'No revenue in this period yet.' : null}>
-        <BarChart
-          data={data}
-          accessibilityLayer={false}
-          stackOffset="sign"
-          barCategoryGap={`${(gap / 2) * 100}%`}
-          barGap={0}
-          margin={{ top: MARGIN_TOP, right: 0, bottom: 0, left: 0 }}
-        >
-          {allZero ? null : (
-            <CartesianGrid vertical={false} horizontalValues={scale.ticks.filter((t) => t !== 0)} stroke="var(--border)" />
-          )}
-          <XAxis
-            type="category"
-            dataKey="i"
-            ticks={xLabelIndices(n)}
-            interval={0}
-            axisLine={false}
-            tickLine={false}
-            tickSize={0}
-            tickMargin={TICK_MARGIN}
-            height={X_AXIS_HEIGHT}
-            tick={xTick({ count: n, bandGap: gap, label: (i) => (rows[i] ? shortDay(rows[i].day) : '') })}
-          />
-          <YAxis
-            type="number"
-            domain={[scale.min, scale.max]}
-            // All-zero stacks give Recharts no data domain, and it would drop the axis and the baseline.
-            allowDataOverflow={allZero}
-            ticks={yTicks}
-            interval={0}
-            axisLine={false}
-            tickLine={false}
-            tickSize={0}
-            tickMargin={TICK_MARGIN}
-            width={yAxisWidth(yLabels)}
-            tick={{ fill: AXIS_TEXT_FILL }}
-            tickFormatter={(v: number) => labelOf.get(v) ?? money(v, currency, { compact: true })}
-          />
-          {allZero ? null : <ChartTooltip cursor={{ fill: 'var(--muted)' }} animationDuration={TOOLTIP_MS} animationEasing="ease-out" content={revenueTooltip(series, currency)} />}
-          {/* Always drawn (all-zero days draw nothing): Recharts needs a series to lay out the y axis. */}
-          {series.length > 0 ? (
-            series.map((s) => (
-                <Bar
-                  key={s.key}
-                  dataKey={`c${s.col}`}
-                  name={s.name}
-                  stackId="day"
-                  fill={seriesFill(s)}
-                  fillOpacity={s.opacity}
-                  shape={segmentShape(s)}
-                  isAnimationActive={false}
-                />
-              ))
-          ) : (
-            <Bar dataKey={(d: Datum) => d.row.total} stackId="day" fill="none" isAnimationActive={false} />
-          )}
-          <ReferenceLine y={0} stroke="var(--input)" ifOverflow="visible" />
-        </BarChart>
+        {line ? (
+          <LineChart data={data} accessibilityLayer={false} margin={{ top: MARGIN_TOP, right: DOT_ROOM, bottom: 0, left: 0 }}>
+            {grid}
+            <XAxis
+              type="number"
+              dataKey="i"
+              // One point: centre it. Otherwise the window runs edge to edge.
+              domain={n > 1 ? [0, n - 1] : [-1, 1]}
+              ticks={xLabelIndices(n)}
+              interval={0}
+              allowDecimals={false}
+              axisLine={false}
+              tickLine={false}
+              tickSize={0}
+              tickMargin={TICK_MARGIN}
+              height={X_AXIS_HEIGHT}
+              tick={xTick({ count: n, label: xLabel })}
+            />
+            {yAxis}
+            {allZero ? null : (
+              <ChartTooltip
+                cursor={{ stroke: 'var(--border)' }}
+                animationDuration={TOOLTIP_MS}
+                animationEasing="ease-out"
+                content={revenueTooltip(series, currency)}
+              />
+            )}
+            {baseline}
+            {/* Drawn even when all-zero, without a stroke: Recharts needs a series to lay out the axes. */}
+            <Line
+              type="linear"
+              dataKey={(d: Datum) => d.row.total}
+              name="Revenue"
+              stroke={allZero ? 'none' : 'var(--brand)'}
+              strokeWidth={2}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              fill="none"
+              dot={!allZero && n <= LINE_DOTS_MAX ? dot : false}
+              activeDot={allZero ? false : dot}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        ) : (
+          <BarChart
+            data={data}
+            accessibilityLayer={false}
+            stackOffset="sign"
+            barCategoryGap={`${(gap / 2) * 100}%`}
+            barGap={0}
+            margin={{ top: MARGIN_TOP, right: 0, bottom: 0, left: 0 }}
+          >
+            {grid}
+            <XAxis
+              type="category"
+              dataKey="i"
+              ticks={xLabelIndices(n)}
+              interval={0}
+              axisLine={false}
+              tickLine={false}
+              tickSize={0}
+              tickMargin={TICK_MARGIN}
+              height={X_AXIS_HEIGHT}
+              tick={xTick({ count: n, bandGap: gap, label: xLabel })}
+            />
+            {yAxis}
+            {allZero ? null : <ChartTooltip cursor={{ fill: 'var(--muted)' }} animationDuration={TOOLTIP_MS} animationEasing="ease-out" content={revenueTooltip(series, currency)} />}
+            {/* Always drawn (all-zero days draw nothing): Recharts needs a series to lay out the y axis. */}
+            {series.length > 0 ? (
+              series.map((s) => (
+                  <Bar
+                    key={s.key}
+                    dataKey={`c${s.col}`}
+                    name={s.name}
+                    stackId="day"
+                    fill={seriesFill(s)}
+                    fillOpacity={s.opacity}
+                    shape={segmentShape(s)}
+                    isAnimationActive={false}
+                  />
+                ))
+            ) : (
+              <Bar dataKey={(d: Datum) => d.row.total} stackId="day" fill="none" isAnimationActive={false} />
+            )}
+            {baseline}
+          </BarChart>
+        )}
       </ChartFrame>
       {allZero ? null : <RevenueTable model={model} currency={currency} id={`${id}-data`} label={title} />}
     </figure>
@@ -373,7 +480,7 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
   const cur = props.currency;
   const colTotals = series.map((s) => rows.reduce((acc, r) => acc + (r.values[s.col] ?? 0), 0));
   const grand = rows.reduce((acc, r) => acc + r.total, 0);
-  const caption = `Daily revenue by connection, ${dayRangeLabel(rows[0]!.day, rows[rows.length - 1]!.day)}, in ${cur.trim().toUpperCase()}.`;
+  const caption = `${props.model.weekly ? 'Weekly' : 'Daily'} revenue by connection, ${windowLabel(rows)}, in ${cur.trim().toUpperCase()}.`;
   return (
     <DataDetails
       id={props.id}
@@ -381,7 +488,7 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
       caption={caption}
       head={
         <TableRow>
-          <HeadCell>Date</HeadCell>
+          <HeadCell>{props.model.weekly ? 'Week' : 'Date'}</HeadCell>
           {series.map((s) => (
             <HeadCell key={s.key} numeric>
               {s.name}
@@ -392,7 +499,7 @@ function RevenueTable(props: { model: RevenueModel; currency: string; id: string
       }
       body={rows.map((r, i) => (
         <TableRow key={`${i}-${r.day}`}>
-          <DayCell day={r.day} label={shortDay(r.day)} />
+          <DayCell day={r.day} label={rowLabel(r)} />
           {series.map((s) => (
             <AmountCell key={s.key} value={r.values[s.col] ?? 0} text={money(r.values[s.col] ?? 0, cur)} />
           ))}
