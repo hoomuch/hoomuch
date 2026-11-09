@@ -9,6 +9,7 @@ import { HTTPException } from 'hono/http-exception';
 import type { ConnectionSummary } from '../data/types';
 import type { AppEnv } from '../env';
 import { publicPagesEnabled } from '../lib/public-pages';
+import { legalOperator } from '../lib/legal';
 import type { PageChrome } from '../views/layout';
 import type { SyncState } from '../views/pages/shared';
 
@@ -23,6 +24,7 @@ export function chrome(c: AppContext): PageChrome {
     if (chrome.user) chrome.share = true;
     else chrome.explore = true;
   }
+  if (legalOperator(c.env)) chrome.legal = true;
   return chrome;
 }
 

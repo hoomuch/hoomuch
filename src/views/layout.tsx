@@ -36,6 +36,8 @@ export interface PageChrome {
   share?: boolean;
   /** The instance has Explore (PUBLIC_PAGES): signed-out pages link to it. Only set when true. */
   explore?: boolean;
+  /** The instance publishes a privacy policy and terms (lib/legal.ts): footers link them. Only set when true. */
+  legal?: boolean;
 }
 
 export interface LayoutProps extends PageChrome {
@@ -69,6 +71,11 @@ export interface LayoutProps extends PageChrome {
    * set it on settings, forms, errors or pricing.
    */
   marketing?: boolean;
+  /**
+   * With `marketing`: a serious zone (the privacy policy, the terms) that keeps the marketing
+   * header and footer, but not the owl (design/brief.md: never in privacy) or the moving light.
+   */
+  quiet?: boolean;
   /**
    * A still ray light with grain behind the page header (views/components/backdrop.tsx). The
    * top-level app pages (dashboard, connections list, transactions, settings). The connect form, a
@@ -178,7 +185,7 @@ export function Layout(props: LayoutProps) {
 
         {/* Light from above, behind the header: ray light and grain (Magic UI). Moving on marketing
             pages, still on the dashboard. */}
-        {props.marketing ? <HeroBackdrop /> : props.backdrop ? <QuietBackdrop /> : null}
+        {props.marketing && !props.quiet ? <HeroBackdrop /> : props.backdrop || props.quiet ? <QuietBackdrop /> : null}
 
         <header className={cn('border-b', props.marketing && 'border-transparent')}>
           <div className={`${FRAME} flex flex-wrap items-center gap-x-6`}>
@@ -260,12 +267,19 @@ export function Layout(props: LayoutProps) {
         </main>
 
         {props.marketing ? (
-          <MarketingFooter note={props.footerNote} signedIn={Boolean(user) || hinted} loginHref={loginHref} explore={Boolean(props.explore)} />
+          <MarketingFooter
+            note={props.footerNote}
+            signedIn={Boolean(user) || hinted}
+            loginHref={loginHref}
+            explore={Boolean(props.explore)}
+            legal={Boolean(props.legal)}
+            owl={!props.quiet}
+          />
         ) : (
           // The owl naps on the footer of the daily pages (dashboard, connections list,
           // transactions): the ones with the backdrop, minus Settings. Never on settings, connect
           // forms, a connection's page (keys, deletes), auth or error pages.
-          <AppFooter owl={Boolean(props.backdrop) && props.nav !== 'settings'} />
+          <AppFooter owl={Boolean(props.backdrop) && props.nav !== 'settings'} legal={Boolean(props.legal)} />
         )}
         {props.celebrate ? <Celebration /> : null}
         <PagePayloadScript />
@@ -326,12 +340,12 @@ function TrustLine() {
   );
 }
 
-function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: string; explore: boolean }) {
+function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: string; explore: boolean; legal: boolean; owl: boolean }) {
   return (
     // mt-*: room above the hairline for the owl, whatever section ends the page.
     <footer className="mt-12 border-t sm:mt-16">
       <div className={`${FRAME} relative`}>
-        <FooterOwl />
+        {props.owl ? <FooterOwl /> : null}
         <div className="flex flex-col gap-x-12 gap-y-5 py-10 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <FooterWordmark />
@@ -367,11 +381,14 @@ function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: s
         </div>
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t py-5 text-caption text-muted-foreground">
           <TrustLine />
-          <p>
-            Open source under{' '}
-            <FooterLink href={LICENSE_URL} external>
-              AGPL-3.0
-            </FooterLink>
+          <p className="flex flex-wrap items-center gap-x-5 gap-y-1">
+            {props.legal ? <LegalLinks /> : null}
+            <span>
+              Open source under{' '}
+              <FooterLink href={LICENSE_URL} external>
+                AGPL-3.0
+              </FooterLink>
+            </span>
           </p>
         </div>
       </div>
@@ -379,7 +396,17 @@ function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: s
   );
 }
 
-function AppFooter(props: { owl: boolean }) {
+/** The privacy policy and terms, where the instance publishes them (lib/legal.ts). */
+function LegalLinks() {
+  return (
+    <>
+      <FooterLink href="/privacy">Privacy</FooterLink>
+      <FooterLink href="/terms">Terms</FooterLink>
+    </>
+  );
+}
+
+function AppFooter(props: { owl: boolean; legal: boolean }) {
   return (
     // mt-8 with the owl: room above the hairline so it never touches the last card.
     <footer className={cn('border-t', props.owl && 'mt-8')}>
@@ -396,6 +423,7 @@ function AppFooter(props: { owl: boolean }) {
             <FooterLink href={ISSUES_URL} external>
               Report an issue
             </FooterLink>
+            {props.legal ? <LegalLinks /> : null}
           </nav>
         </div>
         <TrustLine />

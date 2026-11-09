@@ -48,6 +48,13 @@ export interface Bindings {
    * and every page shows initials.
    */
   MEDIA?: R2Bucket;
+  /**
+   * The privacy policy and terms at /privacy and /terms (lib/legal.ts): who runs this instance and
+   * where to write. Both set: the pages are served and every footer links them. They're
+   * hoomuch.com's texts (an individual in Türkiye); leave these empty and publish your own otherwise.
+   */
+  LEGAL_NAME?: string;
+  LEGAL_EMAIL?: string;
 }
 
 export interface SessionUser {

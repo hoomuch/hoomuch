@@ -104,6 +104,12 @@ export function AuthPage(props: AuthPageProps) {
           <div className="mt-6">
             <Button block busyLabel={isSignup ? 'Creating account…' : 'Logging in…'}>{isSignup ? 'Create account' : 'Log in'}</Button>
           </div>
+          {isSignup && props.chrome.legal ? (
+            <p className="mt-3 text-caption text-pretty text-muted-foreground">
+              By creating an account, you agree to the <TextLink href="/terms">Terms of Service</TextLink> and confirm you’ve read
+              the <TextLink href="/privacy">Privacy Policy</TextLink>.
+            </p>
+          ) : null}
         </form>
         <p className="mt-6 text-body text-muted-foreground">
           {isSignup ? (

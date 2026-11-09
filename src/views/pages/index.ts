@@ -13,6 +13,7 @@ import { ExplorePage } from './explore';
 import { DashboardPage } from './dashboard';
 import { NotFoundPage, ServerErrorPage } from './errors';
 import { LandingPage } from './landing';
+import { LegalPage } from './legal';
 import { PublicProductPage } from './public-product';
 import { PublicProfilePage } from './public-profile';
 import { SettingsPage } from './settings';
@@ -34,6 +35,7 @@ export const PAGES = {
   publicProduct: PublicProductPage,
   publicProfile: PublicProfilePage,
   explore: ExplorePage,
+  legal: LegalPage,
   verifyEmail: VerifyEmailPage,
   notFound: NotFoundPage,
   serverError: ServerErrorPage,

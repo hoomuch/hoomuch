@@ -70,7 +70,12 @@
     "MAIL_FROM": "",
     // Public pages: "true" lets owners publish a product's verified revenue at /p/<slug>, with an
     // embeddable badge at /badge/<slug>.svg. Empty (the default) leaves them off.
-    "PUBLIC_PAGES": ""
+    "PUBLIC_PAGES": "",
+    // hoomuch.com's privacy policy and terms at /privacy and /terms, naming its operator and contact
+    // address. They're written for an individual in Türkiye under the KVKK: leave these empty
+    // (the default: no pages, no links) and publish your own unless that's you.
+    "LEGAL_NAME": "",
+    "LEGAL_EMAIL": ""
   },
 
   // Per-network request limits, checked before any D1 work (src/lib/rate-limit.ts). Counts are per

@@ -26,6 +26,7 @@ const LOADERS: Record<PageName, Loader> = {
   publicProduct: () => import('../views/pages/public-product').then((m) => m.PublicProductPage),
   publicProfile: () => import('../views/pages/public-profile').then((m) => m.PublicProfilePage),
   explore: () => import('../views/pages/explore').then((m) => m.ExplorePage),
+  legal: () => import('../views/pages/legal').then((m) => m.LegalPage),
   verifyEmail: () => import('../views/pages/verify-email').then((m) => m.VerifyEmailPage),
   notFound: () => import('../views/pages/errors').then((m) => m.NotFoundPage),
   serverError: () => import('../views/pages/errors').then((m) => m.ServerErrorPage),
