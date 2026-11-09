@@ -14,8 +14,18 @@ import type { AppEnv } from '../env';
 import { getProduct, setAvatar } from '../db/public';
 import { allowMediaChange, currentUser, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
-import { cleanImage, CONTENT_TYPES, mediaKeyType, UPLOAD_MAX_BYTES, UPLOAD_TYPES, type ImageInfo } from '../lib/media';
-import { deleteImages, mediaEnabled, putImage, refreshSiteIcon, replaceLogo } from '../services/media';
+import { CONTENT_TYPES, mediaKeyType, UPLOAD_MAX_BYTES } from '../lib/media';
+import {
+  checkUpload,
+  deleteImages,
+  mediaEnabled,
+  NO_FILE,
+  putImage,
+  refreshSiteIcon,
+  replaceLogo,
+  TOO_BIG,
+  type CheckedUpload,
+} from '../services/media';
 import { formLimit, isUuid } from './util';
 
 const enabled = async (c: Context<AppEnv>, next: Next) => (mediaEnabled(c.env) ? next() : c.notFound());
@@ -23,41 +33,33 @@ const enabled = async (c: Context<AppEnv>, next: Next) => (mediaEnabled(c.env) ?
 const PROFILE_FORM = '/share/profile';
 const productForm = (id: string) => `/share/products/${id}/edit`;
 
-const TOO_BIG = `That image is over ${UPLOAD_MAX_BYTES / (1024 * 1024)} MB. Pick a smaller one.`;
-const NOT_AN_IMAGE = 'Use a PNG, JPEG, WebP or GIF image, at most 4096 pixels a side.';
-const NO_FILE = 'Choose an image first.';
 const SLOW_DOWN = 'That’s a lot of changes at once. Try again in a few minutes.';
 
 /** Images change for a day before a browser asks again: long enough to spare requests, short enough that a removed photo goes. */
 const MEDIA_MAX_AGE = 86_400;
 
-/** An upload's body: the image and a little room for the multipart framing. Too big goes back with a note. */
-const uploadLimit = bodyLimit({
+/**
+ * An upload's body: the image and a little room for the multipart framing (the new-product form's
+ * fields too). Too big goes back to the form it came from, with a note.
+ */
+export const uploadLimit = bodyLimit({
   maxSize: UPLOAD_MAX_BYTES + 64 * 1024,
   onError: (c) => {
+    if (c.req.path === '/share/products') return redirectWithFlash(c as Context<AppEnv>, '/share/new', 'error', TOO_BIG);
     const id = /^\/share\/products\/([^/]+)\//.exec(c.req.path)?.[1];
     return redirectWithFlash(c as Context<AppEnv>, isUuid(id) ? productForm(id) : PROFILE_FORM, 'error', TOO_BIG);
   },
 });
 
 /** The uploaded image under `field`, checked: its bytes and what they are, or why it was turned away. */
-async function readUpload(
-  c: Context<AppEnv>,
-  field: string,
-): Promise<{ ok: true; bytes: Uint8Array; info: ImageInfo } | { ok: false; error: string }> {
+async function readUpload(c: Context<AppEnv>, field: string): Promise<CheckedUpload> {
   let body: Record<string, unknown>;
   try {
     body = await c.req.parseBody();
   } catch {
     return { ok: false, error: NO_FILE };
   }
-  const file = body[field];
-  if (!(file instanceof File) || file.size === 0) return { ok: false, error: NO_FILE };
-  if (file.size > UPLOAD_MAX_BYTES) return { ok: false, error: TOO_BIG };
-  // Stored as cleaned: no camera or location metadata, nothing after the image's end.
-  const image = cleanImage(new Uint8Array(await file.arrayBuffer()));
-  if (!image || !UPLOAD_TYPES.includes(image.info.type)) return { ok: false, error: NOT_AN_IMAGE };
-  return { ok: true, ...image };
+  return checkUpload(body[field]);
 }
 
 export function registerMediaRoutes(app: Hono<AppEnv>): void {

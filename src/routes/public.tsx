@@ -55,7 +55,8 @@ import {
 } from '../lib/public-pages';
 import { legalOperator } from '../lib/legal';
 import { mediaUrl } from '../lib/media';
-import { deleteImages, mediaEnabled, refreshSiteIcon } from '../services/media';
+import { checkUpload, deleteImages, mediaEnabled, putImage, refreshSiteIcon, replaceLogo } from '../services/media';
+import { uploadLimit } from './media';
 import { refreshProductStats } from '../services/public-pages';
 import { isProviderId } from '../providers/types';
 import { badgeSvg } from '../views/badge';
@@ -94,23 +95,41 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     return renderShare(c, { view: { kind: 'edit', id: product.id } });
   });
 
-  app.post('/share/products', enabled, requireUser, formLimit, async (c) => {
+  // The new-product form may carry a logo (multipart), so its body can be an image's size.
+  app.post('/share/products', enabled, requireUser, uploadLimit, async (c) => {
     const user = currentUser(c);
     const conns = await listConnections(c.env.DB, user.id);
     const { links } = await listProducts(c.env.DB, user.id);
-    const input = readProduct(await readForm(c), conns, links, null);
+    const form = await readForm(c);
+    const input = readProduct(form, conns, links, null);
+    // A chosen logo is checked with the rest: a bad one saves nothing, like any other field.
+    const file = mediaEnabled(c.env) ? form.file('logo') : null;
+    const logo = file ? await checkUpload(file) : null;
+    if (logo && !logo.ok) input.errors.logo = logo.error;
     const fromNew = (form: SharePageProps['form']) => renderShare(c, { view: { kind: 'new' }, form, status: 422 });
-    if (!input.fields) return fromNew({ productId: null, values: input.values, fieldErrors: input.errors, error: FIX_BELOW });
+    if (!input.fields || input.errors.logo) {
+      return fromNew({ productId: null, values: input.values, fieldErrors: input.errors, error: FIX_BELOW });
+    }
     const id = randomId();
     const saved = await insertProduct(c.env.DB, { id, userId: user.id, now: Date.now(), ...input.fields }, input.values.connections);
     if (saved === 'limit') return redirectWithFlash(c, '/share', 'error', `You already have ${MAX_PRODUCTS} products, the most one account can have.`);
     if (saved === 'slug-taken') return fromNew({ productId: null, values: input.values, fieldErrors: { slug: SLUG_TAKEN }, error: FIX_BELOW });
     await refreshProductStats(c.env, id);
-    // Its website's icon as its logo, when there's one (and the instance keeps images).
-    if (input.fields.website && mediaEnabled(c.env) && (await allowMediaChange(c.env, user.id))) {
+    let note = '';
+    if (mediaEnabled(c.env) && (logo?.ok || input.fields.website) && !(await allowMediaChange(c.env, user.id))) {
+      note = logo?.ok ? ' The logo wasn’t saved: that’s a lot of changes at once. Add it from Edit in a few minutes.' : '';
+    } else if (logo?.ok && mediaEnabled(c.env)) {
+      // The owner's own logo, so the website's icon isn't fetched.
+      try {
+        await replaceLogo(c.env, user.id, id, await putImage(c.env.MEDIA, logo.bytes, logo.info), 'upload');
+      } catch {
+        note = ' The logo wasn’t saved. Add it from Edit.';
+      }
+    } else if (input.fields.website) {
+      // Its website's icon as its logo, when there's one (and the instance keeps images).
       await refreshSiteIcon(c.env, user.id, id, new URL(c.req.url).origin, { websiteChanged: true });
     }
-    return redirectWithFlash(c, `/share/products/${id}`, 'success', `Saved ${input.fields.name}. Publish it when you’re ready.`);
+    return redirectWithFlash(c, `/share/products/${id}`, 'success', `Saved ${input.fields.name}. Publish it when you’re ready.${note}`);
   });
 
   app.post('/share/products/:id', enabled, requireUser, formLimit, async (c) => {

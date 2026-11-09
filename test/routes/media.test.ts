@@ -67,7 +67,9 @@ function send(
   let body: BodyInit | undefined;
   const headers: Record<string, string> = { origin: ORIGIN, ...(token ? { cookie: `__Host-hm_session=${token}` } : {}) };
   if (opts.file) {
+    // Multipart, as a form with a file field posts: the other fields too.
     const form = new FormData();
+    for (const [k, v] of Object.entries(opts.form ?? {})) for (const x of Array.isArray(v) ? v : [v]) form.append(k, x);
     form.append(opts.file.field, new File([opts.file.bytes.slice()], 'picked.png', { type: opts.file.type ?? 'image/png' }));
     body = form;
   } else if (opts.form) {
@@ -282,6 +284,41 @@ describe('a product’s logo', () => {
     expect(product()).toMatchObject({ logo_key: `${'a'.repeat(32)}.png`, logo_source: 'upload' });
     // The owner asking for the site's icon does replace it.
     expect(await setLogo(env.DB, 'u1', id, `${'b'.repeat(32)}.png`, 'site', false)).toBe(`${'a'.repeat(32)}.png`);
+  });
+
+  it('can come with a new product: the owner’s own, so the website’s icon isn’t fetched', async () => {
+    useWeb(site());
+    await withProfile();
+    const res = await send('POST', '/share/products', {
+      form: { name: 'Acme', connections: [STRIPE], website: 'https://acme.com' },
+      file: { field: 'logo', bytes: pngBytes(256, 256) },
+    });
+    expect(res.status).toBe(303);
+    expect(product().logo_source).toBe('upload');
+    expect(r2.objects.get(product().logo_key!)?.bytes).toEqual(pngBytes(256, 256));
+    expect(calls).toEqual([]);
+  });
+
+  it('turns a new product away with its logo when the logo isn’t an image, keeping what was typed', async () => {
+    await withProfile();
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+    const res = await send('POST', '/share/products', { form: { name: 'Acme', connections: [STRIPE] }, file: { field: 'logo', bytes: svg } });
+    expect(res.status).toBe(422);
+    const html = await htmlOf(res);
+    expect(html).toContain('Use a PNG, JPEG, WebP or GIF image');
+    expect(html).toContain('value="Acme"');
+    expect(t.rows('SELECT id FROM public_products')).toEqual([]);
+    expect(r2.objects.size).toBe(0);
+  });
+
+  it('is asked for on the new-product form only where the instance keeps images', async () => {
+    await withProfile();
+    const html = await htmlOf(await send('GET', '/share/new'));
+    expect(html).toMatch(/enctype="multipart\/form-data"/i);
+    expect(html).toContain('name="logo"');
+    const off = await htmlOf(await send('GET', '/share/new', { env: testEnv(t.db, { PUBLIC_PAGES: 'true' }) }));
+    expect(off).not.toContain('name="logo"');
+    expect(off).not.toContain('multipart/form-data');
   });
 
   it('drops the old site’s icon when the website changes to one without an icon', async () => {

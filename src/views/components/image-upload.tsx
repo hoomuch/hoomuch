@@ -2,21 +2,24 @@
  * Choosing a photo or logo: with a button, or by dragging an image onto the card or field.
  * Owner: Experience (design).
  *
- * ImageUploadCard is a card that sends its image on its own (routes/media.tsx): the profile's photo,
- * a product's logo on its Edit page.
+ * Two shapes. ImageUploadCard is a card that sends its image on its own (routes/media.tsx): the
+ * profile's photo, a product's logo on its Edit page. ImageField is one field of a bigger form: the
+ * logo on the new-product form, sent with the rest when it's saved.
  *
- * Before hydration it's a plain file input and an Upload button, multipart, so it works without
- * JavaScript. Once hydrated the input hides behind a button, the whole card takes a dropped image,
- * and either way the image is scaled down in the browser first (a square of UPLOAD_SIDE, cropped to
- * the middle, as WebP where the browser writes it). Nothing is shown from the file before it's
- * sent: the CSP allows no blob: images. The server checks whatever arrives either way.
+ * Before hydration both are a plain file input (the card with an Upload button), multipart, so they
+ * work without JavaScript. Once hydrated the input hides behind a button, the whole card or field
+ * takes a dropped image, and either way the image is scaled down in the browser first (a square of
+ * UPLOAD_SIDE, cropped to the middle, as WebP where the browser writes it). Nothing is shown from
+ * the file as an <img>: the CSP allows no blob: images. The field draws its preview on a canvas.
+ * The server checks whatever arrives either way.
  */
 
-import { ImageUp } from 'lucide-react';
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { ImagePlus, ImageUp } from 'lucide-react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Button as CossButton } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { UPLOAD_SIDE } from '../../lib/media';
+import { cn } from '../../lib/utils';
 import { Button } from './ui';
 
 const ACCEPT = 'image/png,image/jpeg,image/webp,image/gif';
@@ -218,3 +221,116 @@ export function ImageUploadCard(props: {
 }
 
 const FILE_INPUT = 'max-w-full text-body file:mr-3 file:rounded-md file:border file:bg-background file:px-2.5 file:py-1 file:text-body';
+
+// ---------- a field in a bigger form ----------
+
+/**
+ * An optional image in a form that posts as multipart: a tile (initials until one is chosen, then
+ * a preview drawn on a canvas), Choose, and Remove to go back to none. The form sends the file with
+ * the rest.
+ */
+export function ImageField(props: {
+  id: string;
+  name: string;
+  label: string;
+  /** Shown while nothing is chosen, e.g. the product's initials or an icon. */
+  placeholder: ReactNode;
+  help?: ReactNode;
+  error?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const ready = useEnhanced();
+  const [chosen, setChosen] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const choose = async (file: File) => {
+    if (!input.current) return;
+    if (!isImage(file)) {
+      setProblem(NOT_AN_IMAGE);
+      return;
+    }
+    setProblem(null);
+    await place(input.current, file);
+    setChosen(await preview(canvas, file));
+  };
+  const clear = () => {
+    if (input.current) input.current.value = '';
+    setChosen(false);
+  };
+  const drop = useDrop(ready, (file) => void choose(file));
+  const message = problem ?? props.error;
+  const helpId = `${props.id}-help`;
+
+  return (
+    <div className="mb-5 grid gap-2" data-slot="field" data-invalid={message ? '' : undefined}>
+      <label htmlFor={props.id} className="text-body font-medium">
+        {props.label} <span className="font-normal text-faint">(optional)</span>
+      </label>
+      <div className="relative flex flex-wrap items-center gap-4 rounded-xl" {...drop.handlers}>
+        <DropOverlay show={drop.over} label="Drop to use it" />
+        {ready ? (
+          <span className="relative size-16 shrink-0">
+            {/* The preview: drawn, never loaded, so the CSP's img-src needs nothing new. */}
+            <canvas
+              ref={canvas}
+              width={128}
+              height={128}
+              aria-hidden="true"
+              className={cn('size-16 rounded-2xl bg-muted outline -outline-offset-1 outline-foreground/10', !chosen && 'hidden')}
+            />
+            {chosen ? null : props.placeholder}
+          </span>
+        ) : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <input
+            ref={input}
+            id={props.id}
+            name={props.name}
+            type="file"
+            accept={ACCEPT}
+            tabIndex={ready ? -1 : undefined}
+            aria-describedby={props.help ? helpId : undefined}
+            aria-invalid={message ? true : undefined}
+            onChange={ready ? (e) => e.currentTarget.files?.[0] && void choose(e.currentTarget.files[0]) : undefined}
+            className={ready ? 'sr-only' : FILE_INPUT}
+          />
+          {ready ? (
+            <>
+              <CossButton type="button" variant="outline" size="sm" onClick={() => input.current?.click()}>
+                <ImagePlus />
+                {chosen ? 'Choose another' : 'Choose a logo'}
+              </CossButton>
+              {chosen ? (
+                <CossButton type="button" variant="ghost" size="sm" onClick={clear}>
+                  Remove
+                </CossButton>
+              ) : null}
+              <DropHint show />
+            </>
+          ) : null}
+        </div>
+      </div>
+      {message ? (
+        <p role="alert" className="text-caption text-destructive-foreground">
+          {message}
+        </p>
+      ) : null}
+      {props.help ? (
+        <p id={helpId} className="text-caption text-muted-foreground">
+          {props.help}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Draws the chosen image on the preview canvas; false when it can't be drawn. */
+async function preview(canvas: RefObject<HTMLCanvasElement | null>, file: File): Promise<boolean> {
+  if (!canvas.current) return false;
+  try {
+    return (await draw(file, canvas.current)) !== null;
+  } catch {
+    return false;
+  }
+}

@@ -10,7 +10,7 @@
  * and publishes.
  */
 
-import { ArrowUpRight, ChevronRight, Link2, Pencil, Plus, UserRound } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, ImagePlus, Link2, Pencil, Plus, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { cn } from '../../lib/utils';
 import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
 import { Avatar, ProductTile } from '../components/avatar';
 import { CopyField } from '../components/copy-field';
-import { ImageUploadCard } from '../components/image-upload';
+import { ImageField, ImageUploadCard } from '../components/image-upload';
 import { EmptyState } from '../components/empty-state';
 import { XMark } from '../components/icons';
 import { ProviderLogo } from '../components/provider-logos';
@@ -78,6 +78,8 @@ export interface ShareFormValues {
 }
 
 export interface ShareFormErrors {
+  /** The logo chosen on the new-product form (not kept after an error: a browser can't refill a file field). */
+  logo?: string;
   name?: string;
   slug?: string;
   website?: string;
@@ -639,6 +641,7 @@ function NewProductView(props: SharePageProps) {
               origin={props.origin}
               submitLabel="Save product"
               cancel="/share"
+              logo={Boolean(props.media)}
             />
           </Card>
         ) : (
@@ -667,11 +670,13 @@ function ProductForm(props: {
   submitLabel: string;
   /** Where Cancel goes. */
   cancel: string;
+  /** Ask for a logo too (a new product, where the instance keeps images): the form posts as multipart. */
+  logo?: boolean;
 }) {
   const v = props.values;
   const errors = props.failed?.fieldErrors ?? {};
   const formError = props.failed && Object.keys(errors).length === 0 ? props.failed.error : null;
-  const focus = formError ? 'form' : errors.name ? 'name' : errors.slug ? 'slug' : errors.website ? 'website' : null;
+  const focus = formError ? 'form' : errors.name ? 'name' : errors.slug ? 'slug' : errors.website ? 'website' : errors.logo ? 'logo' : null;
   const id = (name: string) => `${props.idPrefix}-${name}`;
   const picked = new Set(v?.connections ?? []);
   const rows = props.connections.map((c) => ({
@@ -681,8 +686,22 @@ function ProductForm(props: {
   const free = rows.filter((r) => r.elsewhere === undefined);
   const taken = rows.filter((r) => r.elsewhere !== undefined);
   return (
-    <form method="post" action={props.action}>
+    <form method="post" action={props.action} encType={props.logo ? 'multipart/form-data' : undefined}>
       <FormError message={formError} autoFocus={focus === 'form'} />
+      {props.logo ? (
+        <ImageField
+          id={id('logo')}
+          name="logo"
+          label="Logo"
+          error={errors.logo}
+          placeholder={
+            <span aria-hidden="true" className="flex size-16 items-center justify-center rounded-2xl border border-dashed text-muted-foreground">
+              <ImagePlus className="size-6" />
+            </span>
+          }
+          help="A square works best. Leave it empty and the product’s website icon is used, if it has one."
+        />
+      ) : null}
       <Field
         id={id('name')}
         name="name"
