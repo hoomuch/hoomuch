@@ -11,7 +11,7 @@
 
 import type { ReactNode } from 'react';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { ProductBreakdown, ProductMrrBreakdown, RangeDays } from '../../data/types';
+import { rangeSpan, type ProductBreakdown, type ProductMrrBreakdown, type RangeDays } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { ProviderDot } from './badges';
 import { ShareBar, shareLabel } from './breakdown-table';
@@ -140,7 +140,7 @@ export function ProductTable(props: { products: ProductBreakdown; currency: stri
       caption="Revenue by product, highest first"
       valueHead={
         <>
-          Revenue <span className="font-normal">({props.rangeDays} days)</span>
+          Revenue <span className="font-normal">({rangeSpan(props.rangeDays)})</span>
         </>
       }
       countHead="Charges"

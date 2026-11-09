@@ -4,18 +4,20 @@
  * `now = Date.now()`). Everything else here is test-only.
  */
 
-import type {
-  BreakdownRow,
-  ConnectionDetail,
-  ConnectionSummary,
-  DashboardData,
-  MrrDay,
-  ProductBreakdown,
-  ProductMrrBreakdown,
-  RangeDays,
-  RevenueDay,
-  TransactionPage,
-  TransactionRow,
+import {
+  revenueInSteps,
+  revenueStep,
+  type BreakdownRow,
+  type ConnectionDetail,
+  type ConnectionSummary,
+  type DashboardData,
+  type MrrDay,
+  type ProductBreakdown,
+  type ProductMrrBreakdown,
+  type RangeDays,
+  type RevenueDay,
+  type TransactionPage,
+  type TransactionRow,
 } from '../data/types';
 import { addDays, dayKey, dayStart, DAY, HOUR, MINUTE } from '../lib/time';
 
@@ -81,7 +83,7 @@ export const FIXTURE_CONNECTIONS: ConnectionSummary[] = [
   },
 ];
 
-/** Per-connection profile: today's MRR (USD cents), growth over 90 days, subs, trials, daily revenue. */
+/** Per-connection profile: today's MRR (USD cents), growth over 90 days (revenue grows with it), subs, trials, today's daily revenue. */
 const PROFILES = [
   { mrr: 482_000, growth: 0.11, subs: 131, trials: 9, dailyAvg: 15_800, refundEvery: 9 },
   { mrr: 231_000, growth: 0.18, subs: 402, trials: 37, dailyAvg: 7_900, refundEvery: 14 },
@@ -102,15 +104,18 @@ function mrrOn(profileIdx: number, daysAgo: number): number {
   return Math.round(trend * (1 + (r() - 0.5) * 0.006));
 }
 
-function revenueOn(profileIdx: number, day: string): number {
+function revenueOn(profileIdx: number, day: string, now: number): number {
   const p = PROFILES[profileIdx]!;
   const n = Math.round(dayStart(day) / DAY);
   const r = rng(n * 31 + profileIdx);
   const weekday = new Date(dayStart(day)).getUTCDay();
   const weekendDip = weekday === 0 || weekday === 6 ? 0.7 : 1;
-  let v = p.dailyAvg * weekendDip * (0.55 + r() * 0.9);
+  // Revenue grows along MRR's trend (mrrOn), so a year of demo revenue rises with it.
+  const daysAgo = Math.round((dayStart(dayKey(now)) - dayStart(day)) / DAY);
+  const avg = p.dailyAvg / (1 + p.growth * (daysAgo / 90));
+  let v = avg * weekendDip * (0.55 + r() * 0.9);
   if (r() < 0.06) v *= 2.6; // annual renewals spike
-  if (n % p.refundEvery === 0) v -= p.dailyAvg * (0.4 + r() * 0.5);
+  if (n % p.refundEvery === 0) v -= avg * (0.4 + r() * 0.5);
   return Math.round(v);
 }
 
@@ -244,7 +249,10 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       breakdown: [],
       products: NO_PRODUCTS,
       productMrr: NO_PRODUCT_MRR,
-      revenueSeries: days.map((day) => ({ day, total: 0, byConnection: {} })),
+      revenueSeries: revenueInSteps(
+        days.map((day) => ({ day, total: 0, byConnection: {} })),
+        revenueStep(rangeDays),
+      ),
       mrrSeries: [],
       fx: { asOf: null, daily: false, missing: [] },
       days: { timeZone: 'UTC', otherZones: [] },
@@ -260,7 +268,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     let total = 0;
     if (i >= firstDataIdx) {
       conns.forEach((c, ci) => {
-        const v = revenueOn(ci, day);
+        const v = revenueOn(ci, day, now);
         byConnection[c.id] = v;
         total += v;
       });
@@ -290,7 +298,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
   const revenuePrev =
     state === 'sparse'
       ? null
-      : windowDays(rangeDays, now - rangeDays * DAY).reduce((s, day) => s + conns.reduce((t, _c, ci) => t + revenueOn(ci, day), 0), 0);
+      : windowDays(rangeDays, now - rangeDays * DAY).reduce((s, day) => s + conns.reduce((t, _c, ci) => t + revenueOn(ci, day, now), 0), 0);
 
   const breakdown: BreakdownRow[] = conns
     .map((c, ci) => {
@@ -324,7 +332,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     breakdown,
     products: fixtureProducts(breakdown),
     productMrr: fixtureProductMrr(breakdown),
-    revenueSeries,
+    revenueSeries: revenueInSteps(revenueSeries, revenueStep(rangeDays)),
     mrrSeries,
     fx: { asOf: '2026-11-04', daily: true, missing: state === 'warnings' ? ['ARS'] : [] },
     days: { timeZone: 'UTC', otherZones: [] },

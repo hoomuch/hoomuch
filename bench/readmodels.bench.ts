@@ -108,6 +108,7 @@ it('read models on the seeded database', async () => {
       { name: `${P}/dashboard:7`, run: () => getDashboardData(env, user, 7) },
       { name: `${P}/dashboard:30`, run: () => getDashboardData(env, user, 30) },
       { name: `${P}/dashboard:90`, run: () => getDashboardData(env, user, 90) },
+      { name: `${P}/dashboard:364`, run: () => getDashboardData(env, user, 364) },
       { name: `${P}/calendar:this-month`, run: () => getCalendarMonth(env, user, month) },
       { name: `${P}/calendar:6-months-ago`, run: () => getCalendarMonth(env, user, addMonths(month, -6)) },
       { name: `${P}/currency:dominant`, run: () => dominantMrrCurrency(env, user.id) },

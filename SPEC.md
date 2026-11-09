@@ -50,7 +50,7 @@ Tasarım ilkesi: **indie minimalizm** — tek bakışta cevap, az renk, sıfıra
 | F-08 | Dashboard KPI'ları: MRR, ARR, aktif abonelik, aktif deneme, dönem geliri; önceki döneme göre değişim | P0 |
 | F-09 | Bağlantı bazında kırılım tablosu (MRR payı %) | P0 |
 | F-10 | Günlük gelir grafiği (bağlantı bazında yığılmış çubuk) ve MRR trend grafiği | P0 |
-| F-11 | Dönem seçici: 7 / 30 / 90 gün | P0 |
+| F-11 | Dönem seçici: 7 / 30 / 90 gün / 1 yıl (52 hafta, gelir haftalık) | P0 |
 | F-12 | Görüntüleme para birimi (varsayılan: kullanıcı seçmediyse, gerçek bağlantıların MRR'ının çoğunun olduğu para birimi bir kez otomatik seçilir; yoksa USD. EUR, GBP, TRY, …) ve günlük döviz kuru | P0 |
 | F-13 | Bağlantı durumu: son senkronizasyon zamanı, son hata, son çalıştırmalar | P0 |
 | F-14 | Birleşik işlem listesi (ödeme/iade), sağlayıcı filtresi, sayfalama | P1 |
@@ -267,6 +267,14 @@ yalnızca bugünün snapshot'ını ve son 2 günü yeniler; geçmişi düzeltmek
 | **Dönem geliri** | Seçili penceredeki günlük gelirin toplamı (yerel günler, §6 "Günler"): brüt tahsilat − iadeler. Sağlayıcı komisyonları **düşülmez** (v1). **Vergi:** merchant of record sağlayıcılarda (Paddle, Lemon Squeezy, Polar, Dodo Payments, Gumroad) KDV/satış vergisi satıcının parası değildir ve hariç tutulur (tahsilat − vergi; iadeler aynı oranda). Ödeme işlemcisi/faturalama platformlarında (Stripe, Chargebee) tutar "tahsil edildiği gibi"dir, çünkü işlemler vergiyi ayrı vermez. Uygulama mağazası verisi (RevenueCat, Adapty, Superwall, App Store Connect, Google Play) sağlayıcının kendi Revenue tanımıyla gelir: kullanıcının ödediği brüt tutar, vergi dahil, mağaza komisyonu düşülmeden. MRR vergi hariç hedeflenir; sağlayıcının vergiyi ayırmadığı durumlar (Paddle metrik MRR'ı, Dodo `tax_inclusive` abonelikler, Stripe Tax açık vergi dahil fiyatlar) ilgili bölümde belirtilir. |
 | **Değişim %** | MRR/abonelik/deneme: pencerenin başındaki en yakın snapshot'a göre. Gelir: bir önceki eşit uzunluktaki pencereye göre. Veri yoksa `null` (UI'da "—"). |
 
+**Pencereler:** 7, 30 ve 90 gün; **1 yıl** 364 gündür (52 tam hafta, `?range=364`). Yıl penceresinde gelir grafiği
+haftalık çubuklardır: her hafta bugünün haftanın gününde biter, böylece hiçbir çubuk yarım hafta değildir. Haftalar
+okuma modelinde toplanır (`revenueSeries`'te 52 giriş, her biri `to` ile son gününü söyler); toplamları gelir KPI'ına
+eşittir. Metinler süreyi "52 weeks" diye söyler, sekme "1 year".
+
+**Gelir grafiği:** "Bars" bağlantılara göre yığılmış çubuklar, "Line" günün (yılda haftanın) toplamı tek çizgi; ayrımı
+tooltip ve "Show data" tablosu verir. Seçim `?revenue=bars|line` ile URL'dedir, dönem gibi çerezde hatırlanır.
+
 **Aylığa normalize:** `day → ×365/12`, `week → ×52/12`, `month → ×1`, `year → ×1/12`; hepsi `interval_count`'a bölünür.
 Sonuç en yakın tamsayıya yuvarlanır.
 
@@ -284,7 +292,7 @@ başlamadan önceki günler o para biriminin en eski kurunu, geçmişi hiç olma
 olmayan para birimi toplamdan hariç tutulur ve dashboard'da uyarı gösterilir.
 
 **Günler (v1.1):** Günler kullanıcının saat diliminde (`users.timezone`) gece yarısından gece yarısına sayılır: "bugün",
-7/30/90 pencereleri, önceki dönem, takvim ve `?day=`. `daily_revenue` UTC günüyle saklanmaya devam eder; işlem bazlı
+7/30/90/364 günlük pencereler, önceki dönem, takvim ve `?day=`. `daily_revenue` UTC günüyle saklanmaya devam eder; işlem bazlı
 sağlayıcıların geliri okuma anında `transactions`'tan yerel güne göre gruplanır (D1'de saat dilimi olmadığı için her
 DST aralığının farkı JS'te hesaplanıp SQL `CASE` ile uygulanır). Günlük toplam veren sağlayıcılar yeniden gruplanamaz ve
 kendi günlerini korur (`ProviderMeta.dayZone`): RevenueCat, Dodo Payments, Adapty, Superwall UTC; App Store Connect
@@ -746,7 +754,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | `/signup`, `/login` | Tek kart, iki alan. Kayıt kapalıysa `/signup` bunu söyler |
 | `/verify-email` | E-posta doğrulaması açıkken onaylanmamış hesabın tutulduğu "Check your inbox" kartı: bağlantının gittiği adres, "Send the link again", çıkış. Navigasyon yok |
 | `/verify-email/confirm?token=` | E-postadaki bağlantı: tek düğmeli onay kartı (GET hiçbir şey değiştirmez); süresi geçmiş ya da geçersiz bağlantıda bunu söyler |
-| `/dashboard?range=7\|30\|90` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği, MRR trendi, bağlantı ve ürün kırılım tabloları, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
+| `/dashboard?range=7\|30\|90\|364&revenue=bars\|line` | KPI şeridi (MRR büyük), dönem seçici, gelir grafiği (bağlantılara göre yığılmış çubuk ya da toplamın çizgisi; seçim dönem gibi çerezde hatırlanır), MRR trendi, bağlantı ve ürün kırılım tabloları, uyarılar. Bağlantı yoksa boş durum + "Connect" / "Try demo data" |
 | `/connections` | Bağlantı listesi: renk noktası, ad, sağlayıcı, durum rozeti, son senkronizasyon, son hata |
 | `/connections/new` | Sağlayıcı seçimi (10 logolu kart + demo satırı) |
 | `/connections/new?provider=…` | Dinamik form (`ProviderMeta.fields`), anahtar oluşturma adımları, gerekli izinler, uyarı |
@@ -759,7 +767,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 ### 7.3 Bileşenler
 
 `Layout` (üst navigasyon), `Flash`, `KpiStat`, `DeltaBadge`, `ProviderDot`, `StatusBadge`, `EmptyState`,
-`RangeTabs`, `RevenueChart` (yığılmış çubuk SVG), `MrrChart` (çizgi/alan SVG), `BreakdownTable`, `ProductTable`,
+`RangeTabs`, `RevenueChart` (yığılmış çubuk ya da toplam çizgisi SVG), `MrrChart` (çizgi/alan SVG), `BreakdownTable`, `ProductTable`,
 `ConnectionForm`, `DangerZone`, `RelativeTime`.
 
 ---
@@ -856,7 +864,7 @@ Kurallar:
 **Definition of Done (v1):**
 - Yeni kullanıcı kayıt olur, demo bağlantı ekler ve dashboard birkaç saniye içinde dolar.
 - Hiçbir sağlayıcının geçersiz anahtarı kaydedilmez; kullanıcı sebebi görür.
-- Dashboard 7/30/90 gün arasında geçiş yapar; para birimi değişince tüm tutarlar çevrilir.
+- Dashboard 7/30/90 gün ve 1 yıl arasında geçiş yapar; para birimi değişince tüm tutarlar çevrilir.
 - Bir bağlantının hatası dashboard'ı bozmaz; hata bağlantı satırında görünür.
 - Hiçbir sayfada inline script yok; CSP ihlali konsolda görünmez.
 - `npm run check` (typecheck + test + css) yeşil.

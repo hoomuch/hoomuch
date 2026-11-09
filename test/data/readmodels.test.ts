@@ -268,6 +268,27 @@ describe('getDashboardData', () => {
     expect(d.revenueSeries[0]!.total).toBe(100);
     expect(d.kpis.revenue).toMatchObject({ value: 100, previous: 50 });
   });
+
+  it('rolls the year (52 weeks) into weeks ending today, adding up to the revenue KPI', async () => {
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe' });
+    seedConnection(t, { id: 'b', userId: 'u1', provider: 'demo' });
+    rev('a', addDays(TODAY, -363), 'USD', 100); // the year's first day, in its first week
+    rev('a', addDays(TODAY, -357), 'USD', 20); // that week's last day
+    rev('a', addDays(TODAY, -356), 'USD', 30); // the second week's first day
+    rev('b', addDays(TODAY, -3), 'USD', 7);
+    rev('a', TODAY, 'USD', 5, 2);
+    rev('a', addDays(TODAY, -364), 'USD', 50); // the 52 weeks before
+    const d = await getDashboardData(testEnv(t.db), user, 364);
+    expect(d.revenueSeries).toHaveLength(52);
+    expect(d.revenueSeries[0]).toEqual({ day: addDays(TODAY, -363), to: addDays(TODAY, -357), total: 120, byConnection: { a: 120 } });
+    expect(d.revenueSeries[1]).toEqual({ day: addDays(TODAY, -356), to: addDays(TODAY, -350), total: 30, byConnection: { a: 30 } });
+    expect(d.revenueSeries[2]).toEqual({ day: addDays(TODAY, -349), to: addDays(TODAY, -343), total: 0, byConnection: {} });
+    expect(d.revenueSeries[51]).toEqual({ day: addDays(TODAY, -6), to: TODAY, total: 10, byConnection: { a: 3, b: 7 } });
+    expect(d.kpis.revenue).toMatchObject({ value: 160, previous: 50 });
+    expect(d.revenueSeries.reduce((s, r) => s + r.total, 0)).toBe(d.kpis.revenue.value);
+    // Shorter windows keep one entry per day, without `to`.
+    expect((await getDashboardData(testEnv(t.db), user, 90)).revenueSeries.every((r) => r.to === undefined)).toBe(true);
+  });
 });
 
 describe('getDashboardData products', () => {

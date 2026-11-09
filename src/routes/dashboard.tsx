@@ -1,16 +1,17 @@
-/** GET /dashboard?range=7|30|90&month=YYYY-MM&day=YYYY-MM-DD. Owner: Experience (routes). */
+/** GET /dashboard?range=7|30|90|364&revenue=bars|line&month=YYYY-MM&day=YYYY-MM-DD. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
 import { parseCalendarQuery } from '../data/calendar';
 import { dominantMrrCurrency } from '../data/currency';
 import { getDashboardPage } from '../data/dashboard';
-import { parseRange } from '../data/types';
+import { parseRange, RANGE_OPTIONS } from '../data/types';
 import { setInferredCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { syncCadence, syncIntervalMinutes } from '../views/pages/shared';
 import { rememberedQuery } from './prefs';
 import { awaitingFirstSync, chrome, parsePoll, syncState } from './util';
+import { parseRevenueVariant } from '../views/charts/revenue-chart';
 import { renderPage } from '../views/render';
 
 export function registerDashboardRoutes(app: Hono<AppEnv>): void {
@@ -28,7 +29,9 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
       }
     }
     // ?range= wins and is remembered; the bare nav link brings back the last range.
-    const range = parseRange(rememberedQuery(c, 'range', 'hm_range', (v) => v === '7' || v === '30' || v === '90'));
+    const range = parseRange(rememberedQuery(c, 'range', 'hm_range', (v) => RANGE_OPTIONS.some((r) => String(r) === v)));
+    // The revenue card's bars or line, remembered the same way.
+    const revenueVariant = parseRevenueVariant(rememberedQuery(c, 'revenue', 'hm_revenue', (v) => parseRevenueVariant(v) === v));
     const poll = parsePoll(c.req.query('poll'));
     // The calendar's month and picked day (?month=, ?day=). Not remembered: a bare link is this month.
     const cal = parseCalendarQuery(c.req.query('month'), c.req.query('day'), Date.now(), user.timeZone);
@@ -62,6 +65,7 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
         currencyInferred,
         calendar,
         calendarDay: cal.day,
+        revenueVariant,
       });
   });
 }

@@ -253,7 +253,7 @@ function dayBack(back) {
 const REQUEST = {
   dashboard: () => {
     const r = Math.random();
-    const range = r < 0.7 ? 30 : r < 0.85 ? 7 : 90;
+    const range = r < 0.7 ? 30 : r < 0.85 ? 7 : r < 0.95 ? 90 : 364;
     return { path: `/dashboard?range=${range}`, name: `/dashboard?range=${range}`, page: 'dashboard' };
   },
   dashboard_month: () => ({ path: `/dashboard?month=${monthBack(randInt(1, 6))}`, name: '/dashboard?month=:month', page: 'dashboard' }),

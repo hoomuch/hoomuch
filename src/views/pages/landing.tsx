@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 import { Frame } from '@/components/ui/frame';
 import type { DashboardData } from '../../data/types';
 import { getProviderMeta, PROVIDERS } from '../../providers/registry';
+import type { RevenueVariant } from '../charts/revenue-chart';
 import { BreakdownTable } from '../components/breakdown-table';
 import { KeyGuide } from '../components/connection-form';
 import { HorizonGlow } from '../components/horizon-glow';
@@ -31,6 +32,8 @@ export interface LandingPageProps {
   signupOpen: boolean;
   /** Demo numbers for the live dashboard preview (view fixtures, dated to today). */
   demo: DashboardData;
+  /** The demo's revenue chart (`?revenue=`, not remembered). Default: bars. */
+  revenueVariant?: RevenueVariant;
   /** How often connections sync, in words ("every hour"). */
   cadence: string;
 }
@@ -120,7 +123,12 @@ export function LandingPage(props: LandingPageProps) {
             <h2 id="demo-title" className="font-semibold">
               Dashboard <span className="font-normal text-muted-foreground">· demo data</span>
             </h2>
-            <RangeTabs current={demo.rangeDays} basePath="/" anchor="demo" />
+            <RangeTabs
+              current={demo.rangeDays}
+              basePath="/"
+              anchor="demo"
+              keep={props.revenueVariant === 'line' ? 'revenue=line' : undefined}
+            />
           </div>
           {/* Same pieces, same order as /dashboard, up to the calendar (it has no demo month):
               the list under the frame names it instead. */}
@@ -131,7 +139,7 @@ export function LandingPage(props: LandingPageProps) {
               <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
             </Card>
             <ProductCard data={demo} />
-            <RevenueCard data={demo} />
+            <RevenueCard data={demo} variant={props.revenueVariant} basePath="/" />
           </div>
         </Frame>
         {/* What the demo can't show. Literal: each line is a screen or a behaviour that exists. */}

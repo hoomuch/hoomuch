@@ -49,6 +49,7 @@ import {
   milestoneAtOrBelow,
   mrrOwl,
   recentMilestone,
+  RevenueCard,
 } from '../../src/views/pages/dashboard';
 import { NotFoundPage, ServerErrorPage } from '../../src/views/pages/errors';
 import { AuthPage } from '../../src/views/pages/auth';
@@ -235,8 +236,26 @@ describe('RangeTabs', () => {
     const out = await render('range', h(RangeTabs, { current: 30, basePath: '/preview/dashboard' }));
     expect(out).toContain('href="/preview/dashboard?range=7"');
     expect(out).toContain('href="/preview/dashboard?range=90"');
+    // The year is 52 whole weeks; the tab says "1 year".
+    expect(out).toMatch(/href="\/preview\/dashboard\?range=364"[^>]*>(?:<[^>]+>)*<span class="sr-only">Last <\/span>1 year/);
     expect(out).toMatch(/href="\/preview\/dashboard\?range=30" aria-current="page"/);
     expect(out.match(/aria-current="page"/g)).toHaveLength(1);
+  });
+});
+
+describe('RevenueCard', () => {
+  it('links Bars and Line, keeping the range and landing back on the card', async () => {
+    const data = fixtureDashboard(90, 'full', FIXTURE_NOW);
+    const line = await render('revenue-card-line', h(RevenueCard, { data, variant: 'line' }));
+    expect(tags(line, 'section', 'id="revenue"')).toHaveLength(1);
+    expect(line).toContain('<nav aria-label="Revenue chart"');
+    expect(line).toContain('href="/dashboard?range=90&amp;revenue=bars#revenue"');
+    expect(tags(line, 'a', 'href="/dashboard?range=90&amp;revenue=line#revenue"', 'aria-current="page"')).toHaveLength(1);
+    expect(line).not.toContain('aria-label="Legend"');
+
+    const bars = await render('revenue-card-bars', h(RevenueCard, { data, basePath: '/preview/dashboard' }));
+    expect(tags(bars, 'a', 'href="/preview/dashboard?range=90&amp;revenue=bars#revenue"', 'aria-current="page"')).toHaveLength(1);
+    expect(bars).toContain('aria-label="Legend"');
   });
 });
 
@@ -734,6 +753,11 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('>By product<'); // the demo has every card the dashboard has, up to the calendar
     expect(out).toContain('aria-label="Also in hoomuch"'); // and names what it can't show
     expect(out).toContain('href="/?range=90#demo"');
+    expect(out).toContain('href="/?range=30&amp;revenue=line#revenue"');
+    // The landing page doesn't remember choices, so its range tabs carry the line along.
+    const line = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo, cadence: 'every hour', revenueVariant: 'line' }));
+    expect(line).toContain('href="/?range=90&amp;revenue=line#demo"');
+    expect(tags(line, 'a', 'href="/?range=30&amp;revenue=line#revenue"', 'aria-current="page"')).toHaveLength(1);
     expect(out).toContain('Create a Stripe key');
     expect(out).not.toContain('dashboard.stripe.com'); // preview drops the outbound link
     expect(out).toContain('Setup is one key per store.');

@@ -11,7 +11,11 @@ import type { ConnectionStatus, ConnectionView } from '../db/queries';
 import type { FxRow } from '../sync/fx';
 import type { ProviderId } from '../providers/types';
 
-export type RangeDays = 7 | 30 | 90;
+/**
+ * The dashboard's window in days, ending today. The year is 364 days, 52 whole weeks, so its
+ * revenue rolls up into weeks that all end on today's weekday (`revenueStep`): no bar is a part week.
+ */
+export type RangeDays = 7 | 30 | 90 | 364;
 
 /**
  * A read model as statements for a `db.batch` plus the function that builds it from their results,
@@ -26,11 +30,47 @@ export interface ReadModelQuery<T> {
 
 /** A batch result's rows. */
 export const rowsOf = <T,>(r: D1Result | undefined): T[] => (r?.results ?? []) as unknown as T[];
-export const RANGE_OPTIONS: readonly RangeDays[] = [7, 30, 90];
+export const RANGE_OPTIONS: readonly RangeDays[] = [7, 30, 90, 364];
 
 export function parseRange(v: string | undefined | null): RangeDays {
   const n = Number(v);
-  return n === 7 || n === 90 ? n : 30;
+  return n === 7 || n === 90 || n === 364 ? n : 30;
+}
+
+/** The window in words: "30 days", or "52 weeks" for the year. */
+export function rangeSpan(r: RangeDays): string {
+  return r === 364 ? '52 weeks' : `${r} days`;
+}
+
+/** Days each `revenueSeries` entry adds up: a week in the year's window, a day otherwise. */
+export function revenueStep(r: RangeDays): 1 | 7 {
+  return r === 364 ? 7 : 1;
+}
+
+/**
+ * Daily entries rolled up into `step`-day ones, oldest first. The window is whole steps, so the
+ * last entry ends on the last day. Each entry keeps its first day and says its last in `to`.
+ */
+export function revenueInSteps(days: readonly RevenueDay[], step: number): RevenueDay[] {
+  if (step <= 1) return days.slice();
+  const out: RevenueDay[] = [];
+  for (let i = 0; i < days.length; i += step) {
+    const part = days.slice(i, i + step);
+    const entry: RevenueDay = { day: part[0]!.day, to: part.at(-1)!.day, total: 0, byConnection: {} };
+    for (const d of part) {
+      entry.total += d.total;
+      for (const [id, v] of Object.entries(d.byConnection)) entry.byConnection[id] = (entry.byConnection[id] ?? 0) + v;
+    }
+    for (const [id, v] of Object.entries(entry.byConnection)) if (v === 0) delete entry.byConnection[id];
+    out.push(entry);
+  }
+  return out;
+}
+
+/** The window's last day (the user's today): the last entry's `to`, or its day. */
+export function lastRevenueDay(series: readonly RevenueDay[]): string | undefined {
+  const last = series.at(-1);
+  return last ? (last.to ?? last.day) : undefined;
 }
 
 export interface Kpi {
@@ -148,7 +188,10 @@ export interface ProductMrrBreakdown {
 }
 
 export interface RevenueDay {
+  /** The entry's day, or its first day when it adds up a week. */
   day: string;
+  /** Its last day when it adds up a week (the year's window, `revenueStep`); absent for one day. */
+  to?: string;
   /** Net (gross − refunds) across connections. */
   total: number;
   /** connectionId → net amount. Connections with no revenue that day may be absent. */
@@ -177,7 +220,10 @@ export interface DashboardData {
   breakdown: BreakdownRow[];
   products: ProductBreakdown;
   productMrr: ProductMrrBreakdown;
-  /** Exactly `rangeDays` entries, oldest → newest, zero-filled. */
+  /**
+   * One entry per `revenueStep(rangeDays)` days, oldest → newest, zero-filled: `rangeDays` days, or
+   * 52 weeks for the year. The last entry ends today.
+   */
   revenueSeries: RevenueDay[];
   /** Days in the window that have snapshots, oldest → newest (may be sparse early on). */
   mrrSeries: MrrDay[];

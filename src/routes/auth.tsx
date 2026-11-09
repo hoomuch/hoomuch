@@ -25,6 +25,7 @@ import {
 import { sendVerificationLink, VERIFY_PATH, verificationRequired } from '../lib/email-verification';
 import { redirectWithFlash, setCelebrate } from '../lib/flash';
 import { RATE_LIMIT_PERIOD_SECONDS, withinAuthLimit } from '../lib/rate-limit';
+import { parseRevenueVariant } from '../views/charts/revenue-chart';
 import { fixtureDashboard } from '../views/fixtures';
 import { syncCadence } from '../views/pages/shared';
 import { chrome, formLimit, readForm, type AppContext, type FormFields } from './util';
@@ -80,6 +81,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
         chrome: chrome(c),
         signupOpen: signupAllowed(c.env),
         demo,
+        revenueVariant: parseRevenueVariant(c.req.query('revenue')),
         cadence: syncCadence(c.env.SYNC_INTERVAL_MINUTES),
       });
   });

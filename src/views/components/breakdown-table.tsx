@@ -8,7 +8,7 @@
  */
 
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { BreakdownRow, RangeDays } from '../../data/types';
+import { rangeSpan, type BreakdownRow, type RangeDays } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { ProviderDot, TestModeBadge } from './badges';
 import { NotAvailable, ScrollTable, TableRowHeader } from './ui';
@@ -55,7 +55,7 @@ export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; 
             Trials
           </TableHead>
           <TableHead scope="col" className="text-right">
-            Revenue <span className="font-normal">({props.rangeDays} days)</span>
+            Revenue <span className="font-normal">({rangeSpan(props.rangeDays)})</span>
           </TableHead>
         </TableRow>
       </TableHeader>

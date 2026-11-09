@@ -32,6 +32,8 @@ import {
   type ProductMrrBreakdown,
   type ProductMrrRow,
   type ProductRow,
+  revenueInSteps,
+  revenueStep,
   type RangeDays,
   type ReadModelQuery,
   type RevenueDay,
@@ -414,7 +416,8 @@ function buildDashboard(p: {
     breakdown,
     products,
     productMrr,
-    revenueSeries,
+    // The year's bars are weeks: summed here, so the page carries 52 entries rather than 364.
+    revenueSeries: revenueInSteps(revenueSeries, revenueStep(rangeDays)),
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
     days: { timeZone: tz, otherZones: otherDayZones(conns, tz) },
