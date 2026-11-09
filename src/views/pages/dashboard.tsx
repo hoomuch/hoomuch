@@ -9,7 +9,7 @@
 
 import { Info, TriangleAlert, X } from 'lucide-react';
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { type ReactNode, useState } from 'react';
+import { type MouseEvent, type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
@@ -422,16 +422,46 @@ function revenueNotes(data: DashboardData, where = 'in these bars or in Revenue 
     });
 }
 
+/** Where the dashboard's revenue card remembers a switch made in place (routes/dashboard.tsx). */
+export const REVENUE_CHART_PATH = '/dashboard/revenue-chart';
+
 /**
  * Revenue per day, or per week for the year, the card: stacked bars by connection or the total as
- * a line, picked by links (`?revenue=`) that keep the range and land back on the card. Shared with
- * the landing demo, whose `basePath` is "/".
+ * a line. Before hydration the switch is two links (`?revenue=`) that keep the range and land back
+ * on the card. After it, both draw from the series already on the page, so the switch is in place:
+ * the URL follows with replaceState, and with `remember` (the dashboard) a POST to
+ * REVENUE_CHART_PATH remembers it, as the link would have. Shared with the landing demo, whose
+ * `basePath` is "/" and which tells its range tabs through `onVariantChange`.
  */
-export function RevenueCard(props: { data: DashboardData; variant?: RevenueVariant; basePath?: string; className?: string }) {
+export function RevenueCard(props: {
+  data: DashboardData;
+  variant?: RevenueVariant;
+  basePath?: string;
+  remember?: boolean;
+  onVariantChange?: (v: RevenueVariant) => void;
+  className?: string;
+}) {
   const { data } = props;
-  const variant = props.variant ?? 'bars';
+  const [variant, setVariant] = useState<RevenueVariant>(props.variant ?? 'bars');
+  const [announce, setAnnounce] = useState('');
   const base = props.basePath ?? '/dashboard';
   const notes = revenueNotes(data);
+
+  const pick = (v: RevenueVariant) => (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    if (v === variant) return;
+    setVariant(v);
+    setAnnounce(v === 'line' ? 'Showing revenue as a line.' : 'Showing revenue as bars.');
+    // Only `revenue` changes: the range, a picked calendar day and the fragment stay as they are.
+    const url = new URL(window.location.href);
+    url.searchParams.set('revenue', v);
+    window.history.replaceState(window.history.state, '', url);
+    // Best effort: if it doesn't land, the choice still holds on this page and in its URL.
+    if (props.remember) void fetch(REVENUE_CHART_PATH, { method: 'POST', body: new URLSearchParams({ revenue: v }) }).catch(() => {});
+    props.onVariantChange?.(v);
+  };
+
   return (
     <Card
       id="revenue"
@@ -445,6 +475,7 @@ export function RevenueCard(props: { data: DashboardData; variant?: RevenueVaria
             href: `${base}?range=${data.rangeDays}&revenue=${v}#revenue`,
             current: v === variant,
             label: v === 'bars' ? 'Bars' : 'Line',
+            onClick: pick(v),
           }))}
         />
       }
@@ -452,6 +483,9 @@ export function RevenueCard(props: { data: DashboardData; variant?: RevenueVaria
     >
       <RevenueChart series={data.revenueSeries} connections={data.breakdown} currency={data.currency} variant={variant} />
       {notes.length > 0 ? <NoteList notes={notes} /> : null}
+      <p role="status" className="sr-only">
+        {announce}
+      </p>
     </Card>
   );
 }
@@ -753,7 +787,7 @@ export function DashboardPage(props: DashboardPageProps) {
 
         <ProductCard data={data} />
 
-        <RevenueCard data={data} variant={props.revenueVariant} basePath={props.basePath} />
+        <RevenueCard data={data} variant={props.revenueVariant} basePath={props.basePath} remember />
 
         {props.calendar ? (
           <CalendarCard

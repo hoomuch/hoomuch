@@ -218,11 +218,18 @@ export function Alert(props: { tone?: Tone; title?: string; children?: ReactNode
 /**
  * coss SegmentedControl made of links (range tabs, the transactions filter): one choice of
  * several, each its own URL, so it works before hydration. The current one is aria-current="page".
- * Idle text is muted-foreground at full strength (AA); coss's default is 72% of it.
+ * Idle text is muted-foreground at full strength (AA); coss's default is 72% of it. An item's
+ * `onClick` (after hydration only) can make the choice in place; its href still works without it.
  */
 export function SegmentedLinks(props: {
   label: string;
-  items: readonly { href: string; label: ReactNode; current: boolean; key: string }[];
+  items: readonly {
+    href: string;
+    label: ReactNode;
+    current: boolean;
+    key: string;
+    onClick?: (e: MouseEvent<HTMLAnchorElement>) => void;
+  }[];
   className?: string;
 }) {
   return (
@@ -230,7 +237,7 @@ export function SegmentedLinks(props: {
       {props.items.map((it) => (
         <SegmentedControlItem
           key={it.key}
-          render={<a href={it.href} aria-current={it.current ? 'page' : undefined} />}
+          render={<a href={it.href} aria-current={it.current ? 'page' : undefined} onClick={it.onClick} />}
           className="text-muted-foreground tabular-nums hover:text-foreground"
         >
           {it.label}
