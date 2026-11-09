@@ -21,7 +21,7 @@ import { cn } from '../../lib/utils';
 import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
 import { Avatar, ProductTile } from '../components/avatar';
 import { CopyField } from '../components/copy-field';
-import { ImageUpload } from '../components/image-upload';
+import { ImageUploadCard } from '../components/image-upload';
 import { EmptyState } from '../components/empty-state';
 import { XMark } from '../components/icons';
 import { ProviderLogo } from '../components/provider-logos';
@@ -585,15 +585,16 @@ function LogoCard(props: { product: ShareProduct }) {
           : 'Initials for now. Upload a logo, or add the product’s website below and its icon is used.';
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-        <ProductTile name={p.name} src={p.logo} className="size-16 rounded-2xl font-heading text-title" />
-        <div className="grid min-w-0 flex-1 basis-56 gap-3">
-          <div>
-            <h2 className="font-heading text-base">Logo</h2>
-            <p className="text-body text-pretty text-muted-foreground">{where}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ImageUpload id={`logo-${p.id}`} action={base} field="logo" label={p.logoSource === 'upload' ? 'Change logo' : 'Upload a logo'} />
+      <ImageUploadCard
+        id={`logo-${p.id}`}
+        action={base}
+        field="logo"
+        label={p.logoSource === 'upload' ? 'Change logo' : 'Upload a logo'}
+        preview={<ProductTile name={p.name} src={p.logo} className="size-16 rounded-2xl font-heading text-title" />}
+        title="Logo"
+        description={where}
+        extra={
+          <>
             {p.website && p.logoSource !== 'site' ? (
               <form method="post" action={`${base}/site`}>
                 <Button variant="ghost" small busyLabel="Fetching…">
@@ -608,9 +609,9 @@ function LogoCard(props: { product: ShareProduct }) {
                 </Button>
               </form>
             ) : null}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
     </Card>
   );
 }
@@ -793,25 +794,24 @@ function ProfileView(props: SharePageProps) {
       <div className="grid gap-6">
         {p && props.media ? (
           <Card>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-              <Avatar name={p.displayName} src={p.avatar} className="size-20 font-heading text-section-sm" />
-              <div className="grid min-w-0 flex-1 basis-56 gap-3">
-                <div>
-                  <h2 className="font-heading text-base">Photo</h2>
-                  <p className="text-body text-muted-foreground">On your profile, your product pages and Explore. A square works best.</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <ImageUpload id="profile-photo" action="/share/profile/photo" field="photo" label={p.avatar ? 'Change photo' : 'Add a photo'} />
-                  {p.avatar ? (
-                    <form method="post" action="/share/profile/photo/delete">
-                      <Button variant="ghost" small>
-                        Remove
-                      </Button>
-                    </form>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <ImageUploadCard
+              id="profile-photo"
+              action="/share/profile/photo"
+              field="photo"
+              label={p.avatar ? 'Change photo' : 'Add a photo'}
+              preview={<Avatar name={p.displayName} src={p.avatar} className="size-20 font-heading text-section-sm" />}
+              title="Photo"
+              description="On your profile, your product pages and Explore. A square works best."
+              extra={
+                p.avatar ? (
+                  <form method="post" action="/share/profile/photo/delete">
+                    <Button variant="ghost" small>
+                      Remove
+                    </Button>
+                  </form>
+                ) : null
+              }
+            />
           </Card>
         ) : null}
         <Card>
