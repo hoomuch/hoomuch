@@ -256,6 +256,8 @@ describe('RevenueCard', () => {
     const bars = await render('revenue-card-bars', h(RevenueCard, { data, basePath: '/preview/dashboard' }));
     expect(tags(bars, 'a', 'href="/preview/dashboard?range=90&amp;revenue=bars#revenue"', 'aria-current="page"')).toHaveLength(1);
     expect(bars).toContain('aria-label="Legend"');
+    // After hydration the switch is in place; a status line says what it now shows.
+    expect(bars).toContain('<p role="status" class="sr-only"></p>');
   });
 });
 

@@ -274,6 +274,9 @@ eşittir. Metinler süreyi "52 weeks" diye söyler, sekme "1 year".
 
 **Gelir grafiği:** "Bars" bağlantılara göre yığılmış çubuklar, "Line" günün (yılda haftanın) toplamı tek çizgi; ayrımı
 tooltip ve "Show data" tablosu verir. Seçim `?revenue=bars|line` ile URL'dedir, dönem gibi çerezde hatırlanır.
+Hydration'dan önce iki link sayfayı yeniden yükler; sonra iki görünüm de sayfadaki aynı seriden çizildiği için geçiş
+yerinde olur: URL `replaceState` ile güncellenir, dashboard seçimi `POST /dashboard/revenue-chart` ile çereze yazar
+(sayfa çizilmez, D1 okunmaz). Landing demosu hatırlamaz; dönem sekmeleri seçimi URL'de taşır.
 
 **Aylığa normalize:** `day → ×365/12`, `week → ×52/12`, `month → ×1`, `year → ×1/12`; hepsi `interval_count`'a bölünür.
 Sonuç en yakın tamsayıya yuvarlanır.
@@ -761,6 +764,7 @@ MRR, ara sıra iade. Gerçek akışın tamamından (snapshot, transactions, dail
 | `/connections/:id` | Detay: durum, son hata, son senkronizasyonun uyarıları (F-19), son snapshot'lar, katlanmış senkronizasyon geçmişi, webhook destekleyen sağlayıcılarda "Real-time updates" kartı (F-17: Turn on; açıkken URL, kopyala, sağlayıcıdaki adımlar ve seçilecek olaylar, son çağrı zamanı, New URL, Turn off). Birincil eylem Sync now; son senkronizasyon hatalıysa "Replace key". Yeniden adlandır, anahtar yenile ve sil (onay kutusu ile) tek bir "Manage" bölümünde, gerekmedikçe kapalı. Demo bağlantı başlıktan tek tıkla kaldırılır |
 | `/transactions?provider=&page=` | Birleşik işlem tablosu |
 | `/settings` | Para birimi, saat dilimi (F-20), parola değiştirme, hesabı silme (onay kutusu + parola) |
+| `POST /dashboard/revenue-chart` | Gelir kartının yerinde yapılan Bars/Line seçimini hatırlar (`revenue=bars\|line`, form gövdesi): 204, geçersiz değere 400. Oturum ve CSRF gerekir |
 | `POST /webhooks/:id/:token` | Sağlayıcı webhook'u (F-17): oturum yok, CSRF yok, JSON yanıt; §4.1 "Webhook" |
 | `/healthz` | `{"ok":true}` |
 

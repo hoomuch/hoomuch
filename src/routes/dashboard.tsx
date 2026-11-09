@@ -9,9 +9,10 @@ import { setInferredCurrency } from '../db/queries';
 import type { AppEnv } from '../env';
 import { currentUser, requireUser } from '../lib/auth';
 import { syncCadence, syncIntervalMinutes } from '../views/pages/shared';
-import { rememberedQuery } from './prefs';
-import { awaitingFirstSync, chrome, parsePoll, syncState } from './util';
+import { remember, rememberedQuery } from './prefs';
+import { awaitingFirstSync, chrome, formLimit, parsePoll, readForm, syncState } from './util';
 import { parseRevenueVariant } from '../views/charts/revenue-chart';
+import { REVENUE_CHART_PATH } from '../views/pages/dashboard';
 import { renderPage } from '../views/render';
 
 export function registerDashboardRoutes(app: Hono<AppEnv>): void {
@@ -67,5 +68,14 @@ export function registerDashboardRoutes(app: Hono<AppEnv>): void {
         calendarDay: cal.day,
         revenueVariant,
       });
+  });
+
+  // The revenue card's Bars | Line, switched in place after hydration: remembered like ?revenue=,
+  // without rendering the page. Before hydration the switch is a link and GET /dashboard does it.
+  app.post(REVENUE_CHART_PATH, requireUser, formLimit, async (c) => {
+    const v = (await readForm(c)).text('revenue', 8);
+    if (parseRevenueVariant(v) !== v) return c.text('Unknown revenue chart.', 400);
+    remember(c, 'hm_revenue', v);
+    return c.body(null, 204);
   });
 }

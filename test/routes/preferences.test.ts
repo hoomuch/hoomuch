@@ -52,6 +52,15 @@ function get(path: string, cookies: string[] = []): Promise<Response> {
   return worker.fetch!(req as never, testEnv(t.db), ctx as never) as Promise<Response>;
 }
 
+/** A form POST from the page (same origin unless `origin` says otherwise). */
+function post(path: string, body: Record<string, string>, opts: { origin?: string; session?: boolean } = {}): Promise<Response> {
+  const headers: Record<string, string> = { origin: opts.origin ?? ORIGIN, 'content-type': 'application/x-www-form-urlencoded' };
+  if (opts.session !== false) headers.cookie = `__Host-hm_session=${TOKEN}`;
+  const req = new Request(`${ORIGIN}${path}`, { method: 'POST', headers, body: new URLSearchParams(body).toString() });
+  const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p), passThroughOnException() {} };
+  return worker.fetch!(req as never, testEnv(t.db), ctx as never) as Promise<Response>;
+}
+
 /** "name=value" for a cookie the response sets. */
 function cookie(res: Response, base: string): string | null {
   const c = res.headers.getSetCookie().find((x) => x.startsWith(`__Host-${base}=`));
@@ -136,6 +145,30 @@ describe('remembered choices', () => {
     expect(cookie(odd, 'hm_revenue')).toBeNull();
     expect(await htmlOf(odd)).toMatch(current('line'));
     expect(await htmlOf(await get('/dashboard'))).toMatch(current('bars'));
+  });
+
+  it('remembers a switch the revenue card made in place, as ?revenue= would', async () => {
+    seedConnection(t, { id: 'a', userId: 'u1', provider: 'stripe', lastSyncedAt: NOW });
+    snap('a', { USD: 100_000 });
+    const res = await post('/dashboard/revenue-chart', { revenue: 'line' });
+    expect(res.status).toBe(204);
+    const remembered = cookie(res, 'hm_revenue');
+    expect(remembered).toBe('__Host-hm_revenue=line');
+    expect(await htmlOf(await get('/dashboard', [remembered!]))).toMatch(
+      /<a\b(?=[^>]*href="\/dashboard\?range=30&amp;revenue=line#revenue")(?=[^>]*aria-current="page")/,
+    );
+
+    // Anything but bars or line is turned down, and nothing is remembered.
+    const odd = await post('/dashboard/revenue-chart', { revenue: 'pie' });
+    expect(odd.status).toBe(400);
+    expect(cookie(odd, 'hm_revenue')).toBeNull();
+    // Another site can't set it (CSRF), and neither can someone signed out.
+    const cross = await post('/dashboard/revenue-chart', { revenue: 'line' }, { origin: 'https://evil.example' });
+    expect(cross.status).toBe(403);
+    expect(cookie(cross, 'hm_revenue')).toBeNull();
+    const signedOut = await post('/dashboard/revenue-chart', { revenue: 'line' }, { session: false });
+    expect(signedOut.status).toBe(303);
+    expect(cookie(signedOut, 'hm_revenue')).toBeNull();
   });
 
   it('brings back the last transactions filter, with "All" as an explicit choice', async () => {

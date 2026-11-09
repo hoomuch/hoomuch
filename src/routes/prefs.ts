@@ -1,5 +1,5 @@
 /**
- * Remembered view choices: the dashboard range and the transactions filter. Owner: Experience.
+ * Remembered view choices: the dashboard range, its revenue chart and the transactions filter. Owner: Experience.
  * A URL that carries the parameter always wins and becomes the remembered value, so every state
  * still has its own URL; a bare URL (the nav link) brings back the last choice.
  */
@@ -17,12 +17,17 @@ export function rememberedQuery(
   cookieBase: string,
   valid: (v: string) => boolean,
 ): string | undefined {
-  const { name, secure } = cookieSpec(c, cookieBase);
-  const saved = getCookie(c, name);
+  const saved = getCookie(c, cookieSpec(c, cookieBase).name);
   const fromUrl = c.req.query(param);
   if (fromUrl !== undefined && valid(fromUrl)) {
-    if (saved !== fromUrl) setCookie(c, name, fromUrl, { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: MAX_AGE });
+    remember(c, cookieBase, fromUrl);
     return fromUrl;
   }
   return saved !== undefined && valid(saved) ? saved : undefined;
+}
+
+/** Remembers a choice the page made in place, without a reload (the revenue card's switch). */
+export function remember(c: AppContext, cookieBase: string, value: string): void {
+  const { name, secure } = cookieSpec(c, cookieBase);
+  if (getCookie(c, name) !== value) setCookie(c, name, value, { httpOnly: true, sameSite: 'Lax', secure, path: '/', maxAge: MAX_AGE });
 }
