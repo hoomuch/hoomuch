@@ -18,8 +18,9 @@ import { cn } from '../lib/utils';
 import { HeroBackdrop, QuietBackdrop } from './components/backdrop';
 import { Celebration } from './components/celebration';
 import { Flash } from './components/flash';
-import { Wordmark } from './components/icons';
+import { GitHubMark, Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
+import { IconLinkButton, LinkButton } from './components/ui';
 import { PagePayloadScript } from './page-root';
 
 type NavKey = 'dashboard' | 'connections' | 'transactions' | 'settings';
@@ -80,7 +81,7 @@ const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
 const ISSUES_URL = `${SOURCE_URL}/issues`;
 const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
 const DEFAULT_DESCRIPTION =
-  'MRR, ARR, subscriptions and revenue from Stripe, Lemon Squeezy and RevenueCat, on one dashboard.';
+  'MRR, ARR, subscriptions and revenue from Stripe, Paddle, RevenueCat, the app stores and more, on one dashboard.';
 
 /** The daily places. Settings sits apart on the right; Log out lives inside Settings. */
 const NAV: { key: NavKey; href: string; label: string }[] = [
@@ -189,12 +190,15 @@ export function Layout(props: LayoutProps) {
                 </div>
               </>
             ) : props.marketing ? (
-              <a
-                href="/login"
-                className="-mr-1 ml-auto flex h-12 items-center rounded-md px-1 text-body text-muted-foreground transition-colors hover:text-foreground sm:h-14"
-              >
-                Log in
-              </a>
+              // Secondary, not primary: the page's own action ("See your MRR") is the one ink button.
+              <div className="ml-auto flex items-center gap-2">
+                <IconLinkButton href={SOURCE_URL} label="hoomuch on GitHub">
+                  <GitHubMark />
+                </IconLinkButton>
+                <LinkButton href="/login" variant="secondary">
+                  Log in
+                </LinkButton>
+              </div>
             ) : null}
           </div>
         </header>

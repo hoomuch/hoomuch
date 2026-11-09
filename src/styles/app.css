@@ -300,6 +300,34 @@
   .owl-hop {
     animation: owl-hop 600ms backwards;
   }
+  /* Landing provider strip (views/components/provider-strip.tsx), the one loop on a marketing
+     page: the track holds two copies of the list and slides by one, slowly (about 40px a second),
+     with its ends faded out. Hover or the toggle (a checkbox before it) holds it still. */
+  .marquee {
+    animation: marquee 50s linear infinite;
+  }
+  .marquee-viewport {
+    mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  }
+  .marquee-viewport:hover .marquee,
+  .marquee-pause:checked ~ .marquee-viewport .marquee {
+    animation-play-state: paused;
+  }
+  .marquee-pause:checked ~ * .marquee-icon-pause,
+  .marquee-pause:not(:checked) ~ * .marquee-icon-play {
+    display: none;
+  }
+  /* The checkbox is visually hidden: draw its focus ring on the icon that stands for it. */
+  .marquee-pause:focus-visible ~ * .marquee-toggle {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes marquee {
+  to {
+    translate: -50% 0;
+  }
 }
 
 @keyframes fade-in {
@@ -372,6 +400,13 @@
   }
   .owl-hop {
     animation: none;
+  }
+  /* The provider strip stands still and wraps instead (its layout switches with motion-reduce:). */
+  .marquee {
+    animation: none;
+  }
+  .marquee-viewport {
+    mask-image: none;
   }
   /* Recharts slides its tooltip between data points with an inline transition. */
   .recharts-tooltip-wrapper {

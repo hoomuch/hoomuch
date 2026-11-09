@@ -1,5 +1,5 @@
 /**
- * Provider logos for the Connections pages. Owner: Experience (design).
+ * Provider logos for the Connections pages and the landing page's provider strip. Owner: Experience (design).
  *
  * Each logo is the provider's own square icon (app icon / favicon composition): its background colour and
  * its mark, redrawn on one 24-unit tile so they line up. Inline SVG because the CSP allows images only from
@@ -18,7 +18,8 @@
  *   Superwall      superwall.com/favicon.svg
  *   App Store      mark: simple-icons `appstore` (CC0), white on the App Store icon's blue (#0D96F6)
  *   Google Play    mark: simple-icons `googleplay` (CC0), its four parts in the Play logo's colours, on white
- * Trademarks belong to their owners; hoomuch shows them only to identify which account a connection reads.
+ * Trademarks belong to their owners; hoomuch shows them only to identify which account a connection reads,
+ * and which providers it can read from.
  */
 
 import { FlaskConical } from 'lucide-react';

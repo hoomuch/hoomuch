@@ -724,27 +724,38 @@ describe('personality: owl, landing, first sync, 404', () => {
   it('shows the real dashboard, the one action and literal storage facts on the landing page', async () => {
     const demo = fixtureDashboard(30, 'full', FIXTURE_NOW);
     const out = await render('landing', h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo, cadence: 'every hour' }));
-    expect(out).toContain('Stripe + Lemon\u00a0Squeezy + RevenueCat =\u00a0one\u00a0MRR.');
+    expect(out).toContain('Every store you sell in. One\u00a0MRR.');
+    expect(out).toContain('aria-label="Supported providers"'); // the provider strip, from the registry
+    expect(out).toContain('>Google Play<');
+    expect(out).not.toContain('>Demo data<'); // the demo isn't a provider you can buy from
     expect(out.match(/href="\/signup"/g)).toHaveLength(2); // hero + last call, same action
     expect(out).toContain('aria-label="MRR"'); // the real MRR card
     expect(out).toContain('aria-label="Subscriptions, trials and revenue"');
+    expect(out).toContain('>By product<'); // the demo has every card the dashboard has, up to the calendar
+    expect(out).toContain('aria-label="Also in hoomuch"'); // and names what it can't show
     expect(out).toContain('href="/?range=90#demo"');
     expect(out).toContain('Create a Stripe key');
     expect(out).not.toContain('dashboard.stripe.com'); // preview drops the outbound link
-    expect(out).toContain('so this one has full access');
+    expect(out).toContain('Setup is one key per store.');
+    expect(out).toContain('Any of the 12 above.'); // counted from the registry
+    expect(out).toContain('so they have full access'); // the full-access keys stay named plainly
     expect(out).toContain('AES-256-GCM');
-    expect(out).toContain('Syncs run every hour.');
+    expect(out).toContain('Syncs run every hour, and about a minute after a new subscription or refund where you turn on webhooks.');
     expect(out).toContain('src="/mascot/perched.png"');
     expect(out).toContain('src="/mascot/asleep.png"'); // marketing footer
     expect(out).toContain('id="store"'); // the footer's "What we store" anchor
     expect(out).toContain('href="/login"'); // signed-out header link
+    expect(out).toMatch(/href="https:\/\/github\.com\/hoomuch\/hoomuch"[^>]*aria-label="hoomuch on GitHub"/); // header icon link
     expect(out).not.toContain('NEEDS REAL DATA');
     expect(out).not.toContain('Why this exists'); // no founder note until it's real
-    expect(out).not.toContain('>Pricing<'); // no pricing until it's real
+    expect(out).toContain('Free until your MRR reaches $1,000.'); // the free tier leads the pricing
+    expect(out).toContain('$9 per month'); // exact price, with its tax treatment
+    expect(out).toContain('plus VAT or sales tax where it applies');
 
     const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: false, demo, cadence: 'every hour' }));
     expect(closed).not.toContain('href="/signup"');
     expect(closed).not.toContain('No key handy?');
+    expect(closed).not.toContain('id="pricing-title"'); // a private instance doesn't advertise hoomuch.com
   });
 
   it('finds a milestone crossed in the last 7 days and still held, never one it can’t see crossed', () => {
