@@ -14,16 +14,16 @@ import { Check, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Frame } from '@/components/ui/frame';
 import type { DashboardData } from '../../data/types';
-import { getProviderMeta } from '../../providers/registry';
-import { ProviderDot } from '../components/badges';
+import { getProviderMeta, PROVIDERS } from '../../providers/registry';
 import { BreakdownTable } from '../components/breakdown-table';
 import { KeyGuide } from '../components/connection-form';
 import { HorizonGlow } from '../components/horizon-glow';
 import { Owl } from '../components/mascot';
+import { ProviderStrip } from '../components/provider-strip';
 import { RangeTabs } from '../components/range-tabs';
 import { Card, LinkButton } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { MrrCard, RevenueCard, SecondaryStats } from './dashboard';
+import { MrrCard, ProductCard, RevenueCard, SecondaryStats } from './dashboard';
 
 export interface LandingPageProps {
   chrome: PageChrome;
@@ -70,33 +70,32 @@ const SECTION = 'mx-auto mt-28 max-w-[40rem] sm:mt-32';
 const H2 = 'font-heading text-section-sm sm:text-section';
 const LEAD = 'mt-3 text-pretty text-lead text-muted-foreground';
 
+/** Every provider a visitor can connect (the demo isn't one). */
+const PROVIDER_COUNT = PROVIDERS.filter((p) => p.id !== 'demo').length;
+
 /** Keeps brand names whole and "= one MRR" together when the headline wraps. */
 const NB = ' ';
 
 export function LandingPage(props: LandingPageProps) {
   const cta = props.signupOpen ? { href: '/signup', label: 'See your MRR' } : { href: '/login', label: 'Log in' };
   const stripe = getProviderMeta('stripe');
-  const lemon = getProviderMeta('lemonsqueezy');
-  const revenuecat = getProviderMeta('revenuecat');
   const demo = props.demo;
 
   return (
     <Layout
       {...props.chrome}
-      title="One MRR for Stripe, Lemon Squeezy and RevenueCat"
-      description="See your total MRR, ARR, subscriptions and trials from Stripe, Lemon Squeezy and RevenueCat on one dashboard, in your currency. Read-only."
+      title="One MRR for Stripe, Paddle, RevenueCat and the App Store"
+      description="Total MRR, ARR, subscriptions and trials from Stripe, Paddle, Lemon Squeezy, RevenueCat, the App Store, Google Play and more, on one read-only dashboard."
       marketing
       footerNote={`Syncs ${props.cadence}, so you can check less often.`}
     >
       {/* 1. Hero. Seen once, on a first visit, so its lines rise in one after another (60ms
           apart, done in about half a second). The demo below stays put: it's the product. */}
       <section className="mx-auto max-w-[40rem] pt-6 text-center sm:pt-14">
-        <h1 className="rise-in font-heading text-hero-sm sm:text-hero">
-          Stripe + Lemon{NB}Squeezy + RevenueCat ={NB}one{NB}MRR.
-        </h1>
+        <h1 className="rise-in font-heading text-hero-sm sm:text-hero">Every store you sell in. One{NB}MRR.</h1>
         <p className="rise-in mx-auto mt-5 max-w-[36rem] text-lead text-pretty text-muted-foreground [animation-delay:60ms]">
           A revenue dashboard for founders who sell in more than one place. It only ever reads. You can close the other
-          three tabs.
+          tabs.
         </p>
         <div className="rise-in mt-8 [animation-delay:120ms]">
           <LinkButton href={cta.href} large>
@@ -107,6 +106,9 @@ export function LandingPage(props: LandingPageProps) {
           <p className="rise-in mt-3 text-body text-muted-foreground [animation-delay:180ms]">No key handy? Start with demo data after you sign up.</p>
         ) : null}
       </section>
+
+      {/* 1a. Every provider, from the registry, in one slow loop (the page's only one). */}
+      <ProviderStrip className="mx-auto mt-16 max-w-[48rem] sm:mt-20" />
 
       {/* 1b. The real dashboard, demo numbers. The owl sits on its top edge, and a dotted sun
           (Dither Field shader) rises behind it. */}
@@ -120,59 +122,58 @@ export function LandingPage(props: LandingPageProps) {
             </h2>
             <RangeTabs current={demo.rangeDays} basePath="/" anchor="demo" />
           </div>
-          {/* Same pieces, same order as /dashboard. */}
+          {/* Same pieces, same order as /dashboard, up to the calendar (it has no demo month):
+              the list under the frame names it instead. */}
           <MrrCard data={demo} />
           <SecondaryStats data={demo} className="mt-3 sm:mt-4" />
           <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-4">
             <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
               <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
             </Card>
+            <ProductCard data={demo} />
             <RevenueCard data={demo} />
           </div>
         </Frame>
+        {/* What the demo can't show. Literal: each line is a screen or a behaviour that exists. */}
+        <ul className="mx-auto mt-10 grid max-w-[48rem] gap-6 text-body sm:grid-cols-3 sm:gap-8" aria-label="Also in hoomuch">
+          <AlsoItem title="Any day, opened up.">
+            A calendar shows each day’s revenue, refunds and MRR, store by store.
+          </AlsoItem>
+          <AlsoItem title="Every charge in one list.">
+            Charges and refunds from all your stores together, filtered by store or by day.
+          </AlsoItem>
+          <AlsoItem title="Says when it’s estimating.">
+            If a figure is incomplete, say a key is missing an optional permission, the dashboard tells you which and why.
+          </AlsoItem>
+        </ul>
       </section>
 
-      {/* 2. Setup */}
+      {/* 2. Setup: the same three steps for every store, then the real connect form for one of
+          them. The full-access keys stay named plainly: that's the trust move (brief §3.1.2). */}
       <section aria-labelledby="setup-title" className={SECTION}>
         <h2 id="setup-title" className={H2}>
-          Setup is one key.
+          Setup is one key per store.
         </h2>
         <p className={LEAD}>
-          Make a read-only key in Stripe, paste it here, and your numbers show up a few seconds later. The first sync
-          pulls 90 days of history.
+          No SDK and no code: hoomuch reads each store’s own API, and your numbers show up after the first sync.
         </p>
-        <div className="mt-8">
+        <ol className="mt-8 space-y-5 text-lead">
+          <SetupStep n={1} title="Pick a store.">
+            Any of the {PROVIDER_COUNT} above. Add one for each place you sell.
+          </SetupStep>
+          <SetupStep n={2} title="Make the narrowest key it offers.">
+            The connect form shows where to make it and exactly which read permissions to grant. Lemon{NB}Squeezy,
+            Gumroad and Adapty keys can’t be limited to read-only, so they have full access, and hoomuch only reads with
+            them.
+          </SetupStep>
+          <SetupStep n={3} title="Paste it.">
+            It’s checked live, then saved encrypted. The first sync pulls 90 days of history.
+          </SetupStep>
+        </ol>
+        <p className="mt-10 text-body text-muted-foreground">Here’s the connect form for Stripe:</p>
+        <div className="mt-3">
           <KeyGuide meta={stripe} headingId="landing-key-guide" preview />
         </div>
-        <ul className="mt-8 space-y-3 text-lead" aria-label="What each provider's key can do">
-          <li className="flex gap-3">
-            <ProviderDot dotClass={stripe.dotClass} size="md" className="mt-2.5" />
-            <span>
-              <span className="font-semibold">Stripe:</span> restricted key, read-only.
-            </span>
-          </li>
-          <li className="flex gap-3">
-            <ProviderDot dotClass={revenuecat.dotClass} size="md" className="mt-2.5" />
-            <span>
-              <span className="font-semibold">RevenueCat:</span> v2 secret key with read-only scopes.
-            </span>
-          </li>
-          <li className="flex gap-3">
-            <ProviderDot dotClass={lemon.dotClass} size="md" className="mt-2.5" />
-            <span>
-              <span className="font-semibold">Lemon Squeezy:</span> API key. Lemon Squeezy keys can’t be limited to
-              read-only, so this one has full access. hoomuch only reads with it.
-            </span>
-          </li>
-          <li className="flex gap-3">
-            <ProviderDot dotClass="bg-faint" size="md" className="mt-2.5" />
-            <span>
-              <span className="font-semibold">Also:</span> Paddle, Polar, Chargebee, Dodo{NB}Payments, Gumroad, Adapty,
-              Superwall, App{NB}Store Connect and Google{NB}Play, each with the narrowest key it offers. The connect form
-              lists exactly what to grant.
-            </span>
-          </li>
-        </ul>
       </section>
 
       {/* 3. What we store (literal) */}
@@ -201,7 +202,8 @@ export function LandingPage(props: LandingPageProps) {
           </div>
         </div>
         <p className="mt-8 text-lead text-muted-foreground">
-          Syncs run {props.cadence}. Currencies convert at the European Central Bank’s daily rates. Deleting your account
+          Syncs run {props.cadence}, and about a minute after a new subscription or refund where you turn on webhooks.
+          Currencies convert at the European Central Bank’s daily rates. Deleting your account
           deletes your keys and every synced number, immediately.
         </p>
       </section>
@@ -257,6 +259,33 @@ export function LandingPage(props: LandingPageProps) {
         </section>
       ) : null}
     </Layout>
+  );
+}
+
+/** One thing the demo can't show: what it is in bold, then one line. */
+function AlsoItem(props: { title: string; children?: ReactNode }) {
+  return (
+    <li>
+      <p className="font-semibold">{props.title}</p>
+      <p className="mt-1 text-pretty text-muted-foreground">{props.children}</p>
+    </li>
+  );
+}
+
+/** One setup step: a numbered circle (the <ol> already says the order), the step, then the detail. */
+function SetupStep(props: { n: number; title: string; children?: ReactNode }) {
+  return (
+    <li className="flex gap-4">
+      <span
+        aria-hidden="true"
+        className="flex size-7 shrink-0 items-center justify-center rounded-full border text-body font-semibold tabular-nums"
+      >
+        {props.n}
+      </span>
+      <p>
+        <span className="font-semibold">{props.title}</span> <span className="text-muted-foreground">{props.children}</span>
+      </p>
+    </li>
   );
 }
 

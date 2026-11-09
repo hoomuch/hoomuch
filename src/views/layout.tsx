@@ -81,7 +81,7 @@ const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
 const ISSUES_URL = `${SOURCE_URL}/issues`;
 const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
 const DEFAULT_DESCRIPTION =
-  'MRR, ARR, subscriptions and revenue from Stripe, Lemon Squeezy and RevenueCat, on one dashboard.';
+  'MRR, ARR, subscriptions and revenue from Stripe, Paddle, RevenueCat, the app stores and more, on one dashboard.';
 
 /** The daily places. Settings sits apart on the right; Log out lives inside Settings. */
 const NAV: { key: NavKey; href: string; label: string }[] = [
