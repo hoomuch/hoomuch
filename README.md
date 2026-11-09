@@ -200,6 +200,24 @@ say) and publishes it:
   `/api/p/<slug>/history`, for signed-in accounts only. They're the dashboard's figures
   for those connections, worked out again after every sync. The owner can't type them in; the name,
   description, website and founder details are theirs, and the page says so.
+- **About the product**, the owner's own words, from a form of its own under Share: when it was
+  founded and where (shown under the name with the country's flag), and an **About** section below
+  the chart that opens with a message from the founder (a signed quote, in their own voice) and
+  answers a visitor's questions in order: the facts at a glance (who it sells to,
+  team size, funding), what it is, how it makes money, how it finds customers and how it's built.
+  Pricing is a list of plans, each its own item with its billing (free, weekly, monthly, yearly or
+  one-time): a yearly plan says what it comes to a month and what it saves against the monthly plan
+  of the same name. Under the plans, the one figure hoomuch checks there: what a subscription brings
+  in a month on average. Tags come from fixed lists for its market, tech stack and marketing
+  channels. Every field is optional, and the section only shows what's filled in. The brand marks on the tags come from
+  [Simple Icons](https://simpleicons.org) (CC0), built into `public/brand-icons.svg` by
+  `npm run icons:update`.
+- **Share image**, on the page and on the owner's Share page, draws the product as a picture to post:
+  a figure (MRR, revenue over 30 days or the total), the revenue chart (7 days, 30 days or 12 months)
+  or a revenue calendar (3, 6 or 12 months), light or dark, in a colour of your choice, to download as
+  a PNG or copy. It's drawn in the browser, with the page's address at the bottom. A visitor without
+  an account can make the ones from figures the page already shows; the year's chart and the calendar
+  need a free account, like the charts.
 - **`/p/<slug>.md`** is the same page as Markdown, for AI assistants.
 - **`/badge/<slug>.svg`** is a badge ("Verified MRR | $12,340") for a site or README. It turns grey
   when the figures haven't been confirmed by a sync for 72 hours.
@@ -230,6 +248,31 @@ badge stay public, and its owner sees that it was taken off:
 npx wrangler d1 execute DB --remote --command \
   "UPDATE public_products SET hidden_at = unixepoch() * 1000 WHERE slug = 'the-slug'"
 ```
+
+To take a page down altogether (a scam, someone else's personal data), set `removed_at`: the page,
+its Markdown, badge and history become the ordinary 404, it leaves Explore, the sitemap and its
+founder's profile, and its owner sees that it was taken down and can't publish it again. Setting it
+back to `NULL` restores it:
+
+```bash
+npx wrangler d1 execute DB --remote --command \
+  "UPDATE public_products SET removed_at = unixepoch() * 1000 WHERE slug = 'the-slug'"
+```
+
+What keeps the pages clean on their own:
+
+- **The bar to publish.** A page needs a live payment provider key whose figures have synced; demo
+  data and test-mode keys never count.
+- **Search engines wait.** A page asks not to be indexed (`noindex`, and `X-Robots-Tag` on its
+  Markdown) until its figures go back 30 days, the same bar as Explore, and while it's off Explore.
+  A founder profile is indexed once one of its products is. Until then a page is public and
+  shareable, but publishing one for its links or words gets nothing from search.
+- **No links in the founder's words.** The About section turns back links, email addresses and phone
+  numbers (the website and store fields are where links go, `rel="nofollow ugc"`), and drops the
+  characters that make text pass for something else: direction overrides, zero-width spaces, marks
+  stacked into "zalgo" text. Nothing a founder types is turned into a link.
+- **Report it.** With `LEGAL_EMAIL` set, every public page and profile has a "Report it" link that
+  writes to that address with the page in the subject.
 
 Total revenue starts where hoomuch's history does: the first sync reads 90 days back, so it isn't
 the business's lifetime revenue. Demo data and test-mode keys never count. Nothing is public until the

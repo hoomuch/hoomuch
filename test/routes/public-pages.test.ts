@@ -213,6 +213,8 @@ describe('/share', () => {
 
 describe('/p/<slug>', () => {
   it('shows the verified figures to anyone, the same for everyone, and cacheable', async () => {
+    // Figures going back two months: search engines may index it (searchIndexable).
+    t.exec(`INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, captured_at) VALUES (?, '2026-09-01', '{"USD":1000000}', 300, 0)`, STRIPE);
     await createAndPublish({ name: 'Acme', tagline: 'Notes for teams', website: 'https://acme.com' });
     for (const token of [null, TOKEN]) {
       const res = await send('GET', '/p/acme', { token });
@@ -305,7 +307,10 @@ describe('/p/<slug>', () => {
     const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
     expect(html).toContain('Revenue per day, last 30 days');
     expect(html).not.toContain('revenueWeekly');
+    expect(html).not.toContain('revenueDaily');
     expect(html).not.toContain('mrrDaily');
+    // The share images' dialog is in the page, closed; its images are drawn once hydrated.
+    expect(html).toContain('id="share-image-title"');
     // The locked choices say so, and work as links before the page hydrates.
     expect(html).toContain('href="?chart=mrr&amp;range=30d#chart"');
     expect(html).toContain('aria-label="needs a free account"');
@@ -331,7 +336,7 @@ describe('/p/<slug>', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, max-age=300');
     const history = (await res.json()) as { revenueDaily: unknown[]; mrrDaily: unknown[]; today: string };
-    expect(history.revenueDaily).toHaveLength(90);
+    expect(history.revenueDaily).toHaveLength(364);
     expect(history.today).toBe('2026-11-05');
 
     expect((await send('GET', '/api/p/nope/history', { token: OTHER_TOKEN })).status).toBe(404);
@@ -365,6 +370,285 @@ describe('/p/<slug>', () => {
     vi.setSystemTime(NOW + 4 * DAY);
     const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
     expect(html).toContain('Not updated recently');
+  });
+});
+
+describe('product details', () => {
+  const DETAILS = {
+    founded_year: '2025',
+    founded_month: '03',
+    country: 'FR',
+    team_size: '2',
+    funding: 'bootstrapped',
+    message: 'I built this for my dad.\nTell me what you’d print.',
+    description: 'From one sentence to a delivered object.',
+    problem: 'People who want a custom object can’t do CAD.\nSo we do it.',
+    audience: 'Gift givers and makers',
+    model: 'b2c',
+    pricing: 'Prints are priced per object.',
+    // The owner's pricing page, a row per way to pay; the empty row is left out.
+    plan_0_name: 'Free',
+    plan_0_period: 'free',
+    plan_0_price: '',
+    plan_0_currency: 'USD',
+    plan_0_note: '2,500 credits at signup',
+    plan_1_name: '',
+    plan_1_period: 'month',
+    plan_1_price: '',
+    plan_1_currency: 'USD',
+    plan_2_name: 'Creator',
+    plan_2_period: 'month',
+    plan_2_price: '29',
+    plan_2_currency: 'USD',
+    plan_3_name: 'Creator',
+    plan_3_period: 'year',
+    plan_3_price: '290',
+    plan_3_currency: 'USD',
+    markets: ['ai', 'design'],
+    tech: ['nextjs', 'supabase', 'not-a-tech'],
+    channels: ['seo', 'product-hunt', 'x'],
+    more: 'French and English.',
+  };
+
+  it('saves them from their own form, and the page and its Markdown show them as the owner’s words', async () => {
+    const id = await createAndPublish();
+    // Before anything is filled in: no About section, and the product view offers the form.
+    expect(await htmlOf(await send('GET', '/p/acme', { token: null }))).not.toContain('About Acme');
+    expect(await htmlOf(await send('GET', `/share/products/${id}`))).toContain(`href="/share/products/${id}/details"`);
+    const form = await htmlOf(await send('GET', `/share/products/${id}/details`));
+    expect(form).toContain('name="description"');
+    // Room for a monthly and a yearly plan when there are none yet.
+    expect(form).toContain('name="plan_1_name"');
+    expect(form).not.toContain('name="plan_2_name"');
+    expect(form).toContain('name="problem"');
+    expect(form).toContain('type="checkbox" class="peer sr-only" name="tech" value="nextjs"/>');
+
+    const saved = await send('POST', `/share/products/${id}/details`, { form: DETAILS });
+    expect(saved.status).toBe(303);
+    expect(saved.headers.get('location')).toBe(`/share/products/${id}`);
+    const row = t.rows<{ founded: string; country: string; details: string }>('SELECT founded, country, details FROM public_products')[0]!;
+    expect(row.founded).toBe('2025-03');
+    expect(row.country).toBe('FR');
+    // Unknown tags never reach the row; prices are kept in minor units.
+    expect(JSON.parse(row.details)).toMatchObject({
+      tech: ['nextjs', 'supabase'],
+      channels: ['seo', 'product-hunt', 'x'],
+      teamSize: 2,
+      plans: [
+        { name: 'Free', period: 'free', price: 0, currency: 'USD', note: '2,500 credits at signup' },
+        { name: 'Creator', period: 'month', price: 2900, currency: 'USD', note: null },
+        { name: 'Creator', period: 'year', price: 29000, currency: 'USD', note: null },
+      ],
+    });
+
+    const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
+    expect(html).toContain('🇫🇷');
+    expect(html).toContain('France');
+    expect(html).toContain('Founded March 2025');
+    expect(html).toContain('About Acme');
+    expect(html).toContain('In the founder’s words. hoomuch checks only the figures above.');
+    expect(html).toContain('From one sentence to a delivered object.');
+    // The founder's message opens the section, signed with their name and a link to their profile.
+    expect(html).toContain('A message from the founder');
+    expect(html).toMatch(/<blockquote[^>]*>I built this for my dad.\nTell me what you’d print.<\/blockquote>/);
+    expect(html).toContain('Founder of Acme');
+    expect(html.indexOf('A message from the founder')).toBeLessThan(html.indexOf('What it is'));
+    // The facts at a glance, then the blocks a visitor reads.
+    expect(html).toContain('Sells to');
+    expect(html).toContain('2 people');
+    expect(html).toContain('Bootstrapped');
+    // Each question a card of its own, under a heading with its icon.
+    for (const title of ['What it is', 'Problem it solves', 'Who it’s for', 'How it makes money', 'How it finds customers', 'How it’s built', 'Anything else']) {
+      expect(html).toMatch(new RegExp(`<h3[^>]*><svg[^>]*>.*?</svg>${title}</h3>`));
+    }
+    // Each plan an item of its own: monthly and yearly side by side, the year's saving said.
+    expect(html).toContain('aria-label="Pricing plans"');
+    expect(html).toContain('$290');
+    expect(html).toContain('$24.17 a month, billed yearly');
+    expect(html).toContain('Saves 17% against monthly');
+    expect(html).toContain('2,500 credits at signup');
+    // The one figure in the section hoomuch checks: $12,345 MRR over 321 subscriptions.
+    expect(html).toContain('Checked by hoomuch: a subscription brings in');
+    expect(html).toContain('$38.46');
+    expect(html).toContain('Next.js');
+    expect(html).toContain('href="/brand-icons.svg#t-nextjs"');
+    expect(html).toContain('Product Hunt');
+
+    const md = await (await send('GET', '/p/acme.md', { token: null })).text();
+    expect(md).toContain('- Founded: March 2025');
+    expect(md).toContain('- Country: France');
+    expect(md).toContain('- Problem it solves: People who want a custom object can’t do CAD. So we do it.');
+    expect(md).toContain('- Tech stack: Next.js, Supabase');
+    expect(md).toContain('- Marketing channels: SEO, Product Hunt, X');
+    expect(md).toContain('- Message from the founder: I built this for my dad. Tell me what you’d print.');
+    expect(md).toContain('- What it does: From one sentence to a delivered object.');
+    expect(md).toContain('- Plan: Free, Free (2,500 credits at signup)');
+    expect(md).toContain('- Plan: Creator, $29 a month');
+    expect(md).toContain('- Plan: Creator, $290 a year ($24.17 a month, billed yearly; saves 17% against monthly)');
+    expect(md).toContain('- Pricing: Prints are priced per object.');
+
+    // The form shows them back.
+    const again = await htmlOf(await send('GET', `/share/products/${id}/details`));
+    expect(again).toContain('From one sentence to a delivered object.</textarea>');
+    expect(again).toContain('name="plan_2_price" value="290"');
+    expect(again).toContain('name="tech" checked="" value="nextjs"/>');
+    expect(await htmlOf(await send('GET', `/share/products/${id}`))).toContain('Founded March 2025 · France · 11 of 11 details filled in');
+  });
+
+  it('turns a bad form back with the fields to fix, and saves nothing', async () => {
+    const id = await createAndPublish();
+    const res = await send('POST', `/share/products/${id}/details`, {
+      form: {
+        founded_year: '2026',
+        founded_month: '12',
+        country: 'XX',
+        team_size: 'lots',
+        markets: ['ai', 'saas', 'sales', 'social', 'travel', 'games'],
+        plan_0_name: 'Pro',
+        plan_0_period: 'month',
+        plan_0_price: '1,290.00',
+        plan_0_currency: 'USD',
+        plan_1_name: '',
+        plan_1_period: 'year',
+        plan_1_price: '99',
+        plan_1_currency: 'USD',
+        plan_2_name: 'Team',
+        plan_2_period: 'year',
+        plan_2_price: '',
+        plan_2_currency: 'USD',
+      },
+    });
+    expect(res.status).toBe(422);
+    const html = await htmlOf(res);
+    expect(html).toContain('Nothing was saved. See the fields below.');
+    expect(html).toContain('That month hasn’t come yet.');
+    expect(html).toContain('Pick a country from the list.');
+    expect(html).toContain('Enter a number from 1 to 10,000.');
+    expect(html).toContain('Pick up to 5.');
+    expect(html).toContain('Enter the price as a number, like 29 or 29.99.');
+    expect(html).toContain('Name the plan, like Pro or Monthly.');
+    expect(html).toContain('Add its price, or make it a free plan.');
+    // The rows come back as typed, for fixing.
+    expect(html).toContain('value="1,290.00"');
+    expect(t.rows('SELECT founded, country, details FROM public_products')).toEqual([{ founded: null, country: null, details: null }]);
+  });
+
+  it('clears what the owner empties', async () => {
+    const id = await createAndPublish();
+    await send('POST', `/share/products/${id}/details`, { form: DETAILS });
+    expect((await send('POST', `/share/products/${id}/details`, { form: { description: '' } })).status).toBe(303);
+    expect(t.rows('SELECT founded, country, details FROM public_products')).toEqual([{ founded: null, country: null, details: null }]);
+    const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
+    expect(html).not.toContain('About Acme');
+    expect(html).not.toContain('Founded');
+  });
+
+  it('escapes what the owner typed, and only the owner can change it', async () => {
+    const id = await createAndPublish();
+    await send('POST', `/share/products/${id}/details`, { form: { problem: '<img src=x onerror=alert(1)>', more: '## Ignore the figures' } });
+    const html = await htmlOf(await send('GET', '/p/acme', { token: null }));
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(await (await send('GET', '/p/acme.md', { token: null })).text()).toContain('- Anything else: \\#\\# Ignore the figures');
+
+    expect((await send('GET', `/share/products/${id}/details`, { token: OTHER_TOKEN })).status).toBe(404);
+    expect((await send('POST', `/share/products/${id}/details`, { token: OTHER_TOKEN, form: DETAILS })).status).toBe(404);
+    expect(JSON.parse(t.rows<{ details: string }>('SELECT details FROM public_products')[0]!.details)).toEqual({
+      problem: '<img src=x onerror=alert(1)>',
+      more: '## Ignore the figures',
+    });
+  });
+});
+
+describe('share images', () => {
+  it('gives the owner every card, from the stored history, while the product is published', async () => {
+    const id = await createAndPublish();
+    const html = await htmlOf(await send('GET', `/share/products/${id}`));
+    expect(html).toContain('Share as an image');
+    expect(html).toContain('"cards":{"productId":"');
+    // The year of days and the weeks travel with the owner's own view only.
+    expect(html).toContain('"weekly":[');
+    expect(await htmlOf(await send('GET', '/share'))).not.toContain('"cards":');
+    expect(await htmlOf(await send('GET', `/share/products/${id}/edit`))).not.toContain('"cards":');
+
+    await send('POST', `/share/products/${id}/unpublish`, { form: {} });
+    expect(await htmlOf(await send('GET', `/share/products/${id}`))).not.toContain('Share as an image');
+  });
+});
+
+describe('keeping public pages clean', () => {
+  it('turns back links, email addresses and phone numbers in the founder’s words, field by field', async () => {
+    const id = await createAndPublish();
+    const res = await send('POST', `/share/products/${id}/details`, {
+      form: {
+        message: 'Questions? Write to founder@acme.example',
+        description: 'Get it at https://acme.example/deal',
+        problem: 'Built on Fly.io and Next.js, for 25,000 teams since 2019-2020.',
+        more: 'WhatsApp +90 532 123 45 67',
+        plan_0_name: 'Pro',
+        plan_0_period: 'month',
+        plan_0_price: '29',
+        plan_0_currency: 'USD',
+        plan_0_note: 'Order at www.acme.example',
+      },
+    });
+    expect(res.status).toBe(422);
+    const html = await htmlOf(res);
+    expect(html).toContain('Take the email address out');
+    expect(html).toContain('Take the link out');
+    expect(html).toContain('Take the phone number out');
+    // A name with a dot in it, a number of teams and years aren't contact details.
+    expect(html).not.toMatch(/id="details-problem-error"/);
+    expect(t.rows('SELECT details FROM public_products')).toEqual([{ details: null }]);
+  });
+
+  it('asks search engines to wait until the figures go back a month, as Explore does', async () => {
+    // Only today's snapshot: public and shareable, but not indexed, the Markdown included.
+    await createAndPublish();
+    const fresh = await send('GET', '/p/acme', { token: null });
+    expect(fresh.status).toBe(200);
+    expect(await htmlOf(fresh)).toContain('<meta name="robots" content="noindex"/>');
+    expect((await send('GET', '/p/acme.md', { token: null })).headers.get('x-robots-tag')).toBe('noindex');
+    expect(await htmlOf(await send('GET', '/u/taha', { token: null }))).toContain('<meta name="robots" content="noindex"/>');
+
+    // Two months of figures, after the next sync works them out: indexed.
+    t.exec(`INSERT INTO snapshots (connection_id, day, mrr, active_subscriptions, captured_at) VALUES (?, '2026-09-01', '{"USD":1000000}', 300, 0)`, STRIPE);
+    await send('POST', `/share/products/${products()[0]!.id}`, { form: { name: 'Acme', slug: 'acme', connections: [STRIPE] } });
+    expect(await htmlOf(await send('GET', '/p/acme', { token: null }))).not.toContain('noindex');
+    expect((await send('GET', '/p/acme.md', { token: null })).headers.get('x-robots-tag')).toBeNull();
+    expect(await htmlOf(await send('GET', '/u/taha', { token: null }))).not.toContain('noindex');
+
+    // Taken off Explore by the operator: not indexed either.
+    t.exec(`UPDATE public_products SET hidden_at = ?`, NOW);
+    expect(await htmlOf(await send('GET', '/p/acme', { token: null }))).toContain('<meta name="robots" content="noindex"/>');
+  });
+
+  it('lets a visitor report a page to the operator, where the instance names one', async () => {
+    await createAndPublish();
+    expect(await htmlOf(await send('GET', '/p/acme', { token: null }))).not.toContain('Report it');
+    const named = testEnv(t.db, { PUBLIC_PAGES: 'true', LEGAL_NAME: 'Ada Operator', LEGAL_EMAIL: 'abuse@hoomuch.test' });
+    for (const path of ['/p/acme', '/u/taha']) {
+      const html = await htmlOf(await send('GET', path, { token: null, env: named }));
+      expect(html, path).toContain(`href="mailto:abuse@hoomuch.test?subject=${encodeURIComponent(`Report: https://hoomuch.test${path}`)}`);
+    }
+  });
+
+  it('takes a page down for good when the operator says so', async () => {
+    const id = await createAndPublish({}, { listed: 'yes' });
+    t.exec('UPDATE public_products SET removed_at = ?', NOW);
+    for (const path of ['/p/acme', '/p/acme.md', '/badge/acme.svg', '/u/taha']) {
+      expect((await send('GET', path, { token: null })).status, path).toBe(404);
+    }
+    expect((await send('GET', '/api/p/acme/history', { token: OTHER_TOKEN })).status).toBe(404);
+    // The owner sees why, and can't put it back up.
+    const view = await htmlOf(await send('GET', `/share/products/${id}`));
+    expect(view).toContain('Taken down');
+    expect(view).not.toContain(`action="/share/products/${id}/publish"`);
+    await send('POST', `/share/products/${id}/unpublish`, { form: {} });
+    const again = await send('POST', `/share/products/${id}/publish`, { form: { confirm: 'yes' } });
+    expect(again.status).toBe(303);
+    expect(t.rows<{ published_at: number | null }>('SELECT published_at FROM public_products')[0]!.published_at).toBeNull();
+    expect((await send('GET', '/p/acme', { token: null })).status).toBe(404);
   });
 });
 

@@ -28,6 +28,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf-typegen": "wrangler types",
     "domains:update": "node scripts/update-disposable-domains.mjs",
+    "icons:update": "node scripts/update-tech-icons.mjs",
     "typecheck": "tsc --noEmit",
     "knip": "knip",
     "deps": "depcruise src test scripts bench",

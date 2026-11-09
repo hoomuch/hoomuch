@@ -5,17 +5,21 @@
  * same HTML can be cached for everyone. The figures are the stored PublicProductStats, in USD.
  * The name, tagline, website and founder details are the owner's words, and the page says so.
  *
- * Order: who and what (name, tagline, the founder as a byline; Visit and the share buttons), then
- * how much it makes (total revenue, MRR, the last 30 days, subscriptions), the chart (MRR or
- * revenue, switched in place), the line saying where the figures come from with the details behind
- * it, and the one action for a visitor: have a page like this.
+ * Order: who and what (name, tagline, the founder as a byline with where and since when; Visit and
+ * the share buttons), then how much it makes (total revenue, MRR, the last 30 days, subscriptions),
+ * the chart (MRR or revenue, switched in place), the line saying where the figures come from with
+ * the details behind it, what the founder says about it (About), and the one action for a visitor:
+ * have a page like this.
  */
 
-import { ArrowUpRight, BadgeCheck, Lock, TriangleAlert, X } from 'lucide-react';
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { ArrowUpRight, BadgeCheck, Flag, ImageDown, Lock, TriangleAlert, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardPanel } from '@/components/ui/card';
 import { isOpenView, PUBLIC_RANGES, type MrrDay, type PublicFigures, type PublicHistory, type PublicMetric, type PublicRange, type RevenuePoint } from '../../data/types';
+import { countryFlag, countryName } from '../../lib/countries';
 import { formatMoney, formatNumber } from '../../lib/money';
+import { formatFounded, type ProductDetails } from '../../lib/product-details';
 import { STALE_AFTER_MS } from '../../lib/public-pages';
 import { hasSignedInHint } from '../../lib/signed-in';
 import { addDays, dayRange } from '../../lib/time';
@@ -26,6 +30,10 @@ import { DeltaBadge, KpiStat } from '../components/kpi';
 import { Avatar, ProductTile } from '../components/avatar';
 import { STAT_CELL, StatGrid, VerifiedNote } from '../components/public-stats';
 import { XMark } from '../components/icons';
+import { CopyField } from '../components/copy-field';
+import { ProductAbout } from '../components/product-about';
+import { needsHistory, type CardData, type CardKind } from '../components/share-cards/layout';
+import { ShareCards } from '../components/share-cards/share-cards';
 import { ProviderLogo } from '../components/provider-logos';
 import { RelativeTime } from '../components/relative-time';
 import { ShareButtons } from '../components/share-sheet';
@@ -46,6 +54,11 @@ export interface PublicProductPageProps {
     appStoreUrl: string | null;
     playStoreUrl: string | null;
     logo: string | null;
+    /** When it was founded, 'YYYY' or 'YYYY-MM', and where (ISO code); null for none. The owner's words. */
+    founded?: string | null;
+    country?: string | null;
+    /** The About section, the owner's words (lib/product-details.ts). */
+    details?: ProductDetails;
   };
   /** The figures, without the chart history a visitor needs an account for (publicFigures). */
   stats: PublicFigures;
@@ -63,6 +76,10 @@ export interface PublicProductPageProps {
   signupOpen: boolean;
   /** The instance publishes a privacy policy and terms: the footer links them. */
   legal?: boolean;
+  /** Search engines are asked not to index it yet (lib/public-pages.ts searchIndexable). */
+  noindex?: boolean;
+  /** Where to report the page: the instance operator's address, when it names one. */
+  reportTo?: string;
 }
 
 /** Rendered without the visitor's session; only served where public pages, Explore included, are on. */
@@ -98,10 +115,23 @@ export function PublicProductPage(props: PublicProductPageProps) {
   const stale = stats.syncedAt === null || now - stats.syncedAt > STALE_AFTER_MS;
   const providerNames = listNames(stats.providers.map((p) => getProviderMeta(p).name));
   const summary = publicProductSummary(product, stats);
+  const history = usePublicHistory(product.slug);
+  const [imageOpen, setImageOpen] = useState<CardKind | null>(null);
+  const mounted = useMounted();
+  // Back from signing up for a locked image (`?share=`): open the dialog on it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const want = url.searchParams.get('share');
+    if (want !== 'figure' && want !== 'chart' && want !== 'calendar') return;
+    url.searchParams.delete('share');
+    window.history.replaceState(null, '', url);
+    setImageOpen(want);
+  }, []);
   return (
     <Layout
       {...NO_CHROME}
       legal={props.legal}
+      noindex={props.noindex}
       title={summary.title}
       description={summary.description}
       og={{ url: props.url, image: props.image, title: summary.title, markdown: props.markdown }}
@@ -115,12 +145,19 @@ export function PublicProductPage(props: PublicProductPageProps) {
           <div className="min-w-0">
             <h1 className="font-heading text-hero-sm wrap-break-word">{product.name}</h1>
             {product.tagline ? <p className="mt-1 text-lead text-pretty text-muted-foreground wrap-break-word">{product.tagline}</p> : null}
-            {owner ? <Byline owner={owner} /> : null}
+            {owner || product.country || product.founded ? <Byline owner={owner} country={product.country ?? null} founded={product.founded ?? null} /> : null}
             <ProductLinks product={product} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ShareButtons url={props.url} title={product.name} text={`${product.name} is at ${usd(stats.mrr.value)} MRR, verified by hoomuch`} copy />
+          {/* Drawn in the browser, so it's there once the page is hydrated. */}
+          {mounted ? (
+            <CossButton type="button" variant="outline" className="rounded-full" onClick={() => setImageOpen('figure')}>
+              <ImageDown />
+              Share image
+            </CossButton>
+          ) : null}
         </div>
       </header>
 
@@ -173,7 +210,7 @@ export function PublicProductPage(props: PublicProductPageProps) {
         </StatGrid>
 
         <section aria-label="Chart">
-          <ChartCard slug={product.slug} stats={stats} initial={props.view ?? OPEN_VIEW} signupOpen={props.signupOpen} />
+          <ChartCard slug={product.slug} stats={stats} initial={props.view ?? OPEN_VIEW} signupOpen={props.signupOpen} history={history} />
           <div className="mt-2">
             <VerifiedNote
               caveats={
@@ -201,7 +238,7 @@ export function PublicProductPage(props: PublicProductPageProps) {
                     hoomuch reads these figures with read-only API keys, on a schedule, and the owner can’t edit them. Revenue is
                     net of refunds and before fees; other currencies are converted to US dollars. Total revenue counts what hoomuch
                     holds, from {stats.revenueSince ? formatDay(stats.revenueSince) : 'the day its history starts'}. The name,
-                    description, website and founder details are the owner’s own words.
+                    description, website, founder details, founded date, country and the About section are the owner’s own words.
                   </p>
                 </>
               }
@@ -211,6 +248,27 @@ export function PublicProductPage(props: PublicProductPageProps) {
           </div>
         </section>
       </div>
+
+      {product.details ? (
+        <ProductAbout
+          name={product.name}
+          details={product.details}
+          founder={owner ? { name: owner.name, handle: owner.handle, avatar: owner.avatar } : null}
+          perSubscription={stats.activeSubscriptions.value > 0 ? Math.round(stats.mrr.value / stats.activeSubscriptions.value) : null}
+        />
+      ) : null}
+
+      {props.reportTo ? <ReportLink to={props.reportTo} url={props.url} /> : null}
+
+      <ShareImageDialog
+        kind={imageOpen}
+        onClose={() => setImageOpen(null)}
+        product={product}
+        stats={stats}
+        url={props.url}
+        history={history}
+        signupOpen={props.signupOpen}
+      />
 
       <ShowYourOwn signupOpen={props.signupOpen} />
     </Layout>
@@ -258,23 +316,54 @@ function ProductLinks(props: { product: PublicProductPageProps['product'] }) {
   );
 }
 
-/** Who makes it, like a post's author: their initials and name, linked to their profile. */
-function Byline(props: { owner: NonNullable<PublicProductPageProps['owner']> }) {
+/**
+ * Who makes it, like a post's author: their initials and name, linked to their profile; then where
+ * it's made and since when, as the owner says.
+ */
+function Byline(props: { owner: PublicProductPageProps['owner']; country: string | null; founded: string | null }) {
   const o = props.owner;
+  const country = countryName(props.country);
   return (
     <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-body text-muted-foreground">
-      <a href={`/u/${o.handle}`} className="inline-flex min-w-0 items-center gap-2 font-medium text-foreground hover:underline">
-        <Avatar name={o.name} src={o.avatar} className="size-6 text-[0.625rem]" />
-        <span className="min-w-0 wrap-break-word">{o.name}</span>
-      </a>
-      {o.x ? (
-        <a href={`https://x.com/${o.x}`} rel="nofollow ugc noopener noreferrer" target="_blank" className="inline-flex items-center gap-1.5 wrap-anywhere hover:text-foreground">
-          <XMark className="size-3 shrink-0" />@{o.x}
-        </a>
-      ) : (
-        <span>@{o.handle}</span>
-      )}
+      {o ? (
+        <>
+          <a href={`/u/${o.handle}`} className="inline-flex min-w-0 items-center gap-2 font-medium text-foreground hover:underline">
+            <Avatar name={o.name} src={o.avatar} className="size-6 text-[0.625rem]" />
+            <span className="min-w-0 wrap-break-word">{o.name}</span>
+          </a>
+          {o.x ? (
+            <a href={`https://x.com/${o.x}`} rel="nofollow ugc noopener noreferrer" target="_blank" className="inline-flex items-center gap-1.5 wrap-anywhere hover:text-foreground">
+              <XMark className="size-3 shrink-0" />@{o.x}
+            </a>
+          ) : (
+            <span>@{o.handle}</span>
+          )}
+        </>
+      ) : null}
+      {country && props.country ? (
+        <>
+          {o ? <Dot /> : null}
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true">{countryFlag(props.country)}</span>
+            {country}
+          </span>
+        </>
+      ) : null}
+      {props.founded ? (
+        <>
+          {o || country ? <Dot /> : null}
+          <span>Founded {formatFounded(props.founded)}</span>
+        </>
+      ) : null}
     </p>
+  );
+}
+
+function Dot() {
+  return (
+    <span aria-hidden="true" className="text-faint">
+      ·
+    </span>
   );
 }
 
@@ -319,6 +408,40 @@ async function loadHistory(slug: string): Promise<{ result: Load; history?: Publ
   }
 }
 
+/** The history behind the locks, shared by the chart and the share images: opened once, for both. */
+interface HistoryState {
+  history: PublicHistory | null;
+  /** Where opening it got to: not tried yet, under way, or how it ended. */
+  status: 'idle' | 'loading' | Load;
+  /** Opens it (once; later calls get the same answer). */
+  load: () => Promise<Load>;
+}
+
+function usePublicHistory(slug: string): HistoryState {
+  const [history, setHistory] = useState<PublicHistory | null>(null);
+  const [status, setStatus] = useState<HistoryState['status']>('idle');
+  const pending = useRef<Promise<Load> | null>(null);
+  const load = useCallback(() => {
+    // One request at a time; the history is kept once it comes, anything else is asked again next time.
+    if (!pending.current) {
+      setStatus('loading');
+      pending.current = loadHistory(slug).then(({ result, history: h }) => {
+        if (h) setHistory(h);
+        setStatus(result);
+        if (result !== 'ok') pending.current = null;
+        return result;
+      });
+    }
+    return pending.current;
+  }, [slug]);
+  // A browser with a session (lib/signed-in.ts) gets every view opened up front, so its locks go
+  // before anyone reaches for them.
+  useEffect(() => {
+    if (hasSignedInHint(document.cookie)) void load();
+  }, [load]);
+  return { history, status, load };
+}
+
 /**
  * The chart, like a dashboard's: revenue or MRR over 7 days to all time. Anyone sees revenue over
  * the last 30 days; every other view needs a free account, and choosing one asks for it. That's the
@@ -328,14 +451,14 @@ async function loadHistory(slug: string): Promise<{ result: Load; history?: Publ
  * with sign-up and log-in links. After it, choices switch in place; a locked one fetches the
  * history (a signed-in visitor gets it) or opens the sign-up prompt.
  */
-function ChartCard(props: { slug: string; stats: PublicFigures; initial: ChartView; signupOpen: boolean }) {
+function ChartCard(props: { slug: string; stats: PublicFigures; initial: ChartView; signupOpen: boolean; history: HistoryState }) {
   const { stats } = props;
+  const { history } = props.history;
   const [view, setView] = useState<ChartView>(props.initial);
-  const [history, setHistory] = useState<PublicHistory | null>(null);
-  const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [prompt, setPrompt] = useState<Prompt | null>(null);
   const open = isOpenView(view.metric, view.range);
+  const busy = props.history.status === 'loading';
 
   const show = (to: ChartView) => {
     setView(to);
@@ -345,28 +468,23 @@ function ChartCard(props: { slug: string; stats: PublicFigures; initial: ChartVi
   };
 
   // Landed on a locked view (a shared link, or back from signing up): open it if the visitor can.
-  // A browser with a session (lib/signed-in.ts) gets every view opened up front, so its locks go
-  // before anyone reaches for them; only a locked landing says so if that fails.
+  // Only a locked landing says so if that fails (the page opens the history up front for a browser
+  // with a session, usePublicHistory).
+  const load = props.history.load;
   useEffect(() => {
-    const locked = !isOpenView(props.initial.metric, props.initial.range);
-    if (!locked && !hasSignedInHint(document.cookie)) return;
-    void loadHistory(props.slug).then(({ result, history: h }) => {
-      if (h) setHistory(h);
-      else if (locked && result === 'error') setFailed(true);
+    if (isOpenView(props.initial.metric, props.initial.range)) return;
+    void load().then((result) => {
+      if (result === 'error') setFailed(true);
     });
-  }, [props.slug, props.initial.metric, props.initial.range]);
+  }, [load, props.initial.metric, props.initial.range]);
 
   const choose = (to: ChartView) => async (e: MouseEvent<HTMLAnchorElement>) => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
     e.preventDefault();
     if (isOpenView(to.metric, to.range) || history) return show(to);
-    setBusy(true);
-    const { result, history: h } = await loadHistory(props.slug);
-    setBusy(false);
-    if (h) {
-      setHistory(h);
-      show(to);
-    } else if (result === 'error') setFailed(true);
+    const result = await load();
+    if (result === 'ok') show(to);
+    else if (result === 'error') setFailed(true);
     else setPrompt({ view: to, reason: result === 'verify' ? 'verify' : 'sign-in' });
   };
 
@@ -486,6 +604,119 @@ function LockedChart(props: { next: string; signupOpen: boolean; failed: boolean
   );
 }
 
+/** True once hydrated: for what only works in a browser. */
+function useMounted(): boolean {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted;
+}
+
+/**
+ * The share images, in a native modal <dialog> (focus moves in, Escape closes it). Anyone makes the
+ * images from figures a visitor already sees; the year's chart and the calendar use the history
+ * behind the lock, so picking one opens it for a signed-in visitor and says how to otherwise.
+ */
+function ShareImageDialog(props: {
+  kind: CardKind | null;
+  onClose: () => void;
+  product: PublicProductPageProps['product'];
+  stats: PublicFigures;
+  url: string;
+  history: HistoryState;
+  signupOpen: boolean;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const [wanted, setWanted] = useState<CardKind>('calendar');
+  const { product, stats } = props;
+  const h = props.history.history;
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    if (props.kind && !d.open) d.showModal();
+    if (!props.kind && d.open) d.close();
+  }, [props.kind]);
+  const data = useMemo<CardData>(
+    () => ({
+      slug: product.slug,
+      name: product.name,
+      logo: product.logo,
+      host: new URL(props.url).host,
+      mrr: stats.mrr.value,
+      revenue: stats.revenue.value,
+      revenueTotal: stats.revenueTotal,
+      today: h?.today ?? stats.openSeries.at(-1)?.day ?? '',
+      daily: h?.revenueDaily ?? stats.openSeries,
+      weekly: h?.revenueWeekly ?? null,
+    }),
+    [product, stats, props.url, h],
+  );
+  const next = `/p/${product.slug}?share=${wanted}`;
+  const q = `?next=${encodeURIComponent(next)}`;
+  const status = props.history.status;
+  return (
+    <dialog
+      ref={ref}
+      onClose={props.onClose}
+      aria-labelledby="share-image-title"
+      className="m-auto w-[min(48rem,calc(100%-2rem))] rounded-2xl border bg-popover p-5 text-popover-foreground shadow-lg backdrop:bg-black/60 sm:p-6"
+    >
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h2 id="share-image-title" className="font-heading text-title">
+            Share as an image
+          </h2>
+          <p className="mt-1 text-body text-muted-foreground">Post it with the link, so people can check the figures.</p>
+        </div>
+        <button type="button" onClick={() => ref.current?.close()} className="-m-2 rounded-md p-2 text-muted-foreground hover:text-foreground" aria-label="Close">
+          <X className="size-4" />
+        </button>
+      </div>
+      <div className="mb-5">
+        <CopyField id="share-image-link" label={`Link to ${product.name}`} value={props.url} />
+      </div>
+      {props.kind ? (
+        <ShareCards
+          key={props.kind}
+          data={data}
+          initialKind={props.kind}
+          locked={(spec) => !h && needsHistory(spec)}
+          onLocked={(spec) => {
+            setWanted(spec.kind);
+            void props.history.load();
+          }}
+          lockedPanel={
+            <div className="flex flex-col items-center gap-4 px-4 py-10 text-center">
+              <Lock className="size-5 text-muted-foreground" />
+              {status === 'loading' ? (
+                <p className="text-body text-muted-foreground">Opening…</p>
+              ) : status === 'error' ? (
+                <p className="max-w-sm text-body text-muted-foreground">Couldn’t open it. Try again in a moment.</p>
+              ) : status === 'verify' ? (
+                <>
+                  <p className="max-w-sm text-body text-pretty text-muted-foreground">Confirm your email first: then the year’s chart and the calendar open.</p>
+                  <LinkButton href="/verify-email">Confirm my email</LinkButton>
+                </>
+              ) : (
+                <>
+                  <p className="max-w-sm text-body text-pretty text-muted-foreground">
+                    The year’s chart and the revenue calendar open with a free hoomuch account.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {props.signupOpen ? <LinkButton href={`/signup${q}`}>Create a free account</LinkButton> : null}
+                    <LinkButton href={`/login${q}`} variant="secondary">
+                      Log in
+                    </LinkButton>
+                  </div>
+                </>
+              )}
+            </div>
+          }
+        />
+      ) : null}
+    </dialog>
+  );
+}
+
 /**
  * Asked for when a visitor without an account picks a locked view: a native modal <dialog> (focus
  * moves in, Escape closes it), opened after hydration only.
@@ -561,6 +792,22 @@ function Perk(props: { children: ReactNode }) {
       <BadgeCheck className="mt-0.5 size-4 shrink-0 text-success-foreground" />
       <span>{props.children}</span>
     </li>
+  );
+}
+
+/**
+ * A quiet way to tell the people running the site about a page that breaks the rules: an email to
+ * the operator's address, with the page in the subject. A plain link, so it works everywhere.
+ */
+export function ReportLink(props: { to: string; url: string }) {
+  const href = `mailto:${props.to}?subject=${encodeURIComponent(`Report: ${props.url}`)}&body=${encodeURIComponent('What’s wrong with this page:\n\n')}`;
+  return (
+    <p className="mt-6 flex items-center gap-1.5 text-caption text-muted-foreground">
+      <Flag aria-hidden="true" className="size-3.5 shrink-0" />
+      <span>
+        Spam, a scam or someone else’s details on this page? <TextLink href={href}>Report it</TextLink>
+      </span>
+    </p>
   );
 }
 

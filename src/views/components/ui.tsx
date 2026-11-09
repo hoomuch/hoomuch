@@ -24,6 +24,7 @@ import { SegmentedControl, SegmentedControlItem } from '@/components/ui/segmente
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import { Table } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '../../lib/utils';
 
 // ---------- page structure ----------
@@ -241,6 +242,36 @@ export function SegmentedLinks(props: {
           className="text-muted-foreground tabular-nums hover:text-foreground"
         >
           {it.label}
+        </SegmentedControlItem>
+      ))}
+    </SegmentedControl>
+  );
+}
+
+/**
+ * coss SegmentedControl made of buttons: one choice of several, made in place (after hydration;
+ * for settings that only exist in the browser, like a share image's theme). Each is a toggle
+ * button, aria-pressed on the current one.
+ */
+export function SegmentedChoice<T extends string>(props: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: ReactNode }[];
+  onChange: (value: T) => void;
+  className?: string;
+}) {
+  return (
+    <SegmentedControl role="group" aria-label={props.label} size="sm" className={props.className}>
+      {props.options.map((o) => (
+        <SegmentedControlItem
+          key={o.value}
+          type="button"
+          aria-pressed={o.value === props.value}
+          data-checked={o.value === props.value ? '' : undefined}
+          onClick={() => props.onChange(o.value)}
+          className="text-muted-foreground tabular-nums hover:text-foreground"
+        >
+          {o.label}
         </SegmentedControlItem>
       ))}
     </SegmentedControl>
@@ -476,6 +507,56 @@ export function Field(props: FieldProps) {
   );
 }
 
+/**
+ * A several-line answer (coss Textarea): the same label, help and error wiring as Field. The box
+ * grows with what's typed; `maxLength` stops typing past the limit, and the help can say it.
+ */
+export function TextareaField(props: {
+  name: string;
+  label: string;
+  value?: string;
+  placeholder?: string;
+  help?: ReactNode;
+  error?: string;
+  required?: boolean;
+  autoFocus?: boolean;
+  maxLength?: number;
+  rows?: number;
+  id?: string;
+}) {
+  const id = props.id ?? props.name;
+  const helpId = props.help ? `${id}-help` : undefined;
+  const errId = props.error ? `${id}-error` : undefined;
+  return (
+    <div className={FIELD} data-slot="field" data-invalid={props.error ? '' : undefined}>
+      <Label htmlFor={id}>
+        <span>
+          {props.label}
+          {props.required ? null : <span className="font-normal text-faint"> (optional)</span>}
+        </span>
+      </Label>
+      <Textarea
+        id={id}
+        name={props.name}
+        defaultValue={props.value}
+        placeholder={props.placeholder}
+        required={props.required}
+        autoFocus={props.autoFocus}
+        maxLength={props.maxLength}
+        rows={props.rows ?? 3}
+        aria-invalid={props.error ? true : undefined}
+        aria-describedby={describedBy(errId, helpId)}
+      />
+      {props.error && errId ? <FieldError id={errId} message={props.error} /> : null}
+      {props.help ? (
+        <p id={helpId} className={HELP}>
+          {props.help}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** coss Select (Base UI). The value is posted through Base UI's hidden input named `name`. */
 export function SelectField(props: {
   name: string;
@@ -486,6 +567,8 @@ export function SelectField(props: {
   error?: string;
   id?: string;
   required?: boolean;
+  /** A short list in a narrow column (a currency): the trigger drops coss's minimum width. */
+  narrow?: boolean;
 }) {
   const id = props.id ?? props.name;
   const helpId = props.help ? `${id}-help` : undefined;
@@ -498,7 +581,7 @@ export function SelectField(props: {
           id={id}
           aria-invalid={props.error ? true : undefined}
           aria-describedby={describedBy(errId, helpId)}
-          className="w-full"
+          className={props.narrow ? 'w-full min-w-0' : 'w-full'}
         >
           <SelectValue />
         </SelectTrigger>
@@ -580,6 +663,30 @@ export function CheckboxOption(props: {
         {props.hint ? <span className="block text-caption text-muted-foreground">{props.hint}</span> : null}
       </span>
     </Label>
+  );
+}
+
+/**
+ * One tag in a group of choices, as a chip: a native checkbox (posted as `name=value`, before
+ * hydration too) hidden behind its label, which shows the state. Checked chips take the foreground
+ * colour; focus shows the ring on the chip.
+ */
+export function ChipCheckbox(props: { id: string; name: string; value: string; label: ReactNode; icon?: ReactNode; defaultChecked?: boolean }) {
+  return (
+    <label htmlFor={props.id} className="relative inline-flex">
+      <input id={props.id} type="checkbox" name={props.name} value={props.value} defaultChecked={props.defaultChecked} className="peer sr-only" />
+      <span
+        className={cn(
+          'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border bg-background px-3 text-body select-none transition-colors',
+          'hover:bg-accent/60 peer-focus-visible:ring-[3px] peer-focus-visible:ring-ring/24 peer-focus-visible:border-ring',
+          'peer-checked:border-foreground peer-checked:bg-foreground peer-checked:text-background',
+          '[&_svg]:size-3.5 [&_svg]:shrink-0',
+        )}
+      >
+        {props.icon}
+        {props.label}
+      </span>
+    </label>
   );
 }
 

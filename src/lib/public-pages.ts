@@ -4,7 +4,7 @@
  */
 
 import type { Bindings } from '../env';
-import { HOUR } from './time';
+import { DAY, dayKey, HOUR } from './time';
 
 /** Public pages are on only where the instance says so (`PUBLIC_PAGES=true`); off by default. */
 export function publicPagesEnabled(env: Pick<Bindings, 'PUBLIC_PAGES'> | undefined): boolean {
@@ -107,6 +107,7 @@ export function normalizePlayStoreUrl(input: string): string | null {
   const raw = input.trim();
   if (raw === '' || raw.length > STORE_LINK_MAX) return null;
   let pkg: string | null = null;
+  // nosemgrep: detect-redos -- raw is at most STORE_LINK_MAX long, and PACKAGE_RE's parts are split by a dot none of them matches
   if (PACKAGE_RE.test(raw) && !raw.toLowerCase().startsWith('play.google.com')) {
     pkg = raw;
   } else {
@@ -120,6 +121,7 @@ export function normalizePlayStoreUrl(input: string): string | null {
     if (url.pathname.replace(/\/$/, '') !== '/store/apps/details') return null;
     pkg = url.searchParams.get('id');
   }
+  // nosemgrep: detect-redos -- pkg is at most 150 long, and PACKAGE_RE's parts are split by a dot none of them matches
   return pkg && pkg.length <= 150 && PACKAGE_RE.test(pkg) ? `https://play.google.com/store/apps/details?id=${pkg}` : null;
 }
 
@@ -184,4 +186,14 @@ export type ExploreSort = 'mrr' | 'growth' | 'new';
 
 export function parseExploreSort(v: string | undefined | null): ExploreSort {
   return v === 'growth' || v === 'new' ? v : 'mrr';
+}
+
+/**
+ * Whether search engines may index a public page: only once its figures go back as far as
+ * Explore asks (EXPLORE_MIN_HISTORY_DAYS of revenue history), and never while the operator has it
+ * off Explore. Until then it's public and shareable, but worth nothing to someone publishing a page
+ * for its links or words: they'd need a payment account with a month of real revenue first.
+ */
+export function searchIndexable(historyFrom: string | null, hidden: boolean, now: number): boolean {
+  return !hidden && historyFrom !== null && historyFrom <= dayKey(now - EXPLORE_MIN_HISTORY_DAYS * DAY);
 }

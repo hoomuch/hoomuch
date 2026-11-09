@@ -36,6 +36,12 @@ export interface PublicProductRow {
   /** The logo in R2 (migration 0014; lib/media.ts), and where it came from; null for none. */
   logo_key: string | null;
   logo_source: LogoSource | null;
+  /** What the owner tells visitors (migration 0016): 'YYYY' or 'YYYY-MM', an ISO country code, ProductDetails JSON. */
+  founded: string | null;
+  country: string | null;
+  details: string | null;
+  /** The operator took the page down (migration 0017); NULL = not. */
+  removed_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -175,8 +181,12 @@ export async function setPublished(
   publishedAt: number | null,
   listed?: boolean,
 ): Promise<boolean> {
+  // A product the operator took down stays down: publishing it changes nothing.
   const r = await db
-    .prepare('UPDATE public_products SET published_at = ?, listed = COALESCE(?, listed), updated_at = ? WHERE id = ? AND user_id = ?')
+    .prepare(
+      `UPDATE public_products SET published_at = ?1, listed = COALESCE(?2, listed), updated_at = ?3
+        WHERE id = ?4 AND user_id = ?5 AND (?1 IS NULL OR removed_at IS NULL)`,
+    )
     .bind(publishedAt, listed === undefined ? null : listed ? 1 : 0, Date.now(), id, userId)
     .run();
   return (r.meta.changes ?? 0) > 0;
@@ -187,6 +197,23 @@ export async function setListed(db: D1Database, userId: string, id: string, list
   const r = await db
     .prepare('UPDATE public_products SET listed = ?, updated_at = ? WHERE id = ? AND user_id = ?')
     .bind(listed ? 1 : 0, Date.now(), id, userId)
+    .run();
+  return (r.meta.changes ?? 0) > 0;
+}
+
+/** What the owner tells visitors about a product (lib/product-details.ts), saved from its own form. */
+export interface DetailFields {
+  founded: string | null;
+  country: string | null;
+  /** serializeProductDetails' JSON, null for none. */
+  details: string | null;
+}
+
+/** Saves the user's product details. False when it isn't theirs. */
+export async function updateProductDetails(db: D1Database, userId: string, id: string, f: DetailFields, now: number): Promise<boolean> {
+  const r = await db
+    .prepare('UPDATE public_products SET founded = ?, country = ?, details = ?, updated_at = ? WHERE id = ? AND user_id = ?')
+    .bind(f.founded, f.country, f.details, now, id, userId)
     .run();
   return (r.meta.changes ?? 0) > 0;
 }
@@ -364,16 +391,25 @@ export interface PublishedProduct {
   owner_avatar: string | null;
   app_store_url: string | null;
   play_store_url: string | null;
+  founded: string | null;
+  country: string | null;
+  details: string | null;
+  /** The operator took it off Explore: its page isn't offered to search engines either. */
+  hidden_at: number | null;
 }
+
+/** What makes a product public: published, with figures, and not taken down by the operator. */
+const PUBLIC = 'p.published_at IS NOT NULL AND p.stats IS NOT NULL AND p.removed_at IS NULL';
 
 export function getPublishedProductBySlug(db: D1Database, slug: string): Promise<PublishedProduct | null> {
   return db
     .prepare(
       `SELECT p.slug, p.name, p.tagline, p.website, p.app_store_url, p.play_store_url, p.stats, p.logo_key,
+              p.founded, p.country, p.details, p.hidden_at,
               f.handle AS owner_handle, f.display_name AS owner_name, f.x_handle AS owner_x, f.avatar_key AS owner_avatar
          FROM public_products p
          LEFT JOIN public_profiles f ON f.user_id = p.user_id
-        WHERE p.slug = ? AND p.published_at IS NOT NULL AND p.stats IS NOT NULL`,
+        WHERE p.slug = ? AND ${PUBLIC}`,
     )
     .bind(slug)
     .first<PublishedProduct>();
@@ -387,7 +423,7 @@ export interface PublishedProfile {
   x_handle: string | null;
   avatar_key: string | null;
   /** The owner's published products with figures, oldest first. */
-  products: Array<{ slug: string; name: string; tagline: string | null; stats: string; logo_key: string | null }>;
+  products: Array<{ slug: string; name: string; tagline: string | null; stats: string; logo_key: string | null; hidden_at: number | null }>;
 }
 
 /** A profile and its published products, in one round trip; null when it has none (then it isn't public). */
@@ -398,9 +434,9 @@ export async function getPublishedProfileByHandle(db: D1Database, handle: string
       .bind(handle),
     db
       .prepare(
-        `SELECT p.slug, p.name, p.tagline, p.stats, p.logo_key FROM public_profiles f
+        `SELECT p.slug, p.name, p.tagline, p.stats, p.logo_key, p.hidden_at FROM public_profiles f
            JOIN public_products p ON p.user_id = f.user_id
-          WHERE f.handle = ? AND p.published_at IS NOT NULL AND p.stats IS NOT NULL
+          WHERE f.handle = ? AND ${PUBLIC}
           ORDER BY p.created_at ASC, p.id ASC`,
       )
       .bind(handle),
@@ -418,7 +454,7 @@ export async function getPublishedProfileByHandle(db: D1Database, handle: string
  * going back EXPLORE_MIN_HISTORY_DAYS. Binds ?1 (oldest sync allowed) and ?2 (latest first day).
  */
 const ON_EXPLORE = `p.published_at IS NOT NULL AND p.listed = 1 AND p.hidden_at IS NULL AND p.stats IS NOT NULL
-  AND p.mrr_usd > 0 AND p.synced_at >= ?1 AND p.history_from <= ?2`;
+  AND p.removed_at IS NULL AND p.mrr_usd > 0 AND p.synced_at >= ?1 AND p.history_from <= ?2`;
 
 function exploreBinds(now: number): [number, string] {
   return [now - STALE_AFTER_MS, dayKey(now - EXPLORE_MIN_HISTORY_DAYS * DAY)];

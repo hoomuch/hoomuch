@@ -25,6 +25,8 @@ import publicProfiles from '../../migrations/0012_public_profiles.sql?raw';
 import publicExplore from '../../migrations/0013_public_explore.sql?raw';
 import media from '../../migrations/0014_media.sql?raw';
 import storeLinks from '../../migrations/0015_store_links.sql?raw';
+import productDetails from '../../migrations/0016_product_details.sql?raw';
+import takedowns from '../../migrations/0017_takedowns.sql?raw';
 import type { Bindings } from '../../src/env';
 import type { ProviderId } from '../../src/providers/types';
 import { FakeQueue } from './queue';
@@ -122,6 +124,8 @@ export function createTestD1(): TestD1 {
   sqlite.exec(publicExplore);
   sqlite.exec(media);
   sqlite.exec(storeLinks);
+  sqlite.exec(productDetails);
+  sqlite.exec(takedowns);
   let trips = 0;
 
   const countTrip = <T extends object>(stmt: TestStatement): T => {
