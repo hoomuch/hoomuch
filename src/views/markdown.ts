@@ -24,7 +24,7 @@ const pct = (p: number | null) => (p === null ? 'no earlier data' : `${p >= 0 ? 
 
 export function productMarkdown(p: {
   origin: string;
-  product: { slug: string; name: string; tagline: string | null; website: string | null };
+  product: { slug: string; name: string; tagline: string | null; website: string | null; appStoreUrl?: string | null; playStoreUrl?: string | null };
   owner: { handle: string; name: string; x: string | null } | null;
   stats: PublicProductStats;
 }): string {
@@ -64,6 +64,8 @@ export function productMarkdown(p: {
     '',
     ...(product.tagline ? [`- Description: ${plain(product.tagline)}`] : []),
     ...(product.website ? [`- Website: ${product.website}`] : []),
+    ...(product.appStoreUrl ? [`- App Store: ${product.appStoreUrl}`] : []),
+    ...(product.playStoreUrl ? [`- Google Play: ${product.playStoreUrl}`] : []),
     ...(owner
       ? [
           `- Founder: ${plain(owner.name)} (${origin}/u/${owner.handle})`,

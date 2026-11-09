@@ -16,7 +16,7 @@ import { syncConnection } from '../../src/sync/engine';
 import { seedConnection } from '../fixtures/d1';
 import { NOW, SECRET, SNAP, page, seedStripe, setup, teardown, type Ctx } from './helpers';
 
-const FIELDS = { slug: 'acme', name: 'Acme', tagline: null, website: null };
+const FIELDS = { slug: 'acme', name: 'Acme', tagline: null, website: null, appStoreUrl: null, playStoreUrl: null };
 
 let current: Ctx | null = null;
 function ctx(publicPages = true): Ctx {

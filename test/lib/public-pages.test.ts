@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appStoreId,
+  normalizeAppStoreUrl,
+  normalizePlayStoreUrl,
   countsPublicly,
   isValidHandle,
   isValidSlug,
@@ -55,5 +58,49 @@ describe('public page rules', () => {
     expect(countsPublicly('stripe', false)).toBe(true);
     expect(countsPublicly('stripe', true)).toBe(false);
     expect(countsPublicly('demo', false)).toBe(false);
+  });
+});
+
+describe('store links', () => {
+  it('take any App Store link (or id) to its canonical form', () => {
+    for (const input of [
+      'https://apps.apple.com/tr/app/weigho-weight-tracker/id1234567890',
+      'https://apps.apple.com/app/id1234567890?platform=iphone',
+      'apps.apple.com/us/app/weigho/id1234567890/',
+      'https://itunes.apple.com/us/app/id1234567890?mt=8',
+      'id1234567890',
+    ]) {
+      expect(normalizeAppStoreUrl(input)).toBe('https://apps.apple.com/app/id1234567890');
+    }
+    expect(appStoreId('https://apps.apple.com/app/id1234567890')).toBe('1234567890');
+  });
+
+  it('turn away anything that is not an App Store listing', () => {
+    for (const input of ['https://apps.apple.com.evil.example/app/id1234567890', 'http://apps.apple.com/app/id1234567890', 'https://apps.apple.com/us/app/weigho', 'https://example.com/id1234567890', 'javascript:alert(1)', '']) {
+      expect(normalizeAppStoreUrl(input)).toBeNull();
+    }
+  });
+
+  it('take a Google Play link or package name to its canonical form', () => {
+    for (const input of [
+      'https://play.google.com/store/apps/details?id=com.weigho.app&hl=tr',
+      'play.google.com/store/apps/details?id=com.weigho.app',
+      'com.weigho.app',
+    ]) {
+      expect(normalizePlayStoreUrl(input)).toBe('https://play.google.com/store/apps/details?id=com.weigho.app');
+    }
+  });
+
+  it('turn away anything that is not a Google Play listing', () => {
+    for (const input of [
+      'https://play.google.com/store/apps/developer?id=Weigho',
+      'https://play.google.com.evil.example/store/apps/details?id=com.weigho.app',
+      'https://play.google.com/store/apps/details?id=not a package',
+      'https://play.google.com/store/apps/details',
+      'weigho',
+      'javascript:alert(1)',
+    ]) {
+      expect(normalizePlayStoreUrl(input)).toBeNull();
+    }
   });
 });

@@ -9,7 +9,7 @@
 
 import type { Bindings } from '../env';
 import { getProduct, setLogo, type LogoSource } from '../db/public';
-import { publicPagesEnabled } from '../lib/public-pages';
+import { appStoreId, publicPagesEnabled } from '../lib/public-pages';
 import {
   cleanImage,
   CONTENT_TYPES,
@@ -171,10 +171,40 @@ async function fetchSiteIcon(
   return null;
 }
 
+/** Apple's public lookup API: an app's listing as JSON, its artwork among it. */
+const ITUNES_LOOKUP = 'https://itunes.apple.com/lookup';
+
 /**
- * Gives a product its website's icon. An owner's own logo stays unless `replaceUpload` (they asked
- * for the site's icon instead). When there's no usable icon, the product keeps what it has, except
- * an icon fetched from a website it no longer has (`websiteChanged`).
+ * An App Store listing's icon (512 px) as checked image bytes, from Apple's lookup API; null when
+ * the app isn't found (the lookup reads the US store) or its artwork can't be used.
+ */
+async function fetchAppStoreIcon(appStoreUrl: string, origin: string, fetcher: typeof fetch = fetch): Promise<{ bytes: Uint8Array; info: ImageInfo } | null> {
+  const id = appStoreId(appStoreUrl);
+  if (!id) return null;
+  const signal = AbortSignal.timeout(ICON_BUDGET_MS);
+  const headers = { 'user-agent': `Mozilla/5.0 (compatible; hoomuch; +${origin})` };
+  try {
+    const listing = await fetchChecked(fetcher, `${ITUNES_LOOKUP}?id=${id}`, { signal, headers: { ...headers, accept: 'application/json' } });
+    if (!listing?.res.ok) return null;
+    const body = await readCapped(listing.res, 64 * 1024, true);
+    const data = body ? (JSON.parse(new TextDecoder().decode(body)) as { results?: Array<Record<string, unknown>> }) : null;
+    const art = data?.results?.[0]?.artworkUrl512 ?? data?.results?.[0]?.artworkUrl100;
+    if (typeof art !== 'string') return null;
+    const image = await fetchChecked(fetcher, art, { signal, headers: { ...headers, accept: 'image/*' } });
+    if (!image?.res.ok) return null;
+    const bytes = await readCapped(image.res, ICON_MAX_BYTES, true);
+    const icon = bytes ? cleanImage(bytes) : null;
+    return icon && Math.min(icon.info.width, icon.info.height) >= ICON_MIN_SIDE ? icon : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Gives a product its website's icon, or its App Store listing's when the website has none (or
+ * there's no website). An owner's own logo stays unless `replaceUpload` (they asked for the fetched
+ * icon instead). When there's no usable icon, the product keeps what it has, except an icon fetched
+ * from a website or listing it no longer has (`websiteChanged`).
  */
 export async function refreshSiteIcon(
   env: Bindings,
@@ -187,7 +217,9 @@ export async function refreshSiteIcon(
   if (!mediaEnabled(env)) return 'skipped';
   const product = await getProduct(env.DB, userId, productId);
   if (!product || (product.logo_source === 'upload' && !opts.replaceUpload)) return 'skipped';
-  const icon = product.website ? await fetchSiteIcon(product.website, origin, fetcher) : null;
+  const icon =
+    (product.website ? await fetchSiteIcon(product.website, origin, fetcher) : null) ??
+    (product.app_store_url ? await fetchAppStoreIcon(product.app_store_url, origin, fetcher) : null);
   // The lookup takes a moment: a logo uploaded in the meantime wins (keepUpload), whatever was read above.
   const keepUpload = !opts.replaceUpload;
   if (!icon) {
