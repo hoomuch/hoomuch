@@ -18,6 +18,7 @@
     "dev": "wrangler dev",
     "predeploy": "npm run db:migrate:remote",
     "deploy": "wrangler deploy",
+    "deploy:local": "node scripts/deploy-local.mjs",
     "build": "npm run css && npm run js",
     "css": "tailwindcss -i ./src/styles/app.css -o ./public/app.css --minify",
     "css:watch": "tailwindcss -i ./src/styles/app.css -o ./public/app.css --watch",

@@ -128,6 +128,7 @@ line above it.
 | `npm run css` | Builds `public/app.css` with the Tailwind CLI |
 | `npm run js` | Builds the browser bundle into `public/client/` with esbuild (code-split per page) |
 | `npm run deploy` | Applies remote D1 migrations, then `wrangler deploy` |
+| `npm run deploy:local` | The same, with your `wrangler.local.jsonc` (gitignored; see `wrangler.local.example.jsonc`) applied over `wrangler.jsonc` |
 | `npm run db:migrate:local` / `:remote` | Applies the D1 migrations |
 | `npm run cf-typegen` | Regenerates `worker-configuration.d.ts` |
 | `npm run domains:update` | Refreshes the disposable-email blocklist (`src/lib/disposable-domains.ts`) from upstream |
@@ -151,7 +152,7 @@ src/
   client/entry.tsx   browser entry: hydrates the page the server rendered
   styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
 migrations/          D1 schema
-scripts/             client build, the commit-msg check, the domain list refresh, the security scan
+scripts/             client build, the commit-msg check, the domain list refresh, the security scan, deploy:local
 test/                Vitest suites and API fixtures
 bench/               benchmark data seeding, the read-model benchmark, k6 load tests and their SLOs
 .opengrep/           Opengrep rules for the ground rules, each with its test cases
