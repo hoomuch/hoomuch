@@ -32,7 +32,8 @@ export function AuthPage(props: AuthPageProps) {
 
   if (isSignup && !props.signupOpen) {
     return (
-      <Layout {...props.chrome} title="Sign-ups closed" width="narrow">
+      // One line on a private instance: nothing for a search engine to show.
+      <Layout {...props.chrome} title="Sign-ups closed" width="narrow" noindex>
         <Card>
           <h1 className="font-heading text-title">Sign-ups are closed</h1>
           <p className="mt-2 text-body text-muted-foreground">
@@ -54,9 +55,13 @@ export function AuthPage(props: AuthPageProps) {
   const focus = passwordError ? 'password' : emailError ? 'email' : formError ? 'form' : 'email';
   // "Error: " leads the title, so the failure is announced as the re-rendered page loads.
   const pageTitle = (props.error ? 'Error: ' : '') + (isSignup ? 'Sign up' : 'Log in');
+  // Search engines show these two pages for the name, so each gets its own line.
+  const description = isSignup
+    ? 'Two fields, then your MRR. Connect Stripe, Paddle, RevenueCat, the App Store, Google Play and more with one key each, or start with demo data.'
+    : 'Log in to see your MRR, ARR, subscriptions and revenue from every store you sell in, on one dashboard.';
 
   return (
-    <Layout {...props.chrome} title={pageTitle} width="narrow">
+    <Layout {...props.chrome} title={pageTitle} description={description} width="narrow">
       <Card>
         <h1 className={isSignup ? 'font-heading text-title' : 'mb-6 font-heading text-title'}>{title}</h1>
         {isSignup ? <p className="mt-1.5 mb-6 text-body text-muted-foreground">Two fields, then your MRR.</p> : null}
