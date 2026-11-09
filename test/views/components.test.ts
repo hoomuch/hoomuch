@@ -738,6 +738,7 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('src="/mascot/asleep.png"'); // marketing footer
     expect(out).toContain('id="store"'); // the footer's "What we store" anchor
     expect(out).toContain('href="/login"'); // signed-out header link
+    expect(out).toMatch(/href="https:\/\/github\.com\/hoomuch\/hoomuch"[^>]*aria-label="hoomuch on GitHub"/); // header icon link
     expect(out).not.toContain('NEEDS REAL DATA');
     expect(out).not.toContain('Why this exists'); // no founder note until it's real
     expect(out).toContain('Free until your MRR reaches $1,000.'); // the free tier leads the pricing

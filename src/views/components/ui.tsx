@@ -361,6 +361,23 @@ export function LinkButton(props: {
   );
 }
 
+/**
+ * An icon-only link: coss's ghost icon button, muted until hovered. The icon carries no text, so
+ * `label` is both its accessible name and its hover tooltip.
+ */
+export function IconLinkButton(props: { href: string; label: string; className?: string; children: ReactNode }) {
+  return (
+    <CossButton
+      render={<a href={props.href} aria-label={props.label} title={props.label} />}
+      variant="ghost"
+      size="icon"
+      className={cn('text-muted-foreground hover:text-foreground', props.className)}
+    >
+      {props.children}
+    </CossButton>
+  );
+}
+
 // ---------- form fields ----------
 // coss Label + Input, wired by hand: a visible <label for>, help + error ids in aria-describedby,
 // aria-invalid on error. All of it is in the server HTML, so it holds before hydration too.
