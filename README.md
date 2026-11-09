@@ -66,6 +66,11 @@ npm run deploy                       # applies D1 migrations, then deploys
 
 The first deploy also creates the `hoomuch-sync` queue that every sync runs on.
 
+To pull new releases without conflicts, keep your changes out of `wrangler.jsonc`: copy
+`wrangler.local.example.jsonc` to `wrangler.local.jsonc` (gitignored), put your `database_id`, your
+domain and any vars you change in it, and deploy with `npm run deploy:local`. It applies your file
+over `wrangler.jsonc` and then does what `npm run deploy` does.
+
 Queues are on the Free plan too, with 10,000 operations a day. Each sync is about three
 operations, so that's roughly 3,300 syncs a day: around 130 connections at the default hourly
 interval.

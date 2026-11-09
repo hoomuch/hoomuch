@@ -1,0 +1,27 @@
+// Your instance's own settings, kept out of wrangler.jsonc. Copy this file to wrangler.local.jsonc
+// (gitignored), fill it in and deploy with `npm run deploy:local`: it applies the file over
+// wrangler.jsonc, so pulling a new release never conflicts with your changes.
+//
+// Objects merge key by key, entries of a binding list (d1_databases, ...) merge by `binding`, and
+// anything else replaces what wrangler.jsonc says. Leave out what you don't change. Secrets don't
+// go here: set them with `wrangler secret put`, or upload them with the first deploy
+// (`npm run deploy:local -- --secrets-file <file>`).
+{
+  "d1_databases": [
+    // The id printed by `wrangler d1 create hoomuch`.
+    { "binding": "DB", "database_id": "00000000-0000-0000-0000-000000000000" }
+  ],
+
+  // Your own domain, on a zone in the same Cloudflare account. With it, you can turn the
+  // workers.dev and preview addresses off.
+  // "routes": [{ "pattern": "hoomuch.example.com", "custom_domain": true }],
+  // "workers_dev": false,
+  // "preview_urls": false,
+
+  // Any of the vars in wrangler.jsonc. See Configuration in README.md.
+  // "vars": {
+  //   "ALLOW_SIGNUP": "false",
+  //   "TURNSTILE_SITE_KEY": "",
+  //   "MAIL_FROM": "hoomuch <hello@example.com>"
+  // }
+}

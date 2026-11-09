@@ -21,3 +21,8 @@ design/
 .agents/
 .claude/skills/
 skills-lock.json
+
+# Your instance's own settings (wrangler.local.example.jsonc) and the config npm run deploy:local
+# merges from them on every run.
+wrangler.local.jsonc
+.wrangler-merged.json
