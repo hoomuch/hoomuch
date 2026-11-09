@@ -19,12 +19,32 @@ import {
   isFetchableUrl,
   mediaKeyType,
   newMediaKey,
+  UPLOAD_MAX_BYTES,
+  UPLOAD_TYPES,
   type ImageInfo,
 } from '../lib/media';
 
 /** Photos and logos are on: public pages are, and there's a bucket for them. */
 export function mediaEnabled(env: Bindings): env is Bindings & { MEDIA: R2Bucket } {
   return publicPagesEnabled(env) && env.MEDIA !== undefined;
+}
+
+export const NO_FILE = 'Choose an image first.';
+export const TOO_BIG = `That image is over ${UPLOAD_MAX_BYTES / (1024 * 1024)} MB. Pick a smaller one.`;
+const NOT_AN_IMAGE = 'Use a PNG, JPEG, WebP or GIF image, at most 4096 pixels a side.';
+
+export type CheckedUpload = { ok: true; bytes: Uint8Array; info: ImageInfo } | { ok: false; error: string };
+
+/**
+ * An uploaded file, checked: its cleaned bytes (no camera or location metadata, nothing after the
+ * image's end) and what they are, or why it was turned away. Only what an upload may be (no ICO).
+ */
+export async function checkUpload(file: unknown): Promise<CheckedUpload> {
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: NO_FILE };
+  if (file.size > UPLOAD_MAX_BYTES) return { ok: false, error: TOO_BIG };
+  const image = cleanImage(new Uint8Array(await file.arrayBuffer()));
+  if (!image || !UPLOAD_TYPES.includes(image.info.type)) return { ok: false, error: NOT_AN_IMAGE };
+  return { ok: true, ...image };
 }
 
 /** Stores an image cleanImage returned (lib/media.ts) under a fresh key and returns the key. */

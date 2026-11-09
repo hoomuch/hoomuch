@@ -1,28 +1,36 @@
 /**
- * Uploading a photo or logo (routes/media.tsx). Owner: Experience (design).
+ * Choosing a photo or logo: with a button, or by dragging an image onto the card or field.
+ * Owner: Experience (design).
  *
- * Before hydration it's a plain multipart form: a file field and Upload. Once hydrated the field
- * hides behind one button, as on a social network's "Change photo": picking a file scales it down
- * in the browser (a square of UPLOAD_SIDE, cropped to the middle, as WebP where the browser writes
- * it) and sends it at once. Nothing is shown from the file before it's sent: the CSP allows no
- * blob: images. The server checks whatever arrives either way.
+ * Two shapes. ImageUploadCard is a card that sends its image on its own (routes/media.tsx): the
+ * profile's photo, a product's logo on its Edit page. ImageField is one field of a bigger form: the
+ * logo on the new-product form, sent with the rest when it's saved.
+ *
+ * Before hydration both are a plain file input (the card with an Upload button), multipart, so they
+ * work without JavaScript. Once hydrated the input hides behind a button, the whole card or field
+ * takes a dropped image, and either way the image is scaled down in the browser first (a square of
+ * UPLOAD_SIDE, cropped to the middle, as WebP where the browser writes it). Nothing is shown from
+ * the file as an <img>: the CSP allows no blob: images. The field draws its preview on a canvas.
+ * The server checks whatever arrives either way.
  */
 
-import { ImageUp } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { ImagePlus, ImageUp } from 'lucide-react';
+import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefObject } from 'react';
 import { Button as CossButton } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { UPLOAD_SIDE } from '../../lib/media';
+import { cn } from '../../lib/utils';
 import { Button } from './ui';
 
 const ACCEPT = 'image/png,image/jpeg,image/webp,image/gif';
+const NOT_AN_IMAGE = 'That isn’t an image. Use a PNG, JPEG, WebP or GIF.';
 
-/** The file as a centred square at most UPLOAD_SIDE across; null when the browser can't draw it. */
-async function shrink(file: File): Promise<File | null> {
+/** The image drawn as a centred square at most UPLOAD_SIDE across, or into `onto` at its size. */
+async function draw(file: File, onto?: HTMLCanvasElement): Promise<HTMLCanvasElement | null> {
   const bitmap = await createImageBitmap(file);
   const side = Math.min(bitmap.width, bitmap.height);
-  const out = Math.min(side, UPLOAD_SIDE);
-  const canvas = document.createElement('canvas');
+  const canvas = onto ?? document.createElement('canvas');
+  const out = onto ? canvas.width : Math.min(side, UPLOAD_SIDE);
   canvas.width = out;
   canvas.height = out;
   const ctx = canvas.getContext('2d');
@@ -30,6 +38,13 @@ async function shrink(file: File): Promise<File | null> {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, out, out);
   bitmap.close();
+  return canvas;
+}
+
+/** The file scaled down for upload; null when the browser can't draw it (the original goes then). */
+async function shrink(file: File): Promise<File | null> {
+  const canvas = await draw(file);
+  if (!canvas) return null;
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
   if (!blob) return null;
   // A browser that can't write WebP hands back PNG, which is fine too.
@@ -37,12 +52,105 @@ async function shrink(file: File): Promise<File | null> {
   return new File([blob], webp ? 'image.webp' : 'image.png', { type: webp ? 'image/webp' : 'image/png' });
 }
 
-export function ImageUpload(props: { id: string; action: string; field: string; label: string }) {
+/** Puts `file` (scaled down where the browser can) in the file input, as if it had been picked. */
+async function place(input: HTMLInputElement, file: File): Promise<void> {
+  let chosen = file;
+  try {
+    chosen = (await shrink(file)) ?? file;
+  } catch {
+    // Not something this browser can draw: send it as it is, and the server says what's wrong.
+  }
+  const picked = new DataTransfer();
+  picked.items.add(chosen);
+  input.files = picked.files;
+}
+
+/** Hydrated, and the browser can scale an image and set a file input. */
+function useEnhanced(): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(typeof createImageBitmap === 'function' && typeof DataTransfer === 'function'), []);
+  return ready;
+}
+
+/** The drag handlers for a drop target, and whether an image is being dragged over it. */
+function useDrop(enabled: boolean, onFile: (file: File) => void) {
+  const [over, setOver] = useState(false);
+  const depth = useRef(0);
+  const carriesFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  if (!enabled) return { over: false, handlers: {} };
+  return {
+    over,
+    handlers: {
+      onDragEnter: (e: DragEvent) => {
+        if (!carriesFiles(e)) return;
+        e.preventDefault();
+        depth.current += 1;
+        setOver(true);
+      },
+      onDragOver: (e: DragEvent) => {
+        if (!carriesFiles(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      },
+      // Children fire their own enter and leave: only leaving the target itself counts.
+      onDragLeave: () => {
+        depth.current = Math.max(0, depth.current - 1);
+        if (depth.current === 0) setOver(false);
+      },
+      onDrop: (e: DragEvent) => {
+        if (!carriesFiles(e)) return;
+        e.preventDefault();
+        depth.current = 0;
+        setOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) onFile(file);
+      },
+    },
+  };
+}
+
+/** The outline and note over a target while an image is dragged onto it. */
+function DropOverlay(props: { show: boolean; label: string }) {
+  return props.show ? (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-brand/70 bg-background/85 text-body font-medium text-foreground"
+    >
+      {props.label}
+    </span>
+  ) : null;
+}
+
+/** "or drop one here": only where there's a pointer to drag with. */
+function DropHint(props: { show: boolean }) {
+  return props.show ? <span className="hidden text-caption text-muted-foreground pointer-fine:inline">or drop one here</span> : null;
+}
+
+function isImage(file: File): boolean {
+  return /^image\/(png|jpeg|webp|gif)$/.test(file.type);
+}
+
+// ---------- a card that sends its own image ----------
+
+export function ImageUploadCard(props: {
+  id: string;
+  /** Where the image is posted (multipart), and under which field name. */
+  action: string;
+  field: string;
+  /** The button, e.g. "Change photo". */
+  label: string;
+  /** The photo or logo as it is now. */
+  preview: ReactNode;
+  title: string;
+  description: ReactNode;
+  /** More actions beside the button (their own forms): Remove, Use your website's icon. */
+  extra?: ReactNode;
+}) {
   const form = useRef<HTMLFormElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const [ready, setReady] = useState(false);
+  const ready = useEnhanced();
   const [busy, setBusy] = useState(false);
-  useEffect(() => setReady(typeof createImageBitmap === 'function' && typeof DataTransfer === 'function'), []);
+  const [error, setError] = useState<string | null>(null);
   // Back from the page this one posted to (the browser's back button): the button works again.
   useEffect(() => {
     const reset = () => setBusy(false);
@@ -50,50 +158,179 @@ export function ImageUpload(props: { id: string; action: string; field: string; 
     return () => window.removeEventListener('pageshow', reset);
   }, []);
 
-  const send = async () => {
-    const field = input.current;
-    const file = field?.files?.[0];
-    if (!field || !file || !form.current) return;
-    setBusy(true);
-    try {
-      const smaller = await shrink(file);
-      if (smaller) {
-        const picked = new DataTransfer();
-        picked.items.add(smaller);
-        field.files = picked.files;
-      }
-    } catch {
-      // Not something this browser can draw: send it as it is, and the server says what's wrong.
+  const send = async (file: File) => {
+    if (!input.current || !form.current) return;
+    if (!isImage(file)) {
+      setError(NOT_AN_IMAGE);
+      return;
     }
+    setError(null);
+    setBusy(true);
+    await place(input.current, file);
     form.current.requestSubmit();
   };
+  const drop = useDrop(ready && !busy, (file) => void send(file));
 
   return (
-    <form ref={form} method="post" action={props.action} encType="multipart/form-data" className="flex flex-wrap items-center gap-2">
-      <label htmlFor={props.id} className="sr-only">
-        {props.label}
-      </label>
-      <input
-        ref={input}
-        id={props.id}
-        name={props.field}
-        type="file"
-        accept={ACCEPT}
-        required
-        tabIndex={ready ? -1 : undefined}
-        onChange={ready ? () => void send() : undefined}
-        className={ready ? 'sr-only' : 'max-w-full text-body file:mr-3 file:rounded-md file:border file:bg-background file:px-2.5 file:py-1 file:text-body'}
-      />
-      {ready ? (
-        <CossButton type="button" variant="outline" size="sm" disabled={busy} aria-busy={busy || undefined} onClick={() => input.current?.click()}>
-          {busy ? <Spinner aria-hidden="true" role={undefined} aria-label={undefined} className="size-4" /> : <ImageUp />}
-          {busy ? 'Uploading…' : props.label}
-        </CossButton>
-      ) : (
-        <Button variant="secondary" small>
-          Upload
-        </Button>
-      )}
-    </form>
+    <div className="relative flex flex-wrap items-center gap-x-5 gap-y-4" {...drop.handlers}>
+      <DropOverlay show={drop.over} label="Drop to upload" />
+      {props.preview}
+      <div className="grid min-w-0 flex-1 basis-56 gap-3">
+        <div>
+          <h2 className="font-heading text-base">{props.title}</h2>
+          <p className="text-body text-pretty text-muted-foreground">{props.description}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <form ref={form} method="post" action={props.action} encType="multipart/form-data" className="flex flex-wrap items-center gap-2">
+            <label htmlFor={props.id} className="sr-only">
+              {props.label}
+            </label>
+            <input
+              ref={input}
+              id={props.id}
+              name={props.field}
+              type="file"
+              accept={ACCEPT}
+              required
+              tabIndex={ready ? -1 : undefined}
+              onChange={ready ? (e) => e.currentTarget.files?.[0] && void send(e.currentTarget.files[0]) : undefined}
+              className={ready ? 'sr-only' : FILE_INPUT}
+            />
+            {ready ? (
+              <CossButton type="button" variant="outline" size="sm" disabled={busy} aria-busy={busy || undefined} onClick={() => input.current?.click()}>
+                {busy ? <Spinner aria-hidden="true" role={undefined} aria-label={undefined} className="size-4" /> : <ImageUp />}
+                {busy ? 'Uploading…' : props.label}
+              </CossButton>
+            ) : (
+              <Button variant="secondary" small>
+                Upload
+              </Button>
+            )}
+          </form>
+          {props.extra}
+          <DropHint show={ready && !busy} />
+        </div>
+        {error ? (
+          <p role="alert" className="text-caption text-destructive-foreground">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </div>
   );
+}
+
+const FILE_INPUT = 'max-w-full text-body file:mr-3 file:rounded-md file:border file:bg-background file:px-2.5 file:py-1 file:text-body';
+
+// ---------- a field in a bigger form ----------
+
+/**
+ * An optional image in a form that posts as multipart: a tile (initials until one is chosen, then
+ * a preview drawn on a canvas), Choose, and Remove to go back to none. The form sends the file with
+ * the rest.
+ */
+export function ImageField(props: {
+  id: string;
+  name: string;
+  label: string;
+  /** Shown while nothing is chosen, e.g. the product's initials or an icon. */
+  placeholder: ReactNode;
+  help?: ReactNode;
+  error?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const ready = useEnhanced();
+  const [chosen, setChosen] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const choose = async (file: File) => {
+    if (!input.current) return;
+    if (!isImage(file)) {
+      setProblem(NOT_AN_IMAGE);
+      return;
+    }
+    setProblem(null);
+    await place(input.current, file);
+    setChosen(await preview(canvas, file));
+  };
+  const clear = () => {
+    if (input.current) input.current.value = '';
+    setChosen(false);
+  };
+  const drop = useDrop(ready, (file) => void choose(file));
+  const message = problem ?? props.error;
+  const helpId = `${props.id}-help`;
+
+  return (
+    <div className="mb-5 grid gap-2" data-slot="field" data-invalid={message ? '' : undefined}>
+      <label htmlFor={props.id} className="text-body font-medium">
+        {props.label} <span className="font-normal text-faint">(optional)</span>
+      </label>
+      <div className="relative flex flex-wrap items-center gap-4 rounded-xl" {...drop.handlers}>
+        <DropOverlay show={drop.over} label="Drop to use it" />
+        {ready ? (
+          <span className="relative size-16 shrink-0">
+            {/* The preview: drawn, never loaded, so the CSP's img-src needs nothing new. */}
+            <canvas
+              ref={canvas}
+              width={128}
+              height={128}
+              aria-hidden="true"
+              className={cn('size-16 rounded-2xl bg-muted outline -outline-offset-1 outline-foreground/10', !chosen && 'hidden')}
+            />
+            {chosen ? null : props.placeholder}
+          </span>
+        ) : null}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <input
+            ref={input}
+            id={props.id}
+            name={props.name}
+            type="file"
+            accept={ACCEPT}
+            tabIndex={ready ? -1 : undefined}
+            aria-describedby={props.help ? helpId : undefined}
+            aria-invalid={message ? true : undefined}
+            onChange={ready ? (e) => e.currentTarget.files?.[0] && void choose(e.currentTarget.files[0]) : undefined}
+            className={ready ? 'sr-only' : FILE_INPUT}
+          />
+          {ready ? (
+            <>
+              <CossButton type="button" variant="outline" size="sm" onClick={() => input.current?.click()}>
+                <ImagePlus />
+                {chosen ? 'Choose another' : 'Choose a logo'}
+              </CossButton>
+              {chosen ? (
+                <CossButton type="button" variant="ghost" size="sm" onClick={clear}>
+                  Remove
+                </CossButton>
+              ) : null}
+              <DropHint show />
+            </>
+          ) : null}
+        </div>
+      </div>
+      {message ? (
+        <p role="alert" className="text-caption text-destructive-foreground">
+          {message}
+        </p>
+      ) : null}
+      {props.help ? (
+        <p id={helpId} className="text-caption text-muted-foreground">
+          {props.help}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Draws the chosen image on the preview canvas; false when it can't be drawn. */
+async function preview(canvas: RefObject<HTMLCanvasElement | null>, file: File): Promise<boolean> {
+  if (!canvas.current) return false;
+  try {
+    return (await draw(file, canvas.current)) !== null;
+  } catch {
+    return false;
+  }
 }

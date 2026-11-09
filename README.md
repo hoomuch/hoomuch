@@ -206,7 +206,8 @@ say) and publishes it:
   revenue, MRR and total. Publishing a product needs a founder profile, and the profile is public
   while at least one of their products is.
 - **Photos and logos**, with the `MEDIA` bucket: a founder can upload a photo, and a product gets its
-  website's icon when it's saved with a website, or a logo its owner uploads. They're served from
+  website's icon when it's saved with a website, or a logo its owner uploads (on the new-product form
+  too). An image can be dragged onto the photo or logo card. They're served from
   your own domain at `/media/<key>` (so the pages' `img-src 'self'` still holds), checked by their
   bytes (PNG, JPEG, WebP or GIF; ICO from a website; never SVG), at most 2 MB and 4096 pixels a side,
   and stored without their metadata (a phone photo's location and camera details are taken out). A

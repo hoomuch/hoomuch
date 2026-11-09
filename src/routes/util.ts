@@ -43,10 +43,12 @@ export interface FormFields {
   secret(name: string, max?: number): string;
   /** Every value posted under `name` (checkbox groups), trimmed, at most `limit` of them. */
   all(name: string, max?: number, limit?: number): string[];
+  /** The file posted under `name` (a multipart form's file field), or null when none was chosen. */
+  file(name: string): File | null;
 }
 
 /**
- * Parses urlencoded / multipart bodies, keeping only string values (File parts are ignored).
+ * Parses urlencoded / multipart bodies: string values, and a multipart form's files apart (`file`).
  * A malformed body is the client's fault: 400, not a logged 500.
  */
 export async function readForm(c: AppContext): Promise<FormFields> {
@@ -62,10 +64,16 @@ export async function readForm(c: AppContext): Promise<FormFields> {
     if (list.length > 0) values.set(k, list);
   }
   const last = (name: string) => values.get(name)?.at(-1) ?? '';
+  const files = new Map<string, File>();
+  for (const [k, v] of Object.entries(body)) {
+    const file = (Array.isArray(v) ? v : [v]).find((x): x is File => x instanceof File && x.size > 0);
+    if (file) files.set(k, file);
+  }
   return {
     text: (name, max = 256) => last(name).trim().slice(0, max),
     secret: (name, max = 1024) => last(name).slice(0, max),
     all: (name, max = 256, limit = 50) => (values.get(name) ?? []).slice(0, limit).map((v) => v.trim().slice(0, max)),
+    file: (name) => files.get(name) ?? null,
   };
 }
 

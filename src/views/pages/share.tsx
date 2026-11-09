@@ -10,7 +10,7 @@
  * and publishes.
  */
 
-import { ArrowUpRight, ChevronRight, Link2, Pencil, Plus, UserRound } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, ImagePlus, Link2, Pencil, Plus, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button as CossButton } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import { cn } from '../../lib/utils';
 import { BIO_MAX, DISPLAY_NAME_MAX, HANDLE_MAX, NAME_MAX, SLUG_MAX, TAGLINE_MAX, WEBSITE_MAX } from '../../lib/public-pages';
 import { Avatar, ProductTile } from '../components/avatar';
 import { CopyField } from '../components/copy-field';
-import { ImageUpload } from '../components/image-upload';
+import { ImageField, ImageUploadCard } from '../components/image-upload';
 import { EmptyState } from '../components/empty-state';
 import { XMark } from '../components/icons';
 import { ProviderLogo } from '../components/provider-logos';
@@ -78,6 +78,8 @@ export interface ShareFormValues {
 }
 
 export interface ShareFormErrors {
+  /** The logo chosen on the new-product form (not kept after an error: a browser can't refill a file field). */
+  logo?: string;
   name?: string;
   slug?: string;
   website?: string;
@@ -585,15 +587,16 @@ function LogoCard(props: { product: ShareProduct }) {
           : 'Initials for now. Upload a logo, or add the product’s website below and its icon is used.';
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-        <ProductTile name={p.name} src={p.logo} className="size-16 rounded-2xl font-heading text-title" />
-        <div className="grid min-w-0 flex-1 basis-56 gap-3">
-          <div>
-            <h2 className="font-heading text-base">Logo</h2>
-            <p className="text-body text-pretty text-muted-foreground">{where}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ImageUpload id={`logo-${p.id}`} action={base} field="logo" label={p.logoSource === 'upload' ? 'Change logo' : 'Upload a logo'} />
+      <ImageUploadCard
+        id={`logo-${p.id}`}
+        action={base}
+        field="logo"
+        label={p.logoSource === 'upload' ? 'Change logo' : 'Upload a logo'}
+        preview={<ProductTile name={p.name} src={p.logo} className="size-16 rounded-2xl font-heading text-title" />}
+        title="Logo"
+        description={where}
+        extra={
+          <>
             {p.website && p.logoSource !== 'site' ? (
               <form method="post" action={`${base}/site`}>
                 <Button variant="ghost" small busyLabel="Fetching…">
@@ -608,9 +611,9 @@ function LogoCard(props: { product: ShareProduct }) {
                 </Button>
               </form>
             ) : null}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
     </Card>
   );
 }
@@ -638,6 +641,7 @@ function NewProductView(props: SharePageProps) {
               origin={props.origin}
               submitLabel="Save product"
               cancel="/share"
+              logo={Boolean(props.media)}
             />
           </Card>
         ) : (
@@ -666,11 +670,13 @@ function ProductForm(props: {
   submitLabel: string;
   /** Where Cancel goes. */
   cancel: string;
+  /** Ask for a logo too (a new product, where the instance keeps images): the form posts as multipart. */
+  logo?: boolean;
 }) {
   const v = props.values;
   const errors = props.failed?.fieldErrors ?? {};
   const formError = props.failed && Object.keys(errors).length === 0 ? props.failed.error : null;
-  const focus = formError ? 'form' : errors.name ? 'name' : errors.slug ? 'slug' : errors.website ? 'website' : null;
+  const focus = formError ? 'form' : errors.name ? 'name' : errors.slug ? 'slug' : errors.website ? 'website' : errors.logo ? 'logo' : null;
   const id = (name: string) => `${props.idPrefix}-${name}`;
   const picked = new Set(v?.connections ?? []);
   const rows = props.connections.map((c) => ({
@@ -680,8 +686,22 @@ function ProductForm(props: {
   const free = rows.filter((r) => r.elsewhere === undefined);
   const taken = rows.filter((r) => r.elsewhere !== undefined);
   return (
-    <form method="post" action={props.action}>
+    <form method="post" action={props.action} encType={props.logo ? 'multipart/form-data' : undefined}>
       <FormError message={formError} autoFocus={focus === 'form'} />
+      {props.logo ? (
+        <ImageField
+          id={id('logo')}
+          name="logo"
+          label="Logo"
+          error={errors.logo}
+          placeholder={
+            <span aria-hidden="true" className="flex size-16 items-center justify-center rounded-2xl border border-dashed text-muted-foreground">
+              <ImagePlus className="size-6" />
+            </span>
+          }
+          help="A square works best. Leave it empty and the product’s website icon is used, if it has one."
+        />
+      ) : null}
       <Field
         id={id('name')}
         name="name"
@@ -793,25 +813,24 @@ function ProfileView(props: SharePageProps) {
       <div className="grid gap-6">
         {p && props.media ? (
           <Card>
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-              <Avatar name={p.displayName} src={p.avatar} className="size-20 font-heading text-section-sm" />
-              <div className="grid min-w-0 flex-1 basis-56 gap-3">
-                <div>
-                  <h2 className="font-heading text-base">Photo</h2>
-                  <p className="text-body text-muted-foreground">On your profile, your product pages and Explore. A square works best.</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <ImageUpload id="profile-photo" action="/share/profile/photo" field="photo" label={p.avatar ? 'Change photo' : 'Add a photo'} />
-                  {p.avatar ? (
-                    <form method="post" action="/share/profile/photo/delete">
-                      <Button variant="ghost" small>
-                        Remove
-                      </Button>
-                    </form>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <ImageUploadCard
+              id="profile-photo"
+              action="/share/profile/photo"
+              field="photo"
+              label={p.avatar ? 'Change photo' : 'Add a photo'}
+              preview={<Avatar name={p.displayName} src={p.avatar} className="size-20 font-heading text-section-sm" />}
+              title="Photo"
+              description="On your profile, your product pages and Explore. A square works best."
+              extra={
+                p.avatar ? (
+                  <form method="post" action="/share/profile/photo/delete">
+                    <Button variant="ghost" small>
+                      Remove
+                    </Button>
+                  </form>
+                ) : null
+              }
+            />
           </Card>
         ) : null}
         <Card>
