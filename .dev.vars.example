@@ -12,8 +12,8 @@ ENCRYPTION_KEY=
 # In production: wrangler secret put TURNSTILE_SECRET_KEY
 # TURNSTILE_SECRET_KEY=
 
-# Optional: email verification. With a Resend API key set, sign-up mails a confirmation link and
-# holds the new account at "check your inbox" until it's used. Set MAIL_FROM in wrangler.jsonc
+# Optional: email. With a Resend API key set, sign-up mails a confirmation link and holds the new
+# account at "check your inbox" until it's used, and Settings offers an email digest. Set MAIL_FROM in wrangler.jsonc
 # (vars) to a sender on a domain you verified in Resend, and turn click tracking off for that
 # domain so the link isn't rewritten. Locally, Resend's sandbox sender works for your own address:
 #   MAIL_FROM=onboarding@resend.dev (in a local override of vars)

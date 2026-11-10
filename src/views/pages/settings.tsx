@@ -1,4 +1,4 @@
-/** Settings (GET /settings): display currency, time zone, password, session (log out), account deletion. Owner: Experience (pages). */
+/** Settings (GET /settings): display currency, time zone, email digest, password, session (log out), account deletion. Owner: Experience (pages). */
 
 import { PASSWORD_MIN } from '../../lib/password-policy';
 import { SUPPORTED_CURRENCIES } from '../../lib/money';
@@ -19,11 +19,18 @@ export interface SettingsPageProps {
   timeZoneSource?: 'default' | 'inferred' | 'chosen';
   /** Every zone to offer (from the server, so the browser hydrates the same list). */
   timeZones?: string[];
+  /** The email digest's rhythm. Absent on an instance that sends no mail: the card isn't shown. */
+  digest?: 'off' | 'weekly';
   /** Errors from a failed password change (re-rendered with 422). */
   password?: { error?: string | null; fieldErrors?: { current?: string; next?: string } };
   /** Errors from a failed account deletion (re-rendered with 422). */
   deleteAccount?: { error?: string | null; fieldErrors?: { password?: string; confirm?: string } };
 }
+
+const DIGEST_OPTIONS = [
+  { value: 'off', label: 'Never' },
+  { value: 'weekly', label: 'Every Monday, with last week’s numbers' },
+] as const;
 
 let currencyNames: Intl.DisplayNames | null | undefined;
 
@@ -98,6 +105,29 @@ export function SettingsPage(props: SettingsPageProps) {
             <Button variant="secondary">Save time zone</Button>
           </form>
         </Card>
+
+        {props.digest ? (
+          <Card
+            id="email-digest"
+            title="Email digest"
+            description="Last week’s revenue, MRR, subscriptions and trials in your inbox every Monday, around 8:00 in your time zone."
+          >
+            <form method="post" action="/settings/digest">
+              <SelectField
+                name="digest"
+                label="Send it"
+                options={DIGEST_OPTIONS}
+                value={props.digest}
+                help={
+                  <>
+                    Goes to <span className="wrap-anywhere">{props.chrome.user?.email}</span>. Every email has a link that stops it.
+                  </>
+                }
+              />
+              <Button variant="secondary">Save digest</Button>
+            </form>
+          </Card>
+        ) : null}
 
         <Card id="change-password" title="Change password" description="Changing it logs you out on other devices.">
           <form method="post" action="/settings/password">

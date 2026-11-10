@@ -12,6 +12,8 @@
 import type { ConnectionRow } from '../db/queries';
 import type { DailyRevenuePoint, MetricsSnapshot, RevenueEvent } from '../providers/types';
 import { rangeBounds, type DayRange } from './aggregate';
+import { emptyMovement, parseState, type Movement, type MovementPart, type SubscriptionState } from './movement';
+import { parseMoneyMap } from '../lib/money';
 
 /** Rows per bulk statement. */
 const BULK_MAX_ROWS = 200;
@@ -215,6 +217,76 @@ export function insertSnapshotHistory(
       )
       .bind(connectionId, capturedAt, json),
   );
+}
+
+// ---------- MRR movement (migration 0019) ----------
+
+interface MovementRow {
+  new_mrr: string;
+  new_count: number;
+  expansion_mrr: string;
+  expansion_count: number;
+  contraction_mrr: string;
+  contraction_count: number;
+  churned_mrr: string;
+  churned_count: number;
+}
+
+/** A stored `mrr_movements` row as a Movement. */
+export function movementOfRow(r: MovementRow): Movement {
+  const part = (mrr: string, count: number): MovementPart => ({ mrr: parseMoneyMap(mrr), count });
+  return {
+    new: part(r.new_mrr, r.new_count),
+    expansion: part(r.expansion_mrr, r.expansion_count),
+    contraction: part(r.contraction_mrr, r.contraction_count),
+    churned: part(r.churned_mrr, r.churned_count),
+  };
+}
+
+/**
+ * What the movement diff starts from, in one round trip: the connection's list of subscriptions as
+ * of its last sync (null when there's none, or it can't be read) and `day`'s movement so far.
+ */
+export async function readMovementState(
+  db: D1Database,
+  connectionId: string,
+  day: string,
+): Promise<{ state: SubscriptionState | null; since: string | null; today: Movement }> {
+  const [stateR, dayR] = await db.batch([
+    db.prepare('SELECT since, state FROM subscription_states WHERE connection_id = ?').bind(connectionId),
+    db.prepare('SELECT * FROM mrr_movements WHERE connection_id = ? AND day = ?').bind(connectionId, day),
+  ]);
+  const s = (stateR?.results?.[0] ?? null) as { since: string; state: string } | null;
+  const d = (dayR?.results?.[0] ?? null) as MovementRow | null;
+  const state = s ? parseState(s.state) : null;
+  return { state, since: state && s ? s.since : null, today: d ? movementOfRow(d) : emptyMovement() };
+}
+
+/** The list as of this sync. `since` is kept from the first one stored. */
+export function upsertSubscriptionState(db: D1Database, connectionId: string, since: string, stateJson: string, now: number): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO subscription_states (connection_id, since, updated_at, state) VALUES (?, ?, ?, ?)
+       ON CONFLICT(connection_id) DO UPDATE SET since = excluded.since, updated_at = excluded.updated_at, state = excluded.state`,
+    )
+    .bind(connectionId, since, now, stateJson);
+}
+
+/** A day's movement, replacing what was stored for it. */
+export function upsertMovement(db: D1Database, connectionId: string, day: string, m: Movement): D1PreparedStatement {
+  const j = (p: MovementPart) => JSON.stringify(p.mrr);
+  return db
+    .prepare(
+      `INSERT INTO mrr_movements (connection_id, day, new_mrr, new_count, expansion_mrr, expansion_count,
+                                  contraction_mrr, contraction_count, churned_mrr, churned_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(connection_id, day) DO UPDATE SET
+         new_mrr = excluded.new_mrr, new_count = excluded.new_count,
+         expansion_mrr = excluded.expansion_mrr, expansion_count = excluded.expansion_count,
+         contraction_mrr = excluded.contraction_mrr, contraction_count = excluded.contraction_count,
+         churned_mrr = excluded.churned_mrr, churned_count = excluded.churned_count`,
+    )
+    .bind(connectionId, day, j(m.new), m.new.count, j(m.expansion), m.expansion.count, j(m.contraction), m.contraction.count, j(m.churned), m.churned.count);
 }
 
 // ---------- transactions & daily revenue ----------

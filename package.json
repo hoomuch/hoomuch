@@ -57,10 +57,10 @@
         "description": "Optional secret. The secret key of the same Turnstile widget."
       },
       "MAIL_FROM": {
-        "description": "Optional. Sender of the sign-up confirmation email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set."
+        "description": "Optional. Sender of hoomuch's emails (sign-up confirmation, the digest), on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set."
       },
       "RESEND_API_KEY": {
-        "description": "Optional secret. A Resend API key with sending access. When set, new accounts must confirm their email address before using hoomuch. Leave empty to keep it off."
+        "description": "Optional secret. A Resend API key with sending access. When set, new accounts must confirm their email address before using hoomuch, and people can turn on an email digest of their numbers. Leave empty to keep it off."
       },
       "PUBLIC_PAGES": {
         "description": "Optional. `true` lets owners publish a product's verified revenue on a public page with an embeddable badge. Leave empty to keep it off."

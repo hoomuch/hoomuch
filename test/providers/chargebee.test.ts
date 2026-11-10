@@ -13,7 +13,7 @@ import {
 import { ProviderError } from '../../src/providers/types';
 import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { isStaleCursorError } from '../../src/sync/errors';
-import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, recordSleeps, route, type RecordedCall, type Route } from '../fixtures/harness';
+import { expectNoSecretsInLogs, expectSubscriptionsAddUp, fakeFetch, makeCtx, NOW, recordSleeps, route, type RecordedCall, type Route } from '../fixtures/harness';
 // Sample objects from https://apidocs.chargebee.com/docs/api (API v2, Product Catalog 2.0), verbatim except that
 // the docs' `{..}` elision placeholders were removed from the two list samples.
 import subscriptionFx from '../fixtures/chargebee/subscription.json';
@@ -349,7 +349,9 @@ describe('chargebee fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      subscriptions: expect.any(Array),
     });
+    expectSubscriptionsAddUp(snap);
     expect(calls.map((c) => [params(c).get('status[in]'), params(c).get('status[is]')])).toEqual([
       ['["active","non_renewing"]', null],
       [null, 'in_trial'],

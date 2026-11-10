@@ -118,6 +118,66 @@ export async function setInferredCurrency(db: D1Database, userId: string, curren
   return (r.meta?.changes ?? 0) > 0;
 }
 
+// ---------- email digest (migration 0018) ----------
+
+export type DigestKind = 'off' | 'weekly';
+
+export interface DigestUserRow {
+  id: string;
+  email: string;
+  email_verified_at: number | null;
+  base_currency: string;
+  timezone: string;
+  digest: DigestKind;
+  digest_next_at: number | null;
+  digest_sent_day: string | null;
+  digest_origin: string | null;
+}
+
+const DIGEST_COLS = 'id, email, email_verified_at, base_currency, timezone, digest, digest_next_at, digest_sent_day, digest_origin';
+
+export function getDigestUser(db: D1Database, userId: string): Promise<DigestUserRow | null> {
+  return db.prepare(`SELECT ${DIGEST_COLS} FROM users WHERE id = ?`).bind(userId).first<DigestUserRow>();
+}
+
+/** Turns the digest on, off or to another rhythm. `nextAt` and `origin` are null when it's off. */
+export async function setUserDigest(
+  db: D1Database,
+  userId: string,
+  d: { kind: DigestKind; nextAt: number | null; origin: string | null },
+): Promise<void> {
+  await db
+    .prepare('UPDATE users SET digest = ?, digest_next_at = ?, digest_origin = COALESCE(?, digest_origin), updated_at = ? WHERE id = ?')
+    .bind(d.kind, d.nextAt, d.origin, Date.now(), userId)
+    .run();
+}
+
+/** Users whose digest is due, earliest first. */
+export async function selectDueDigests(db: D1Database, now: number, limit: number): Promise<DigestUserRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT ${DIGEST_COLS} FROM users
+        WHERE digest_next_at IS NOT NULL AND digest_next_at <= ? AND digest != 'off'
+        ORDER BY digest_next_at LIMIT ?`,
+    )
+    .bind(now, limit)
+    .all<DigestUserRow>();
+  return results ?? [];
+}
+
+/**
+ * Moves a due digest to its next time and reports whether this caller moved it: two cron ticks
+ * racing for one user queue one mail.
+ */
+export function claimDigest(db: D1Database, userId: string, dueAt: number, nextAt: number): D1PreparedStatement {
+  return db.prepare('UPDATE users SET digest_next_at = ? WHERE id = ? AND digest_next_at = ? RETURNING id').bind(nextAt, userId, dueAt);
+}
+
+/** Records the local day a digest went out on. */
+export async function markDigestSent(db: D1Database, userId: string, day: string): Promise<void> {
+  await db.prepare('UPDATE users SET digest_sent_day = ? WHERE id = ?').bind(day, userId).run();
+}
+
 export async function updateUserPassword(db: D1Database, userId: string, passwordHash: string): Promise<void> {
   await db
     .prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')

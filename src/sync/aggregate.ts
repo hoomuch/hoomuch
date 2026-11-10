@@ -11,7 +11,8 @@
 import { normalizeCurrency, type MoneyMap } from '../lib/money';
 import { DAY, UTC, addDays, dayKey, dayStart, zonedDayKey, zonedDayStart } from '../lib/time';
 import { sanitizeErrorText } from '../providers/http';
-import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent } from '../providers/types';
+import type { DailyRevenuePoint, MetricsSnapshot, ProductMrr, RevenueEvent, SubscriptionMrr } from '../providers/types';
+import { MAX_TRACKED_SUBSCRIPTIONS } from './movement';
 
 /**
  * The first sync covers this many days INCLUDING today, in the owner's zone (SPEC F-07): exactly the dashboard's
@@ -216,6 +217,25 @@ export function cleanProductMrr(input: unknown): { products: ProductMrr[]; dropp
 }
 
 /**
+ * A snapshot's list of subscriptions (`MetricsSnapshot.subscriptions`) for the movement diff. All
+ * of it or nothing: a list with an entry that can't be read, or longer than
+ * MAX_TRACKED_SUBSCRIPTIONS, is null, because a partial list would read as churn.
+ */
+export function cleanSubscriptions(input: unknown): SubscriptionMrr[] | null {
+  if (!Array.isArray(input) || input.length > MAX_TRACKED_SUBSCRIPTIONS) return null;
+  const out: SubscriptionMrr[] = [];
+  for (const raw of input) {
+    if (!isRecord(raw)) return null;
+    const id = raw['id'];
+    const currency = cleanCurrency(raw['currency']);
+    const mrr = nonNegativeInt(raw['mrr']);
+    if (typeof id !== 'string' || id === '' || id.length > MAX_EXTERNAL_ID_LENGTH || !currency || mrr === null) return null;
+    out.push({ id, currency, mrr });
+  }
+  return out;
+}
+
+/**
  * A snapshot's warnings as stored: strings only, one line each, key-like text masked, capped in
  * length and number, duplicates dropped. Null when nothing is left.
  */
@@ -255,6 +275,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
   const days = nonNegativeInt(input['revenuePeriodDays']);
   const byProduct = cleanProductMrr(input['mrrByProduct']);
   const warnings = cleanWarnings(input['warnings']);
+  const subscriptions = cleanSubscriptions(input['subscriptions']);
   return {
     snapshot: {
       mrr: mrr.map,
@@ -264,6 +285,7 @@ export function cleanSnapshot(input: unknown): { snapshot: MetricsSnapshot; drop
       revenuePeriodDays: period && days ? days : null,
       newCustomers: nonNegativeInt(input['newCustomers']),
       mrrByProduct: byProduct ? byProduct.products : null,
+      ...(subscriptions ? { subscriptions } : {}),
       ...(warnings ? { warnings } : {}),
     },
     dropped: mrr.dropped + (period?.dropped ?? 0) + (byProduct?.dropped ?? 0),

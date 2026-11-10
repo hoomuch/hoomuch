@@ -15,7 +15,7 @@ import { addDays, DAY, UTC, zonedDayKey, zonedDayStart } from '../lib/time';
 import { getProviderMeta } from '../providers/registry';
 import type { ProviderId } from '../providers/types';
 import { FxConverter, FxHistory, LATEST_FX_SQL, LATEST_LOOKBACK_DAYS, latestFx, slimRatesSql, type FxRow } from '../sync/fx';
-import { rowsOf, type TransactionPage, type TransactionRow } from './types';
+import { EXPORT_MAX_ROWS, rowsOf, type TransactionPage, type TransactionRow } from './types';
 
 const TRANSACTIONS_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -31,6 +31,7 @@ interface Row {
   type: 'charge' | 'refund';
   amount: number;
   currency: string;
+  fee: number | null;
   description: string | null;
 }
 
@@ -57,6 +58,30 @@ export function parseCursor(v: string | undefined | null): TransactionCursor | n
   if (!m) return null;
   const at = Number(m[1]);
   return Number.isSafeInteger(at) ? { at, connectionId: m[2]!, externalId: m[3]! } : null;
+}
+
+/** A stored row as the page and the export show it: converted at the rate of the day the money moved (SPEC §6). */
+function toRow(r: Row, cv: FxConverter, tz: string): TransactionRow {
+  const meta = getProviderMeta(r.provider);
+  const original = normalizeCurrency(r.currency);
+  const day = zonedDayKey(r.occurred_at, tz);
+  const fee = typeof r.fee === 'number' && r.fee > 0 ? r.fee : null;
+  return {
+    connectionId: r.connection_id,
+    connectionName: r.connection_name,
+    provider: r.provider,
+    color: meta.color,
+    dotClass: meta.dotClass,
+    externalId: r.external_id,
+    occurredAt: r.occurred_at,
+    type: r.type,
+    amount: r.amount,
+    originalCurrency: original,
+    displayAmount: cv.tryAmountOn(r.amount, original, day),
+    fee,
+    displayFee: fee === null ? null : cv.tryAmountOn(fee, original, day),
+    description: r.description,
+  };
 }
 
 export async function listTransactions(
@@ -124,7 +149,14 @@ export async function listTransactions(
     ...spanBinds, ...cursorBinds, pageSize + 1, offset,
   ];
   const [pageR, fxR, histR] = await db.batch([
-    db.prepare(`${withConns} ${pageSql}`).bind(...pageBinds),
+    // The fee isn't in idx_transactions_cover, so it's looked up by primary key, for the page's rows only.
+    db
+      .prepare(
+        `${withConns}
+         SELECT p.*, (SELECT x.fee FROM transactions x WHERE x.connection_id = p.connection_id AND x.external_id = p.external_id) AS fee
+           FROM (${pageSql}) p`,
+      )
+      .bind(...pageBinds),
     db.prepare(LATEST_FX_SQL),
     // The rates of the page's currencies on its days, the lookback before them, and the oldest
     // stored day: FxHistory.rateOn falls back to it for a day older than every stored rate.
@@ -151,25 +183,7 @@ export async function listTransactions(
   // Newer pages were read nearest-first: the rows next to the cursor, then turned the list's way.
   const rows = newer ? read.slice(0, pageSize).reverse() : read.slice(0, pageSize);
   const cv = new FxConverter(currency, latestFx(rowsOf<FxRow>(fxR)), new FxHistory(rowsOf<FxRow>(histR)));
-  const items: TransactionRow[] = rows.map((r) => {
-    const meta = getProviderMeta(r.provider);
-    const original = normalizeCurrency(r.currency);
-    return {
-      connectionId: r.connection_id,
-      connectionName: r.connection_name,
-      provider: r.provider,
-      color: meta.color,
-      dotClass: meta.dotClass,
-      externalId: r.external_id,
-      occurredAt: r.occurred_at,
-      type: r.type,
-      amount: r.amount,
-      originalCurrency: original,
-      // At the rate of the day the money moved (SPEC §6).
-      displayAmount: cv.tryAmountOn(r.amount, original, zonedDayKey(r.occurred_at, tz)),
-      description: r.description,
-    };
-  });
+  const items = rows.map((r) => toRow(r, cv, tz));
 
   // A page read newer than a cursor has the cursor's own row after it.
   const hasMore = newer ? items.length > 0 : read.length > pageSize;
@@ -187,4 +201,62 @@ export async function listTransactions(
     nextCursor: hasMore && last ? at(last) : null,
     prevCursor: page > 1 && first ? at(first) : null,
   };
+}
+
+export interface TransactionExport {
+  /** Display currency the converted columns are in. */
+  currency: string;
+  /** Newest first, at most EXPORT_MAX_ROWS. */
+  items: TransactionRow[];
+  /** The period holds more than EXPORT_MAX_ROWS: nothing is exported, the caller asks for a shorter one. */
+  tooMany: boolean;
+}
+
+/**
+ * Every transaction on the user's local days `from`..`to` (already validated), for the CSV export:
+ * one D1 round trip, like the page. Providers that report daily totals have no rows here.
+ */
+export async function exportTransactions(
+  env: Bindings,
+  user: SessionUser,
+  opts: { provider: ProviderId | null; from: string; to: string },
+): Promise<TransactionExport> {
+  const currency = normalizeCurrency(user.baseCurrency || 'USD');
+  const tz = user.timeZone || UTC;
+  const lo = zonedDayStart(opts.from, tz);
+  const hi = zonedDayStart(addDays(opts.to, 1), tz);
+  const conns = opts.provider ? 'c.user_id = ? AND c.provider = ?' : 'c.user_id = ?';
+  const connBinds = opts.provider ? [user.id, opts.provider] : [user.id];
+  const inPeriod = `FROM connections c JOIN transactions t ON t.connection_id = c.id AND t.occurred_at >= ? AND t.occurred_at < ?
+                   WHERE ${conns}`;
+  const db = env.DB;
+  const [rowsR, fxR, histR] = await db.batch([
+    db
+      .prepare(
+        `SELECT t.connection_id, c.name AS connection_name, c.provider, t.external_id, t.occurred_at,
+                t.type, t.amount, t.currency, t.fee, t.description
+           ${inPeriod}
+          ORDER BY t.occurred_at DESC, t.connection_id, t.external_id DESC
+          LIMIT ?`,
+      )
+      .bind(lo, hi, ...connBinds, EXPORT_MAX_ROWS + 1),
+    db.prepare(LATEST_FX_SQL),
+    // The period's rates for its own currencies, the lookback before it, and the oldest stored day
+    // (FxHistory.rateOn falls back to it), as for the page.
+    db
+      .prepare(
+        `WITH need(cur) AS MATERIALIZED (SELECT DISTINCT t.currency ${inPeriod} UNION SELECT ?)
+         SELECT f.day, f.base, ${slimRatesSql('f.rates', 'need')} AS rates
+           FROM fx_rates f
+          WHERE f.rates != '{}'
+            AND ((f.day >= date(? / 1000 - ?, 'unixepoch') AND f.day <= date(? / 1000 + ?, 'unixepoch'))
+                 OR f.day = (SELECT MIN(day) FROM fx_rates WHERE rates != '{}'))
+          ORDER BY f.day`,
+      )
+      .bind(lo, hi, ...connBinds, currency, lo, ((LATEST_LOOKBACK_DAYS + 1) * DAY) / 1000, hi, DAY / 1000),
+  ]);
+  const rows = rowsOf<Row>(rowsR);
+  if (rows.length > EXPORT_MAX_ROWS) return { currency, items: [], tooMany: true };
+  const cv = new FxConverter(currency, latestFx(rowsOf<FxRow>(fxR)), new FxHistory(rowsOf<FxRow>(histR)));
+  return { currency, items: rows.map((r) => toRow(r, cv, tz)), tooMany: false };
 }

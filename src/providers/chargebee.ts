@@ -65,6 +65,7 @@ import {
   ProviderError,
   type ConnectionInput,
   type MetricsSnapshot,
+  type SubscriptionMrr,
   type ProviderAdapter,
   type ProviderContext,
   type RevenueEvent,
@@ -290,6 +291,7 @@ interface CbAddon {
 }
 
 interface CbSubscription {
+  id?: string;
   status?: string;
   deleted?: boolean;
   currency_code?: string;
@@ -373,6 +375,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   let activeSubscriptions = 0;
   let zeroMrr = 0;
   let skipped = 0;
+  // Each paying subscription's own MRR, for the engine's movement diff (SPEC F-26). Dropped when
+  // one comes without an id: a partial list would read as churn.
+  let subscriptions: SubscriptionMrr[] | null = [];
 
   for await (const raw of paginate(ctx, conn, '/subscriptions', { 'status[in]': '["active","non_renewing"]' }, 'subscription', 'subscriptions')) {
     if (!isObject(raw)) {
@@ -403,6 +408,8 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     }
     activeSubscriptions += 1;
     addToMoney(mrr, currency, amount);
+    if (typeof sub.id === 'string' && sub.id) subscriptions?.push({ id: sub.id, currency, mrr: amount });
+    else subscriptions = null;
   }
 
   let activeTrials = 0;
@@ -427,6 +434,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(subscriptions ? { subscriptions } : {}),
     ...(stats.unpriced > 0 ? { warnings: [chargebeeUnpricedItemsWarning(stats.unpriced)] } : {}),
   };
 }

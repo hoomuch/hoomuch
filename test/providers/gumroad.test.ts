@@ -312,6 +312,7 @@ const EMPTY_SNAPSHOT = {
   revenuePeriod: null,
   revenuePeriodDays: null,
   newCustomers: null,
+  subscriptions: [],
 };
 
 describe('gumroad fetchSnapshot', () => {
@@ -329,6 +330,7 @@ describe('gumroad fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      subscriptions: [{ id: sub.id, currency: 'USD', mrr: 1000 }],
     });
     expect(pathsOf(calls)).toEqual(['/v2/products', `/v2/products/${p.id}/subscribers`, '/v2/sales']);
     expect(new URL(calls[2]!.url).searchParams.get('after')).toBe(new Date(NOW - RECENT_CHARGES_MS).toISOString().slice(0, 10));

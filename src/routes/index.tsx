@@ -9,6 +9,7 @@ import type { AppEnv } from '../env';
 import { registerAuthRoutes } from './auth';
 import { registerConnectionRoutes } from './connections';
 import { registerDashboardRoutes } from './dashboard';
+import { registerDigestRoutes } from './digest';
 import { registerErrorHandlers } from './errors';
 import { registerLegalRoutes } from './legal';
 import { registerMediaRoutes } from './media';
@@ -25,6 +26,7 @@ export function registerRoutes(app: Hono<AppEnv>): void {
   registerConnectionRoutes(app);
   registerTransactionRoutes(app);
   registerSettingsRoutes(app);
+  registerDigestRoutes(app);
   registerWebhookRoutes(app);
   registerPublicRoutes(app);
   registerMediaRoutes(app);

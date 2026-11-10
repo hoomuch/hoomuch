@@ -168,6 +168,9 @@ export function Layout(props: LayoutProps) {
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#0f1013" media="(prefers-color-scheme: dark)" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        {/* Add to Home Screen: the dashboard opens in its own window (public/manifest.webmanifest). */}
+        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+        <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossOrigin="" />
         <link rel="stylesheet" href="/app.css" />
         {/* Same origin (CSP script-src 'self'), a deferred module: hydrates the page after it has parsed. */}

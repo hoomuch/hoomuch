@@ -144,9 +144,9 @@ src/
   lib/               crypto, auth, money, time, flash, rate limits, bot checks
   db/queries.ts      users, sessions, connections
   providers/         adapter contract, registry (metadata), adapter lookup, one adapter per provider, Demo
-  sync/              sync engine, the sync queue and its consumer, aggregation, FX (frankfurter.dev), repository
+  sync/              sync engine, the sync queue and its consumer, aggregation, MRR movement, FX (frankfurter.dev), repository
   data/              read models for the dashboard, transactions and connection detail
-  services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks
+  services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks; the email digest
   routes/            HTTP handlers (Post/Redirect/Get), and /webhooks for providers; pages render with views/render.tsx
   views/             layout, pages, hoomuch components, charts (React)
   components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
@@ -295,6 +295,9 @@ references.
    - `verify`: a live, read-only check of the key, at most about 3 requests, with a clear error
      message and the form `field` it belongs to.
    - `fetchSnapshot`: MRR (normalised to monthly, trials excluded), active subscriptions and trials.
+     If the provider's API lists subscriptions one by one, also return `subscriptions`: the id,
+     currency and monthly amount of every subscription counted as active, so the dashboard can say
+     why MRR moved. Return all of them or leave the field out; a partial list would read as churn.
      When a figure is incomplete or estimated (a missing optional permission, items without a price),
      say so in `warnings`: one short sentence each, exported as a constant, with no customer data or
      provider text. They show on the dashboard and the connection page until a sync stops reporting them.

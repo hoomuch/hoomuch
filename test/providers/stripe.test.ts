@@ -25,6 +25,7 @@ import {
   type FakeResponse,
   type RecordedCall,
   type Route,
+  expectSubscriptionsAddUp,
 } from '../fixtures/harness';
 // Verbatim example objects from https://docs.stripe.com/api for Stripe-Version 2026-10-28.endive.
 import subscriptionFx from '../fixtures/stripe/subscription.json';
@@ -466,7 +467,11 @@ describe('stripe fetchSnapshot', () => {
       newCustomers: null,
       // Every fixture price is prod_FakeMain; its name is read once.
       mrrByProduct: [{ name: 'FakeMain', mrr: { USD: 1000 + 1000 + 1000 + 2167 + 3042 + 2700 + 1250 + 2000 }, subscriptions: 8 }],
+      subscriptions: expect.any(Array),
     });
+    // Each subscription with its own MRR, in listing order, for the movement diff.
+    expect(snap.subscriptions?.map((s) => s.mrr)).toEqual([1000, 1000, 1000, 2167, 3042, 2700, 1250, 2000]);
+    expectSubscriptionsAddUp(snap);
     expectStripeHeaders(calls);
     expect(calls.filter((c) => pathOf(c) === '/v1/products')).toHaveLength(1);
   });

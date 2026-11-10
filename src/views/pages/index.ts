@@ -11,6 +11,7 @@ import { ConnectionDetailPage } from './connection-detail';
 import { ConnectionsPage, NewConnectionPage, ProviderPickerPage } from './connections';
 import { ExplorePage } from './explore';
 import { DashboardPage } from './dashboard';
+import { DigestStopPage } from './digest-stop';
 import { NotFoundPage, ServerErrorPage } from './errors';
 import { LandingPage } from './landing';
 import { LegalPage } from './legal';
@@ -37,6 +38,7 @@ export const PAGES = {
   explore: ExplorePage,
   legal: LegalPage,
   verifyEmail: VerifyEmailPage,
+  digestStop: DigestStopPage,
   notFound: NotFoundPage,
   serverError: ServerErrorPage,
 } as const;

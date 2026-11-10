@@ -1,6 +1,7 @@
 /** Queue consumer for `SYNC_QUEUE` (see sync/queue.ts). Owner: Data Plane. */
 
 import type { Bindings } from '../env';
+import { sendDigest } from '../services/digest';
 import { SYNC_BUSY_MESSAGE, SYNC_LOCK_STALE_MS, SYNC_NOT_STARTED_MESSAGE, syncConnection, type SyncKind } from './engine';
 import { errorLogFields } from './errors';
 import { SYNC_KINDS, message, type SyncMessage } from './queue';
@@ -33,6 +34,16 @@ function emit(level: 'log' | 'warn' | 'error', event: string, data: Record<strin
   }
 }
 
+/** A digest message's user id (queue.ts: DigestMessage), or null for anything else. */
+function digestUserId(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as Record<string, unknown>;
+  const d = b['digest'];
+  if (b['v'] !== 1 || !d || typeof d !== 'object') return null;
+  const id = (d as Record<string, unknown>)['userId'];
+  return typeof id === 'string' && id.length > 0 && id.length <= 64 ? id : null;
+}
+
 function parseMessage(body: unknown): SyncMessage | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
@@ -47,6 +58,21 @@ function parseMessage(body: unknown): SyncMessage | null {
  */
 export async function handleSyncBatch(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
   for (const msg of batch.messages) {
+    const digestFor = digestUserId(msg.body);
+    if (digestFor) {
+      // An email digest: mailed once (services/digest.ts skips a day already sent), retried when
+      // the mail didn't go out.
+      try {
+        const outcome = await sendDigest(env, digestFor);
+        emit(outcome === 'failed' ? 'warn' : 'log', 'queue_digest', { outcome, attempts: msg.attempts });
+        if (outcome === 'failed') msg.retry({ delaySeconds: CRASH_RETRY_DELAY_SECONDS });
+        else msg.ack();
+      } catch (err) {
+        emit('error', 'queue_digest_crashed', errorLogFields(err));
+        msg.retry({ delaySeconds: CRASH_RETRY_DELAY_SECONDS });
+      }
+      continue;
+    }
     const m = parseMessage(msg.body);
     if (!m) {
       emit('warn', 'queue_message_ignored', { queue: batch.queue });

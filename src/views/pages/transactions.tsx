@@ -11,13 +11,13 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { TransactionPage, TransactionRow } from '../../data/types';
-import { formatMoney, normalizeCurrency } from '../../lib/money';
+import { EXPORT_MAX_ROWS, type TransactionPage, type TransactionRow } from '../../data/types';
+import { formatMoney, formatNumber, normalizeCurrency } from '../../lib/money';
 import { getProviderMeta } from '../../providers/registry';
 import type { ProviderId } from '../../providers/types';
 import { ProviderDot } from '../components/badges';
 import { EmptyState } from '../components/empty-state';
-import { LinkButton, PageHeader, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
+import { Button, Card, Field, LinkButton, PageHeader, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
 import { formatDateTime, formatDay, zoneName } from './shared';
 import { useTimeZone } from '../page-root';
@@ -31,6 +31,11 @@ export interface TransactionsPageProps {
   filterProviders: readonly ProviderId[];
   /** Filter and pagination links; defaults to "/transactions". */
   basePath?: string;
+  /**
+   * The days the CSV export form starts with and the last one it offers (the user's today), from
+   * the server: a page never reads the clock. Without it there's no export form (the landing demo).
+   */
+  exportRange?: { from: string; to: string; max: string };
 }
 
 /**
@@ -56,6 +61,12 @@ function href(
   return s ? `${base}?${s}` : base;
 }
 
+/** What the provider kept of the charge, under its amount. Only some providers report it. */
+function FeeNote(props: { amount: number | null; currency: string }) {
+  if (props.amount === null) return null;
+  return <span className="mt-1 block text-caption text-faint">{formatMoney(props.amount, props.currency)} fee</span>;
+}
+
 function AmountCell(props: { row: TransactionRow; currency: string }) {
   const { row } = props;
   const refund = row.type === 'refund';
@@ -65,10 +76,41 @@ function AmountCell(props: { row: TransactionRow; currency: string }) {
       <TableCell className={cls}>
         {formatMoney(row.amount, row.originalCurrency)}
         <span className="mt-1 block text-caption text-faint">No rate to convert to {props.currency}</span>
+        <FeeNote amount={row.fee} currency={row.originalCurrency} />
       </TableCell>
     );
   }
-  return <TableCell className={cls}>{formatMoney(row.displayAmount, props.currency)}</TableCell>;
+  return (
+    <TableCell className={cls}>
+      {formatMoney(row.displayAmount, props.currency)}
+      <FeeNote amount={row.displayFee} currency={props.currency} />
+    </TableCell>
+  );
+}
+
+/**
+ * The list as a CSV file: a plain GET form, so it downloads with or without JavaScript. It keeps
+ * the provider filter; the days are its own.
+ */
+function ExportCard(props: { range: { from: string; to: string; max: string }; provider: ProviderId | null }) {
+  const from = props.provider ? ` from ${getProviderMeta(props.provider).name}` : '';
+  return (
+    <Card
+      id="export"
+      className="mt-8 max-w-xl"
+      title="Export as CSV"
+      description={`Charges and refunds${from} between two days, with the provider’s fee where it reports one. Up to ${formatNumber(EXPORT_MAX_ROWS)} rows in a file.`}
+    >
+      <form method="get" action="/transactions.csv">
+        {props.provider ? <input type="hidden" name="provider" value={props.provider} /> : null}
+        <div className="grid gap-x-4 sm:grid-cols-2">
+          <Field name="from" label="First day" type="date" value={props.range.from} max={props.range.max} required />
+          <Field name="to" label="Last day" type="date" value={props.range.to} max={props.range.max} required />
+        </div>
+        <Button variant="secondary">Download CSV</Button>
+      </form>
+    </Card>
+  );
 }
 
 export function TransactionsPage(props: TransactionsPageProps) {
@@ -224,6 +266,8 @@ export function TransactionsPage(props: TransactionsPageProps) {
           </PaginationContent>
         </Pagination>
       ) : null}
+
+      {props.exportRange ? <ExportCard range={props.exportRange} provider={p.provider} /> : null}
     </Layout>
   );
 }

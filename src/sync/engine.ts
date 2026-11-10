@@ -36,7 +36,9 @@ import {
   type Credentials,
   type ProviderAdapter,
   type ProviderContext,
+  type MetricsSnapshot,
   type ProviderMeta,
+  type SubscriptionMrr,
 } from '../providers/types';
 import {
   advanceRevenue,
@@ -59,6 +61,7 @@ import {
   isStaleCursorError,
 } from './errors';
 import { ensureFx, ensureFxHistory, refreshFxIfStale } from './fx';
+import { MAX_STATE_BYTES, addMovements, diffSubscriptions, movementIsEmpty, toState } from './movement';
 import { QUEUED_STALE_MS, enqueueSyncs } from './queue';
 import {
   acquireSyncLock,
@@ -68,11 +71,14 @@ import {
   insertSnapshotHistory,
   openSyncRun,
   pruneSyncRuns,
+  readMovementState,
   recomputeDailyRevenue,
   selectDueConnections,
   storedSpanOf,
+  upsertMovement,
   upsertProviderDaily,
   upsertSnapshot,
+  upsertSubscriptionState,
   upsertTransactions,
   type ConnectionFinish,
   type LockedConnectionRow,
@@ -451,6 +457,8 @@ async function syncSnapshot(
   // The owner's local day: the dashboard's "today" (SPEC §6).
   const today = zonedDayKey(now, ownerZone(row));
   const stmts = [upsertSnapshot(db, row.id, today, snapshot, now)];
+  /** The movement's statements once they're known; null until then. */
+  let movement: D1PreparedStatement[] | null = null;
   if (adapter.fetchSnapshotHistory && !row.has_snapshots) {
     // A connection without snapshots (new, or its key now reads another account) can start its MRR
     // trend with the provider's history. Asked once: today's row, written below, closes the gate
@@ -461,15 +469,76 @@ async function syncSnapshot(
       const { rows, skipped } = cleanSnapshotHistory(history, today, SNAPSHOT_HISTORY_DAYS);
       if (skipped > 0) emit('warn', 'sync_history_skipped', { ...logCtx, skipped });
       stmts.push(...insertSnapshotHistory(db, row.id, rows, now));
+      // A history that lists subscriptions (the demo's) starts the movement with those days too.
+      if (snapshot.subscriptions) movement = seededMovementStatements(db, row.id, rows, today, snapshot.subscriptions, now);
     } catch (err) {
       emit('warn', 'sync_history_failed', { ...logCtx, ...errorLogFields(err) });
     }
   }
+  if (snapshot.subscriptions && !movement) {
+    // Why MRR moved since the last sync (SPEC F-26). Optional data, like the history above: a
+    // failure is logged and today's snapshot is still written.
+    try {
+      movement = await movementStatements(db, row, today, snapshot.subscriptions, now);
+    } catch (err) {
+      emit('warn', 'sync_movement_failed', { ...logCtx, ...errorLogFields(err) });
+    }
+  }
+  if (movement) stmts.push(...movement);
   // The snapshot is the first row the dashboard can see. On a fresh install the FX table is still
   // being fetched (in parallel with the provider calls); writing before it lands made the first
   // render count only the display currency (e.g. a demo showing $2,240 MRR, then $4,044).
   await fxReady;
   await db.batch(stmts);
+}
+
+/**
+ * Statements that store this sync's list of subscriptions and add what changed since the last one
+ * to today's movement. The first list (a new connection, or one whose key now reads another
+ * account) is only stored: there is nothing to compare it with. Written with the snapshot, in one
+ * batch, so the list and the movement never disagree.
+ */
+async function movementStatements(
+  db: D1Database,
+  row: LockedConnectionRow,
+  today: string,
+  subscriptions: readonly SubscriptionMrr[],
+  now: number,
+): Promise<D1PreparedStatement[]> {
+  const next = toState(subscriptions);
+  const json = JSON.stringify(next);
+  if (json.length > MAX_STATE_BYTES) return [];
+  const prev = await readMovementState(db, row.id, today);
+  if (!prev.state || !prev.since || !row.has_snapshots) return [upsertSubscriptionState(db, row.id, today, json, now)];
+  const diff = diffSubscriptions(prev.state, next);
+  if (movementIsEmpty(diff)) return [];
+  return [upsertSubscriptionState(db, row.id, prev.since, json, now), upsertMovement(db, row.id, today, addMovements(prev.today, diff))];
+}
+
+/**
+ * The movement of a connection's first sync when its adapter's history lists subscriptions: each
+ * day's change from the day before it, up to today. Null when the history has no such day, and the
+ * first list is then only stored (`movementStatements`).
+ */
+function seededMovementStatements(
+  db: D1Database,
+  connectionId: string,
+  history: ReadonlyArray<{ day: string; snapshot: MetricsSnapshot }>,
+  today: string,
+  subscriptions: readonly SubscriptionMrr[],
+  now: number,
+): D1PreparedStatement[] | null {
+  const days = history.flatMap((h) => (h.snapshot.subscriptions ? [{ day: h.day, state: toState(h.snapshot.subscriptions) }] : []));
+  if (days.length === 0) return null;
+  days.push({ day: today, state: toState(subscriptions) });
+  const json = JSON.stringify(days[days.length - 1]!.state);
+  if (json.length > MAX_STATE_BYTES) return null;
+  const stmts = [upsertSubscriptionState(db, connectionId, days[0]!.day, json, now)];
+  for (let i = 1; i < days.length; i++) {
+    const diff = diffSubscriptions(days[i - 1]!.state, days[i]!.state);
+    if (!movementIsEmpty(diff)) stmts.push(upsertMovement(db, connectionId, days[i]!.day, diff));
+  }
+  return stmts;
 }
 
 /** Fetches one revenue page and turns it into statements for the final batch (nothing is written here). */

@@ -74,6 +74,7 @@ import {
   type ConnectionInput,
   type DailyRevenuePoint,
   type MetricsSnapshot,
+  type SubscriptionMrr,
   type ProviderAdapter,
   type ProviderContext,
   type RevenuePage,
@@ -286,6 +287,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   let activeTrials = 0;
   const stats = { listed: 0, pages: 0, zero: 0, onDemand: 0, unpriced: 0, notActive: 0, taxInclusive: 0, cancelling: 0 };
   const seen = new Set<string>();
+  // Each paying subscription's own MRR, for the engine's movement diff (SPEC F-26). Dropped when
+  // one comes without an id: a partial list would read as churn.
+  let subscriptions: SubscriptionMrr[] | null = [];
 
   for (const status of SNAPSHOT_STATUSES) {
     for (let page = 0; ; page++) {
@@ -306,6 +310,8 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
           case 'paying':
             activeSubscriptions += 1;
             addToMoney(mrr, c.currency, c.monthly);
+            if (id) subscriptions?.push({ id, currency: c.currency, mrr: c.monthly });
+            else subscriptions = null;
             if (c.taxInclusive) stats.taxInclusive += 1;
             if (raw['cancel_at_next_billing_date'] === true) stats.cancelling += 1;
             break;
@@ -344,6 +350,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    ...(subscriptions ? { subscriptions } : {}),
   };
 }
 

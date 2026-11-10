@@ -115,6 +115,7 @@ import {
   ProviderError,
   type ConnectionInput,
   type MetricsSnapshot,
+  type SubscriptionMrr,
   type ProviderAdapter,
   type ProviderContext,
   type RevenueEvent,
@@ -744,6 +745,8 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
 
   const mrr: MoneyMap = {};
   let active = 0;
+  // Each paying subscriber's own MRR, for the engine's movement diff (SPEC F-26).
+  const subscriptions: SubscriptionMrr[] = [];
   const priced = { charge: 0, list: 0, list_estimated: 0, unpriced: 0, zero: 0 };
   let listForBudget = 0; // list-priced (exactly) only because the budget ran out before their lookup
   for (const m of members) {
@@ -760,7 +763,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     priced[p.source] += 1;
     if (p.source === 'list' && !m.looked) listForBudget += 1;
     active += 1;
-    addToMoney(mrr, p.currency, normalizeToMonthly(p.amount, rec.interval, rec.count));
+    const monthly = normalizeToMonthly(p.amount, rec.interval, rec.count);
+    addToMoney(mrr, p.currency, monthly);
+    subscriptions.push({ id: m.sub.id, currency: p.currency, mrr: monthly });
   }
 
   if (unknownStatus > 0) ctx.log('gumroad_unknown_status', { subscribers: unknownStatus });
@@ -791,6 +796,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null, // derived from daily_revenue by the sync engine
     revenuePeriodDays: null,
     newCustomers: null,
+    subscriptions,
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

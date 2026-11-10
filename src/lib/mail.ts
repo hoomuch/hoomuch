@@ -2,7 +2,7 @@
  * Outgoing mail through Resend's HTTP API: one plain `fetch`, no SDK. Owner: Lead. See SPEC.md §8.
  *
  * Off unless RESEND_API_KEY is set, so a self-hosted instance without mail keeps working as
- * before (no verification step). Nothing here ever logs the recipient, the message or the key.
+ * before (no verification step, no digest). Nothing here ever logs the recipient, the message or the key.
  */
 
 import type { Bindings } from '../env';
@@ -22,6 +22,15 @@ export interface MailMessage {
   subject: string;
   text: string;
   html: string;
+  /** Extra message headers, e.g. `List-Unsubscribe`. */
+  headers?: Record<string, string>;
+}
+
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/** For text put into a message's HTML copy. */
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]!);
 }
 
 /**
@@ -45,7 +54,14 @@ export async function sendMail(env: MailEnv, msg: MailMessage, fetchImpl: typeof
         // Resend refuses requests without one (403).
         'user-agent': 'hoomuch',
       },
-      body: JSON.stringify({ from, to: [msg.to], subject: msg.subject, text: msg.text, html: msg.html }),
+      body: JSON.stringify({
+        from,
+        to: [msg.to],
+        subject: msg.subject,
+        text: msg.text,
+        html: msg.html,
+        ...(msg.headers ? { headers: msg.headers } : {}),
+      }),
       signal: AbortSignal.timeout(MAIL_TIMEOUT_MS),
     });
     if (res.ok) return true;

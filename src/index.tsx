@@ -14,6 +14,7 @@ import { limitRequests } from './lib/rate-limit';
 import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
 import { PUBLIC_PATH } from './routes/public';
+import { queueDueDigests } from './services/digest';
 import { WEBHOOK_PATH_PREFIX } from './services/webhooks';
 import { handleSyncBatch } from './sync/consumer';
 import { runScheduledSync } from './sync/engine';
@@ -134,6 +135,8 @@ export default {
     ctx.waitUntil(
       Promise.allSettled([
         runScheduledSync(env, now),
+        // Email digests that are due (08:00 in each owner's zone): one queue message each.
+        queueDueDigests(env, now),
         deleteExpiredSessions(env.DB, now),
         deleteStaleLoginAttempts(env.DB, now, {
           shortMs: THROTTLE_WINDOW_MS,

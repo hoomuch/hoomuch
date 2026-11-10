@@ -12,6 +12,7 @@ import {
   type ConnectionSummary,
   type DashboardData,
   type MrrDay,
+  type MrrMovement,
   type ProductBreakdown,
   type ProductMrrBreakdown,
   type RangeDays,
@@ -233,6 +234,28 @@ const NO_PRODUCTS: ProductBreakdown = {
   named: false,
 };
 
+/** Why the fixture's MRR moved: buckets that add up to its change over the window. Null without a starting MRR. */
+function fixtureMovement(mrrNow: number, mrrStart: number | null, subsNow: number, withTotalsOnly: boolean): MrrMovement | null {
+  if (mrrStart === null || mrrStart <= 0) return null;
+  const subsStart = Math.round(subsNow * 0.94);
+  const churned = { amount: Math.round(mrrStart * 0.031), count: Math.max(1, Math.round(subsStart * 0.03)) };
+  const contraction = { amount: Math.round(mrrStart * 0.006), count: 2 };
+  const expansion = { amount: Math.round(mrrStart * 0.012), count: 4 };
+  const net = mrrNow - mrrStart;
+  const added = { amount: Math.max(0, net + churned.amount + contraction.amount - expansion.amount), count: Math.max(0, subsNow - subsStart + churned.count) };
+  return {
+    new: added,
+    expansion,
+    contraction,
+    churned,
+    net: added.amount + expansion.amount - contraction.amount - churned.amount,
+    subscriptionChurnPct: subsStart > 0 ? (churned.count / subsStart) * 100 : null,
+    mrrChurnPct: ((churned.amount + contraction.amount) / mrrStart) * 100,
+    since: null,
+    notIncluded: withTotalsOnly ? ['RevenueCat'] : [],
+  };
+}
+
 /** A complete DashboardData, in USD, for the given window. */
 export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState = 'full', now = FIXTURE_NOW): DashboardData {
   const days = windowDays(rangeDays, now);
@@ -249,6 +272,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
       breakdown: [],
       products: NO_PRODUCTS,
       productMrr: NO_PRODUCT_MRR,
+      movement: null,
       revenueSeries: revenueInSteps(
         days.map((day) => ({ day, total: 0, byConnection: {} })),
         revenueStep(rangeDays),
@@ -332,6 +356,7 @@ export function fixtureDashboard(rangeDays: RangeDays = 30, state: FixtureState 
     breakdown,
     products: fixtureProducts(breakdown),
     productMrr: fixtureProductMrr(breakdown),
+    movement: fixtureMovement(mrrNow, mrrStart, subsNow, conns.some((c) => c.provider === 'revenuecat')),
     revenueSeries: revenueInSteps(revenueSeries, revenueStep(rangeDays)),
     mrrSeries,
     fx: { asOf: '2026-11-04', daily: true, missing: state === 'warnings' ? ['ARS'] : [] },
@@ -367,6 +392,8 @@ export function fixtureTransactions(page = 1, provider: TransactionPage['provide
       amount,
       originalCurrency: eur ? 'EUR' : 'USD',
       displayAmount: eur ? Math.round(amount * 1.08) : amount,
+      fee: refund || eur ? null : Math.round(base * 0.029) + 30,
+      displayFee: refund || eur ? null : Math.round(base * 0.029) + 30,
       description: PLANS[Math.floor(r() * PLANS.length)]!,
     });
     t -= Math.floor(r() * 5 * HOUR) + 3 * MINUTE;
