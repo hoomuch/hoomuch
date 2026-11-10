@@ -203,6 +203,38 @@ export interface MrrDay {
   total: number;
 }
 
+/** One bucket of the MRR movement: what it moved (positive, display currency) and how many subscriptions. */
+interface MovementPart {
+  amount: number;
+  count: number;
+}
+
+/**
+ * Why MRR moved in the window (SPEC F-26), over the connections whose provider lists subscriptions
+ * one by one. Worked out by comparing each sync's list with the one before, so it starts on the day
+ * a connection was first synced with it, and a change counts on the day a sync saw it.
+ */
+export interface MrrMovement {
+  /** Subscriptions that started paying. */
+  new: MovementPart;
+  /** Subscriptions that pay more than before: the increase. */
+  expansion: MovementPart;
+  /** Subscriptions that pay less than before: the decrease. */
+  contraction: MovementPart;
+  /** Subscriptions that stopped counting: what they paid. */
+  churned: MovementPart;
+  /** new + expansion − contraction − churned. */
+  net: number;
+  /** Churned subscriptions as a share of those at the start of the window, 0–100; null when there were none. */
+  subscriptionChurnPct: number | null;
+  /** Churned and contraction MRR as a share of the MRR at the start of the window, 0–100; null when there was none. */
+  mrrChurnPct: number | null;
+  /** The day the count starts, when that's after the window's first day ('YYYY-MM-DD'); null when the whole window is covered. */
+  since: string | null;
+  /** Names of the user's providers that aren't in it, in breakdown order. */
+  notIncluded: string[];
+}
+
 export interface DashboardData {
   currency: string;
   rangeDays: RangeDays;
@@ -220,6 +252,8 @@ export interface DashboardData {
   breakdown: BreakdownRow[];
   products: ProductBreakdown;
   productMrr: ProductMrrBreakdown;
+  /** Null when no connection's provider lists subscriptions one by one, or none has synced with it yet. */
+  movement: MrrMovement | null;
   /**
    * One entry per `revenueStep(rangeDays)` days, oldest → newest, zero-filled: `rangeDays` days, or
    * 52 weeks for the year. The last entry ends today.
@@ -312,8 +346,15 @@ export interface TransactionRow {
   originalCurrency: string;
   /** Converted to the page currency; null if no FX rate. */
   displayAmount: number | null;
+  /** What the provider kept of a charge, in `originalCurrency` (positive minor units); null when it doesn't say. */
+  fee: number | null;
+  /** `fee` in the page currency, at the same day's rate; null without a fee or a rate. */
+  displayFee: number | null;
   description: string | null;
 }
+
+/** Most rows one CSV export holds (`exportTransactions`). A longer period is exported in parts. */
+export const EXPORT_MAX_ROWS = 10_000;
 
 export interface TransactionPage {
   /** Display currency. */

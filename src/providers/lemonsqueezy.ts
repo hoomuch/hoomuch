@@ -77,6 +77,7 @@ import {
   type ConnectionConfig,
   type ConnectionInput,
   type MetricsSnapshot,
+  type SubscriptionMrr,
   type ProviderAdapter,
   type ProviderContext,
   type RevenueEvent,
@@ -765,7 +766,11 @@ async function recurringDiscounts(
   return out;
 }
 
+/** ISO 4217's "no currency": a subscription listed for the movement diff whose amount isn't known. */
+const UNKNOWN_AMOUNT_CURRENCY = 'XXX';
+
 interface PricedSubscription {
+  id: string;
   orderId: string | null;
   currency: string;
   /** One billing period, before discounts. */
@@ -788,6 +793,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   const stats = { listed: 0, otherMode: 0, usageBased: 0, unpriced: 0, cancelledTrials: 0, discounted: 0, zeroMrr: 0 };
   const seen = new Set<string>();
   const priced: PricedSubscription[] = [];
+  // Each subscription counted as active, with its own MRR, for the engine's movement diff (SPEC
+  // F-26). One whose amount is unknown (usage-based, unpriced) is listed at 0.
+  const subscriptions: SubscriptionMrr[] = [];
 
   for (const status of SNAPSHOT_STATUSES) {
     for (let page = 1; ; page++) {
@@ -840,6 +848,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
         if (usageItem || price?.usageBased) {
           active += 1;
           stats.usageBased += 1;
+          subscriptions.push({ id: sub.id, currency: UNKNOWN_AMOUNT_CURRENCY, mrr: 0 });
           continue;
         }
         const amount = price ? priceAmountMinor(price, num(item?.['quantity']) ?? 1) : null;
@@ -847,6 +856,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
         if (!price || amount === null || !price.interval || !currency) {
           active += 1;
           stats.unpriced += 1;
+          subscriptions.push({ id: sub.id, currency: currency ?? UNKNOWN_AMOUNT_CURRENCY, mrr: 0 });
           ctx.log('ls_subscription_unpriced', {
             subscriptionId: sub.id,
             priceId,
@@ -854,7 +864,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
           });
           continue;
         }
-        priced.push({ orderId: idOf(a['order_id']), currency, amount, interval: price.interval, intervalCount: price.intervalCount });
+        priced.push({ id: sub.id, orderId: idOf(a['order_id']), currency, amount, interval: price.interval, intervalCount: price.intervalCount });
       }
 
       const last = lastPageOf(list, page, PAGE_SIZE);
@@ -877,7 +887,9 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       continue;
     }
     active += 1;
-    addToMoney(mrr, p.currency, normalizeToMonthly(amount, p.interval, p.intervalCount));
+    const monthly = normalizeToMonthly(amount, p.interval, p.intervalCount);
+    addToMoney(mrr, p.currency, monthly);
+    subscriptions.push({ id: p.id, currency: p.currency, mrr: monthly });
   }
 
   ctx.log('ls_snapshot', {
@@ -897,6 +909,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriod: null,
     revenuePeriodDays: null,
     newCustomers: null,
+    subscriptions,
     ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
   };
 }

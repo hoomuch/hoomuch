@@ -41,6 +41,11 @@ down by connection.
   encrypted at rest (AES-256-GCM).
 - **No customer personal data.** It keeps amounts, currencies, timestamps, IDs and plan names, never
   your customers' emails, names or addresses.
+- **Why MRR moved.** New subscriptions, upgrades, downgrades and cancellations over the period, with
+  the churn rates that follow (see [MRR movement](#mrr-movement)).
+- **Numbers in your inbox.** An optional Monday email with last week's revenue, MRR, subscriptions
+  and trials (see [Email digest](#email-digest)).
+- **Yours to take away.** Transactions export to CSV, with the provider's fee where it reports one.
 - **Try it without a key.** After signing up, **Try demo data** fills the dashboard with a sample
   business.
 - **Show your MRR, verified.** On instances that turn it on, publish a product's MRR on a public page
@@ -95,8 +100,8 @@ interval.
 | `SYNC_INTERVAL_MINUTES` | `vars` in `wrangler.jsonc` | `"60"` | How often each connection syncs, rounded up to a multiple of the 30-minute cron. |
 | `TURNSTILE_SITE_KEY` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. A [Turnstile](https://developers.cloudflare.com/turnstile/) widget's site key. With the secret below, log in and sign up require the Turnstile check. |
 | `TURNSTILE_SECRET_KEY` | Secret (`wrangler secret put`) | none | Optional. The same widget's secret key. |
-| `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below). |
-| `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of that email, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
+| `RESEND_API_KEY` | Secret (`wrangler secret put`) | none (off) | Optional. A [Resend](https://resend.com) API key with sending access. When set, sign-up mails a confirmation link and new accounts can't use hoomuch until it's clicked (see below), and people can turn on the [email digest](#email-digest). |
+| `MAIL_FROM` | `vars` in `wrangler.jsonc` | `""` | Sender of those emails, on a domain verified in Resend, e.g. `hoomuch <hello@example.com>`. Needed once `RESEND_API_KEY` is set. |
 | `RL_REQUESTS`, `RL_AUTH` | `ratelimits` in `wrangler.jsonc` | 300 and 10 a minute | Per-network request limits (see below). `namespace_id` must be unique in your Cloudflare account. |
 | `RL_WEBHOOKS` | `ratelimits` in `wrangler.jsonc` | 30 a minute | Webhook calls per connection (see [Real-time updates](#real-time-updates)). Webhooks skip the per-network limits, because a provider sends every customer's calls from the same addresses. Its `namespace_id` must be unique too. |
 | `PUBLIC_PAGES` | `vars` in `wrangler.jsonc` | `""` (off) | Optional. `"true"` lets owners publish a product's verified revenue at `/p/<slug>`, with a badge, a profile at `/u/<handle>` and a listing on `/explore` (see [Public pages](#public-pages)). |
@@ -182,6 +187,48 @@ which events to pick.
 - **Not offered** for App Store Connect and Google Play (their reports arrive a day later), Adapty
   (one webhook URL per environment, which apps already use), and RevenueCat and Superwall (their
   charts refresh on their own schedule).
+
+### MRR movement
+
+The dashboard's **MRR movement** card says why MRR changed over the selected period: what new
+subscriptions and upgrades added, what downgrades and cancellations took away, the net, and two
+churn rates (subscriptions that churned, and MRR lost to churn and downgrades, each as a share of
+what there was at the start of the period).
+
+- **How it's worked out.** Each sync reads the provider's list of paying subscriptions and compares
+  it with the list from the sync before. hoomuch keeps subscription ids and amounts for this, nothing
+  about the customer.
+- **Which providers.** Stripe, Lemon Squeezy, Chargebee, Dodo Payments and Gumroad, whose APIs list
+  subscriptions one by one. The others report totals only and aren't in the card; it says which.
+- **It starts when you connect.** There's no movement before a connection's first sync, and the card
+  says so when the period reaches back further. A change counts on the day a sync saw it.
+- **Churned means stopped counting towards MRR.** A subscription that's paused, unpaid or cancelled
+  churns; if it comes back, it's new again. Movement is tracked for up to 20,000 subscriptions per
+  connection.
+
+### Email digest
+
+On an instance that sends mail (`RESEND_API_KEY` and `MAIL_FROM`), **Settings → Email digest** offers
+an email every Monday with last week's numbers: revenue, MRR, active subscriptions and trials with
+their changes, and any connection that couldn't sync. It goes out around 8:00 in your time zone, is
+built from what's already synced (no provider is called), and holds your own totals and connection
+names, never anything about your customers. Every email has a link that stops it without logging in.
+
+### Exporting transactions
+
+**Transactions → Export as CSV** downloads the charges and refunds between two days, for all
+providers or the one you're filtering by: amount and currency as charged, the provider's fee and the
+net where the provider reports a fee (Stripe, Paddle, Polar and Gumroad), and both converted to your
+display currency at that day's rate. A file holds up to 10,000 rows; export a longer period in
+parts. Providers that report daily totals only (RevenueCat, Dodo Payments, Adapty, Superwall and App
+Store Connect) have no transactions to export. Text cells that a spreadsheet would read as a formula
+are written with a leading apostrophe.
+
+### Add to Home Screen
+
+hoomuch has a web app manifest, so a phone's **Add to Home Screen** (or a desktop browser's
+**Install**) opens the dashboard in its own window with its own icon. It still needs a connection:
+nothing is stored offline.
 
 ### Public pages
 

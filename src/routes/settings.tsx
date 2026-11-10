@@ -1,13 +1,14 @@
-/** Settings: display currency, time zone, password change, account deletion. Owner: Experience (routes). */
+/** Settings: display currency, time zone, email digest, password change, account deletion. Owner: Experience (routes). */
 
 import type { Hono } from 'hono';
 import { mediaKeysOfUser } from '../db/public';
-import { deleteUser, updateUserCurrency, updateUserTimezone } from '../db/queries';
+import { deleteUser, getDigestUser, updateUserCurrency, updateUserTimezone } from '../db/queries';
 import type { AppEnv } from '../env';
 import { changePassword, confirmPassword, currentUser, endSession, requireUser } from '../lib/auth';
 import { redirectWithFlash } from '../lib/flash';
 import { isSupportedCurrency, normalizeCurrency } from '../lib/money';
 import { normalizeTimeZone, timeZoneOptions, zoneLabel } from '../lib/time';
+import { chooseDigest, digestAvailable, isDigestKind, rescheduleDigest } from '../services/digest';
 import { deleteImages } from '../services/media';
 import { chrome, formLimit, readForm } from './util';
 import { renderPage } from '../views/render';
@@ -17,7 +18,8 @@ const PASSWORD_INPUT_MAX = 1024;
 export function registerSettingsRoutes(app: Hono<AppEnv>): void {
   app.get('/settings', requireUser, async (c) => {
     const user = currentUser(c);
-    // Both sources came with the session (lib/auth.ts): no query of its own.
+    // Both sources came with the session (lib/auth.ts). The digest is read only where mail is on.
+    const digest = digestAvailable(c.env) ? ((await getDigestUser(c.env.DB, user.id))?.digest ?? 'off') : undefined;
     return renderPage(c, 'settings', {
         chrome: chrome(c),
         currency: user.baseCurrency,
@@ -25,7 +27,22 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
         timeZone: user.timeZone,
         timeZoneSource: c.get('timezoneSource'),
         timeZones: timeZoneOptions(),
+        ...(digest ? { digest } : {}),
       });
+  });
+
+  app.post('/settings/digest', requireUser, formLimit, async (c) => {
+    const user = currentUser(c);
+    const form = await readForm(c);
+    const kind = form.text('digest', 16);
+    if (!digestAvailable(c.env)) return redirectWithFlash(c, '/settings', 'error', 'This instance doesn’t send email, so there’s no digest to turn on.');
+    if (!isDigestKind(kind)) return redirectWithFlash(c, '/settings', 'error', 'Pick one of the listed options.');
+    await chooseDigest(c.env.DB, user.id, kind, user.timeZone, new URL(c.req.url).origin);
+    const saved =
+      kind === 'off'
+        ? 'Saved. The email digest is off.'
+        : `Saved. Your digest arrives every Monday morning, around 8:00 in ${zoneLabel(user.timeZone)}.`;
+    return redirectWithFlash(c, '/settings', 'success', saved);
   });
 
   app.post('/settings/timezone', requireUser, formLimit, async (c) => {
@@ -34,6 +51,8 @@ export function registerSettingsRoutes(app: Hono<AppEnv>): void {
     const zone = normalizeTimeZone(form.text('timezone', 64));
     if (!zone) return redirectWithFlash(c, '/settings', 'error', 'Pick one of the listed time zones.');
     await updateUserTimezone(c.env.DB, user.id, zone);
+    // A digest that's on moves to 8:00 in the new zone.
+    await rescheduleDigest(c.env.DB, user.id, zone);
     return redirectWithFlash(c, '/settings', 'success', `Saved. Days now run midnight to midnight in ${zoneLabel(zone)}.`);
   });
 

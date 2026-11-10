@@ -12,7 +12,7 @@
  */
 
 import { setSleepForTesting } from '../../src/providers/http';
-import type { ProviderContext } from '../../src/providers/types';
+import type { MetricsSnapshot, ProviderContext } from '../../src/providers/types';
 
 export const NOW = Date.parse('2026-11-05T12:00:00.000Z');
 
@@ -145,6 +145,24 @@ export function recordSleeps(): number[] {
 
 // Default for every test file that imports the harness: retries never actually wait.
 setSleepForTesting(() => undefined);
+
+/**
+ * Fails the test unless the snapshot lists every subscription it counts, once each, and their
+ * amounts add up to its MRR (`MetricsSnapshot.subscriptions`, for the movement diff).
+ */
+export function expectSubscriptionsAddUp(snap: MetricsSnapshot): void {
+  const list = snap.subscriptions ?? null;
+  if (!list) throw new Error('the snapshot lists no subscriptions');
+  if (list.length !== snap.activeSubscriptions) throw new Error(`${list.length} subscriptions listed, ${snap.activeSubscriptions} counted`);
+  if (new Set(list.map((s) => s.id)).size !== list.length) throw new Error('a subscription is listed twice');
+  const sum: Record<string, number> = {};
+  for (const s of list) {
+    if (!Number.isInteger(s.mrr) || s.mrr < 0) throw new Error(`subscription ${s.id}: mrr ${s.mrr}`);
+    if (s.mrr > 0) sum[s.currency.toUpperCase()] = (sum[s.currency.toUpperCase()] ?? 0) + s.mrr;
+  }
+  const sorted = (m: Record<string, number>) => JSON.stringify(Object.entries(m).sort());
+  if (sorted(sum) !== sorted(snap.mrr)) throw new Error(`subscriptions add up to ${sorted(sum)}, MRR is ${sorted(snap.mrr)}`);
+}
 
 /** Fails the test if any log line contains a secret-looking value. */
 export function expectNoSecretsInLogs(ctx: TestCtx, secrets: string[]): void {

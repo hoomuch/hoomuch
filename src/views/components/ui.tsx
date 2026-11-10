@@ -442,7 +442,10 @@ function describedBy(...ids: (string | undefined)[]): string | undefined {
 export interface FieldProps {
   name: string;
   label: string;
-  type?: 'text' | 'email' | 'password' | 'search' | 'url';
+  type?: 'text' | 'email' | 'password' | 'search' | 'url' | 'date';
+  /** For `type: 'date'`: the first and last day that can be picked ('YYYY-MM-DD'). */
+  min?: string;
+  max?: string;
   /** Never pass secret values back into a field (password fields drop it regardless). */
   value?: string;
   placeholder?: string;

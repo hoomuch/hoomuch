@@ -191,6 +191,9 @@ async function purgeSyncedData(db: D1Database, userId: string, connectionId: str
   await db.batch([
     db.prepare('DELETE FROM daily_revenue WHERE connection_id = ?').bind(connectionId),
     db.prepare('DELETE FROM snapshots WHERE connection_id = ?').bind(connectionId),
+    // MRR movement and the list of subscriptions it's worked out from (migration 0019).
+    db.prepare('DELETE FROM mrr_movements WHERE connection_id = ?').bind(connectionId),
+    db.prepare('DELETE FROM subscription_states WHERE connection_id = ?').bind(connectionId),
     db
       .prepare('UPDATE connections SET revenue_cursor = NULL, revenue_synced_until = NULL WHERE id = ? AND user_id = ?')
       .bind(connectionId, userId),

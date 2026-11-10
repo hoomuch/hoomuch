@@ -18,6 +18,7 @@ import { STRIPE_PRODUCTS_WARNING } from '../providers/warnings';
 import { BACKFILL_DAYS, cleanProductMrr, parseStoredWarnings } from '../sync/aggregate';
 import type { FxTable } from '../lib/money';
 import { FxConverter, FxHistory, LATEST_FX_SQL, fxHistoryStatement, latestFx, type FxRow } from '../sync/fx';
+import { movementOfRow } from '../sync/repo';
 import { calendarQuery } from './calendar';
 import { toSummary } from './connections';
 import { localDays, revenueRowsStatement } from './days';
@@ -30,6 +31,7 @@ import {
   type Kpi,
   lastRevenueDay,
   type MrrDay,
+  type MrrMovement,
   type ProductBreakdown,
   type ProductMrrBreakdown,
   type ProductMrrRow,
@@ -94,7 +96,7 @@ const daysBetween = (a: string, b: string) => Math.abs(Date.parse(a) - Date.pars
 
 export async function getDashboardData(env: Bindings, user: SessionUser, rangeDays: RangeDays): Promise<DashboardData> {
   const db = env.DB;
-  const q = dashboardQuery(db, user, rangeDays, Date.now());
+  const q = dashboardQuery(db, user, rangeDays, Date.now(), undefined, { movement: true });
   const [connsR, fxR, ...results] = await db.batch([connectionsStatement(db, user.id), db.prepare(LATEST_FX_SQL), ...q.statements]);
   return q.build(results, rowsOf<ConnectionView>(connsR), rowsOf<FxRow>(fxR));
 }
@@ -111,7 +113,7 @@ export async function getDashboardPage(
 ): Promise<{ data: DashboardData; calendar: CalendarMonth; connections: ConnectionSummary[] }> {
   const db = env.DB;
   const now = Date.now();
-  const dashboard = dashboardQuery(db, user, rangeDays, now);
+  const dashboard = dashboardQuery(db, user, rangeDays, now, undefined, { movement: true });
   const calendar = calendarQuery(db, user, month, now);
   const [connsR, fxR, ...results] = await db.batch([
     connectionsStatement(db, user.id),
@@ -142,7 +144,8 @@ function dashboardQuery(
   rangeDays: RangeDays,
   now: number,
   include?: (c: ConnectionView) => boolean,
-  opts: { dailyRevenue?: boolean } = {},
+  /** `movement`: also read why MRR moved (the dashboard page; public figures don't show it). */
+  opts: { dailyRevenue?: boolean; movement?: boolean } = {},
 ): ReadModelQuery<DashboardData> {
   const currency = normalizeCurrency(user.baseCurrency || 'USD');
   // Days run midnight to midnight in the user's zone (SPEC §6).
@@ -202,8 +205,23 @@ function dashboardQuery(
         )
         .bind(...productDays.dayNumber.binds, user.id, productDays.lo, productDays.hi),
       fxHistoryStatement(db, user.id, currency, prevStart, today),
+      // MRR movement (SPEC F-26): the window's rows, and which connections it's tracked for and
+      // since when. `state`, the stored list itself, is never read here.
+      ...(opts.movement
+        ? [
+            db
+              .prepare(
+                `SELECT m.* FROM mrr_movements m JOIN connections c ON c.id = m.connection_id
+                  WHERE c.user_id = ? AND m.day >= ? AND m.day <= ?`,
+              )
+              .bind(user.id, start, today),
+            db
+              .prepare('SELECT s.connection_id, s.since FROM subscription_states s JOIN connections c ON c.id = s.connection_id WHERE c.user_id = ?')
+              .bind(user.id),
+          ]
+        : []),
     ],
-    build: ([windowR, latestR, beforeR, revR, productR, histR], allConns, fxRows) => {
+    build: ([windowR, latestR, beforeR, revR, productR, histR, movementR, trackedR], allConns, fxRows) => {
       const conns = include ? allConns.filter(include) : allConns;
       const ids = include ? new Set(conns.map((c) => c.id)) : null;
       const own = <T extends { connection_id: string }>(rows: T[]): T[] => (ids ? rows.filter((r) => ids.has(r.connection_id)) : rows);
@@ -227,6 +245,8 @@ function dashboardQuery(
         fx,
         // Revenue at each day's rate (amountOn), MRR at the latest (amount / map): SPEC §6.
         cv: new FxConverter(currency, fx, new FxHistory(rowsOf<FxRow>(histR))),
+        movementRows: own(rowsOf<MovementDayRow>(movementR)),
+        tracked: own(rowsOf<TrackedRow>(trackedR)),
       });
     },
   };
@@ -425,6 +445,8 @@ function buildDashboard(p: {
   productRows: ProductDayRow[];
   fx: FxTable | null;
   cv: FxConverter;
+  movementRows: MovementDayRow[];
+  tracked: TrackedRow[];
 }): DashboardData {
   const { now, currency, tz, today, start, prevStart, rangeDays, revenueStepDays, conns, windowSnaps, latestSnaps, beforeSnaps, revRows, productRows, fx, cv } =
     p;
@@ -574,6 +596,7 @@ function buildDashboard(p: {
   );
 
   const productMrr = productMrrBreakdown(latestSnaps, conns, cv);
+  const movement = mrrMovement(p.movementRows, p.tracked, breakdown, latestSnaps, start, cv);
 
   // Reported through fx.missing; the dashboard says it next to the MRR it leaves out.
   const missing = [...cv.missing].sort();
@@ -594,12 +617,75 @@ function buildDashboard(p: {
     breakdown,
     products,
     productMrr,
+    movement,
     // The year's bars are weeks: summed here, so the page carries 52 entries rather than 364.
     revenueSeries: revenueInSteps(revenueSeries, revenueStepDays),
     mrrSeries,
     fx: { asOf: cv.used && fx ? fx.day : null, daily: cv.usedDaily, missing },
     days: { timeZone: tz, otherZones: otherDayZones(conns, tz) },
     warnings,
+  };
+}
+
+type MovementDayRow = Parameters<typeof movementOfRow>[0] & { connection_id: string; day: string };
+
+interface TrackedRow {
+  connection_id: string;
+  /** The day the connection's first list of subscriptions was stored. */
+  since: string;
+}
+
+/**
+ * Why MRR moved from `start` to today (SPEC F-26), at the latest rates like MRR itself. The
+ * figures at the start of the window come from today's, less what moved since: the movement is
+ * what was added to and taken from exactly that list.
+ */
+function mrrMovement(
+  rows: readonly MovementDayRow[],
+  tracked: readonly TrackedRow[],
+  breakdown: readonly BreakdownRow[],
+  latestSnaps: readonly SnapRow[],
+  start: string,
+  cv: FxConverter,
+): MrrMovement | null {
+  const since = new Map(tracked.map((t) => [t.connection_id, t.since]));
+  const included = breakdown.filter((b) => since.has(b.id));
+  if (included.length === 0) return null;
+  const ids = new Set(included.map((b) => b.id));
+
+  const total = { new: { amount: 0, count: 0 }, expansion: { amount: 0, count: 0 }, contraction: { amount: 0, count: 0 }, churned: { amount: 0, count: 0 } };
+  for (const r of rows) {
+    if (!ids.has(r.connection_id)) continue;
+    const m = movementOfRow(r);
+    for (const key of ['new', 'expansion', 'contraction', 'churned'] as const) {
+      total[key].amount += cv.map(m[key].mrr);
+      total[key].count += m[key].count;
+    }
+  }
+
+  let mrrNow = 0;
+  let subsNow = 0;
+  for (const s of latestSnaps) {
+    if (!ids.has(s.connection_id)) continue;
+    mrrNow += cv.map(parseMoneyMap(s.mrr));
+    subsNow += s.active_subscriptions;
+  }
+  const net = total.new.amount + total.expansion.amount - total.contraction.amount - total.churned.amount;
+  const mrrAtStart = mrrNow - net;
+  const subsAtStart = subsNow - total.new.count + total.churned.count;
+  const latestSince = included.map((b) => since.get(b.id)!).sort().at(-1)!;
+  const names: string[] = [];
+  for (const b of breakdown) {
+    const name = getProviderMeta(b.provider).name;
+    if (!ids.has(b.id) && !names.includes(name)) names.push(name);
+  }
+  return {
+    ...total,
+    net,
+    subscriptionChurnPct: subsAtStart > 0 ? (total.churned.count / subsAtStart) * 100 : null,
+    mrrChurnPct: mrrAtStart > 0 ? ((total.churned.amount + total.contraction.amount) / mrrAtStart) * 100 : null,
+    since: latestSince > start ? latestSince : null,
+    notIncluded: names,
   };
 }
 

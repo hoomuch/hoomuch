@@ -31,6 +31,17 @@ export interface SyncMessage {
 }
 
 /**
+ * One user's email digest (services/digest.ts). It rides the sync queue so each mail gets an
+ * invocation of its own, like a sync, instead of sharing the cron's.
+ */
+export interface DigestMessage {
+  v: 1;
+  digest: { userId: string };
+}
+
+export type QueueMessage = SyncMessage | DigestMessage;
+
+/**
  * A queued sync that hasn't started after this long is presumed lost, and may be queued again. A message
  * merely waiting its turn can outlive it too, behind a backlog of long syncs (up to SYNC_DEADLINE_MS each,
  * `max_concurrency` at a time); its copy is then superseded by the first one's sync, or retries a failed one.

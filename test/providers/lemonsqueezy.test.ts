@@ -23,6 +23,7 @@ import {
   type FakeResponse,
   type RecordedCall,
   type TestCtx,
+  expectSubscriptionsAddUp,
 } from '../fixtures/harness';
 import redemptionsJson from '../fixtures/lemonsqueezy/discount-redemptions.json';
 import discountsJson from '../fixtures/lemonsqueezy/discounts.json';
@@ -421,7 +422,11 @@ describe('lemonsqueezy fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      subscriptions: expect.any(Array),
     });
+    // Every active subscription once, #7 (usage-based) at 0; the rest add up to the MRR.
+    expectSubscriptionsAddUp(s);
+    expect(s.subscriptions?.filter((x) => x.mrr === 0)).toHaveLength(1);
     expect(priceCalls(calls)).toEqual(['/v1/prices/11', '/v1/prices/12', '/v1/prices/21', '/v1/prices/22']);
     expect(callsTo(calls, '/v1/users/me')).toHaveLength(0); // mode comes from config
     expect(calls.filter((c) => pathOf(c).startsWith('/v1/stores'))).toHaveLength(0); // currencies too

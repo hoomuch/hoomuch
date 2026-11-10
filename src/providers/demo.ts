@@ -13,6 +13,7 @@ import { DAY, addDays, dayKey, dayStart } from '../lib/time';
 import type {
   ConnectionConfig,
   MetricsSnapshot,
+  SubscriptionMrr,
   ProviderAdapter,
   RevenueEvent,
   RevenuePage,
@@ -79,17 +80,36 @@ function params(config: ConnectionConfig): DemoParams {
 function subscribers(p: DemoParams, plan: DemoPlan, day: string): number {
   const t = (dayStart(day) - dayStart(p.anchor)) / DAY;
   const trend = plan.base * p.scale * (1 + plan.growth) ** t;
-  const jitter = (rand(p.seed, 'subs', plan.key, day) - 0.5) * 3; // ±1.5 subscribers
+  // ±1.5 subscribers, redrawn once a week: a count that wobbled every day would read as a
+  // subscriber leaving and joining every day in the MRR movement (`subscriptionsOf`).
+  const jitter = (rand(p.seed, 'subs', plan.key, Math.floor(t / 7)) - 0.5) * 3;
   return Math.max(0, Math.round(trend + jitter));
+}
+
+/** Share of a plan's starting subscribers that cancel in a month, so the demo has churn to show. */
+const MONTHLY_CHURN = 0.04;
+
+/**
+ * The plan's subscribers on `day` as made-up subscriptions (`MetricsSnapshot.subscriptions`):
+ * numbered, the oldest cancelling at a steady rate and new ones joining at the top, so that the
+ * count is `n` every day.
+ */
+function subscriptionsOf(p: DemoParams, plan: DemoPlan, day: string, n: number): SubscriptionMrr[] {
+  const t = Math.max(0, (dayStart(day) - dayStart(p.anchor)) / DAY);
+  const first = Math.floor((t * plan.base * p.scale * MONTHLY_CHURN) / 30);
+  const monthly = normalizeToMonthly(plan.price, plan.interval);
+  return Array.from({ length: n }, (_, i) => ({ id: `${plan.key}-${first + i}`, currency: plan.currency, mrr: monthly }));
 }
 
 function snapshotFor(p: DemoParams, day: string): MetricsSnapshot {
   const mrr: MoneyMap = {};
   let subs = 0;
+  const subscriptions: SubscriptionMrr[] = [];
   for (const plan of DEMO_PLANS) {
     const n = subscribers(p, plan, day);
     subs += n;
     addToMoney(mrr, plan.currency, normalizeToMonthly(plan.price * n, plan.interval));
+    subscriptions.push(...subscriptionsOf(p, plan, day, n));
   }
   const revenue: MoneyMap = {};
   for (let i = 0; i < 30; i++) {
@@ -102,6 +122,7 @@ function snapshotFor(p: DemoParams, day: string): MetricsSnapshot {
     revenuePeriod: revenue,
     revenuePeriodDays: 30,
     newCustomers: Math.round(subs * (0.07 + rand(p.seed, 'new', day) * 0.03)),
+    subscriptions,
   };
 }
 

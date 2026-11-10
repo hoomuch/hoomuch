@@ -28,6 +28,7 @@ const LOADERS: Record<PageName, Loader> = {
   explore: () => import('../views/pages/explore').then((m) => m.ExplorePage),
   legal: () => import('../views/pages/legal').then((m) => m.LegalPage),
   verifyEmail: () => import('../views/pages/verify-email').then((m) => m.VerifyEmailPage),
+  digestStop: () => import('../views/pages/digest-stop').then((m) => m.DigestStopPage),
   notFound: () => import('../views/pages/errors').then((m) => m.NotFoundPage),
   serverError: () => import('../views/pages/errors').then((m) => m.ServerErrorPage),
 };

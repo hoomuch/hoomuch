@@ -12,7 +12,7 @@ import {
 import { ProviderError } from '../../src/providers/types';
 import { REVENUE_PAGE_BUDGET, SNAPSHOT_PAGE_BUDGET } from '../../src/sync/engine';
 import { DAY } from '../../src/lib/time';
-import { expectNoSecretsInLogs, fakeFetch, makeCtx, NOW, route, type RecordedCall } from '../fixtures/harness';
+import { expectNoSecretsInLogs, expectSubscriptionsAddUp, fakeFetch, makeCtx, NOW, route, type RecordedCall } from '../fixtures/harness';
 // Shapes from the OpenAPI schemas on https://docs.dodopayments.com/api-reference (SubscriptionListResponseItem,
 // BalanceLedgerEntryResponse) and the documented error bodies ({code, message}, /api-reference/error-codes).
 import subscriptionFx from '../fixtures/dodo/subscription.json';
@@ -265,7 +265,9 @@ describe('dodo fetchSnapshot', () => {
       revenuePeriod: null,
       revenuePeriodDays: null,
       newCustomers: null,
+      subscriptions: [{ id: expect.any(String), currency: 'USD', mrr: 2900 }],
     });
+    expectSubscriptionsAddUp(snap);
     expect(calls.map((c) => new URL(c.url).search)).toEqual([
       '?status=active&page_size=100&page_number=0',
       '?status=past_due&page_size=100&page_number=0',

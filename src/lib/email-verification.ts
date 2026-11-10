@@ -14,7 +14,7 @@ import {
   markEmailVerified,
 } from '../db/queries';
 import { randomToken, sha256Hex } from './crypto';
-import { mailEnabled, sendMail, type MailMessage } from './mail';
+import { escapeHtml, mailEnabled, sendMail, type MailMessage } from './mail';
 import { DAY } from './time';
 
 /** How long a mailed link works. A new one can be sent from the check-your-inbox page. */
@@ -80,12 +80,6 @@ export async function sendVerificationLink(
   await insertEmailVerification(env.DB, await sha256Hex(token), user.id, now + VERIFY_LINK_TTL_MS, now);
   const link = `${origin}${CONFIRM_PATH}?token=${token}`;
   return sendMail(env, verificationMessage(env.APP_NAME || 'hoomuch', user.email, link), fetchImpl);
-}
-
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (ch) => HTML_ESCAPES[ch]!);
 }
 
 /** The confirmation email: plain text first, a minimal HTML copy with the same words. */

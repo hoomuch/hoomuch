@@ -64,9 +64,9 @@
     // Cloudflare Turnstile on log in and sign up: put the widget's site key here and set the
     // TURNSTILE_SECRET_KEY secret. Empty (the default) leaves Turnstile off.
     "TURNSTILE_SITE_KEY": "",
-    // Email verification: who the sign-up confirmation mail comes from, on a domain verified in
-    // Resend, e.g. "hoomuch <hello@example.com>". It's on once the RESEND_API_KEY secret is set;
-    // without that secret, nothing is mailed and new accounts don't need confirming.
+    // Email: who the sign-up confirmation mail and the email digest come from, on a domain verified
+    // in Resend, e.g. "hoomuch <hello@example.com>". Both are on once the RESEND_API_KEY secret is
+    // set; without that secret, nothing is mailed and new accounts don't need confirming.
     "MAIL_FROM": "",
     // Public pages: "true" lets owners publish a product's verified revenue at /p/<slug>, with an
     // embeddable badge at /badge/<slug>.svg. Empty (the default) leaves them off.

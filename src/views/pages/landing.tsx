@@ -27,7 +27,7 @@ import { ProviderStrip } from '../components/provider-strip';
 import { RangeTabs } from '../components/range-tabs';
 import { Card, LinkButton } from '../components/ui';
 import { Layout, type PageChrome } from '../layout';
-import { MrrCard, ProductCard, RevenueCard, SecondaryStats } from './dashboard';
+import { MovementCard, MrrCard, ProductCard, RevenueCard, SecondaryStats } from './dashboard';
 
 export interface LandingPageProps {
   chrome: PageChrome;
@@ -142,6 +142,7 @@ export function LandingPage(props: LandingPageProps) {
           <MrrCard data={demo} />
           <SecondaryStats data={demo} className="mt-3 sm:mt-4" />
           <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-4">
+            <MovementCard data={demo} />
             <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
               <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
             </Card>

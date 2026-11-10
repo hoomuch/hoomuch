@@ -96,6 +96,7 @@ import {
   ProviderError,
   type ConnectionInput,
   type MetricsSnapshot,
+  type SubscriptionMrr as SnapshotSubscription,
   type ProviderAdapter,
   type ProviderContext,
   type RevenueEvent,
@@ -857,6 +858,8 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
   const byProduct = new Map<string, { mrr: MoneyMap; subscriptions: number }>();
   let activeSubscriptions = 0;
   let activeTrials = 0;
+  // Each paying subscription's own MRR, for the engine's movement diff (SPEC F-26).
+  const subscriptions: SnapshotSubscription[] = [];
   for (const status of ['active', 'past_due'] as const) {
     for await (const sub of paginate<StripeSubscription>(
       ctx,
@@ -875,6 +878,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
       if (amount > 0) {
         activeSubscriptions += 1;
         addToMoney(mrr, currency, amount);
+        subscriptions.push({ id: sub.id, currency, mrr: amount });
         for (const [product, part] of split) {
           if (part <= 0) continue;
           const entry = byProduct.get(product) ?? { mrr: {}, subscriptions: 0 };
@@ -929,6 +933,7 @@ async function fetchSnapshot(input: ConnectionInput, ctx: ProviderContext): Prom
     revenuePeriodDays: null,
     newCustomers: null,
     mrrByProduct,
+    subscriptions,
     ...(warnings.size > 0 ? { warnings: [...warnings] } : {}),
   };
 }

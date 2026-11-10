@@ -403,6 +403,64 @@ export function SecondaryStats(props: { data: DashboardData; className?: string 
   );
 }
 
+/** "3.1%": a share that is never negative, so no sign. */
+const share = (pct: number): string => `${pct.toFixed(1)}%`;
+
+/**
+ * Why MRR moved in the window (SPEC F-26): what new subscriptions and upgrades added, what
+ * downgrades and cancellations took away, and the churn rates that follow. Nothing when no
+ * connection's provider lists its subscriptions one by one.
+ */
+export function MovementCard(props: { data: DashboardData; className?: string }) {
+  const { data } = props;
+  const m = data.movement;
+  if (!m) return null;
+  const cur = data.currency;
+  const span = rangeSpan(data.rangeDays);
+  const money = (amount: number, sign: '+' | '−') => `${amount === 0 ? '' : sign}${formatMoney(amount, cur, { whole: true })}`;
+  const cells = [
+    { label: 'New', value: money(m.new.amount, '+'), count: m.new.count, tone: 'text-success-foreground' },
+    { label: 'Expansion', value: money(m.expansion.amount, '+'), count: m.expansion.count, tone: 'text-success-foreground' },
+    { label: 'Contraction', value: money(m.contraction.amount, '−'), count: m.contraction.count, tone: 'text-destructive-foreground' },
+    { label: 'Churned', value: money(m.churned.amount, '−'), count: m.churned.count, tone: 'text-destructive-foreground' },
+  ];
+  const rates = [
+    m.subscriptionChurnPct !== null ? `${share(m.subscriptionChurnPct)} of subscriptions churned` : null,
+    m.mrrChurnPct !== null ? `${share(m.mrrChurnPct)} of MRR lost to churn and downgrades` : null,
+  ].filter((r): r is string => r !== null);
+  const notes = [
+    m.since ? `Counted since ${formatDay(m.since)}, the first day there was a list of subscriptions to compare.` : null,
+    m.notIncluded.length > 0 ? `Not included: ${listNames(m.notIncluded)}.` : null,
+  ].filter((n): n is string => n !== null);
+  return (
+    <Card
+      className={props.className}
+      title="MRR movement"
+      description={`What changed MRR over ${span}. A change counts on the day a sync saw it.`}
+    >
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+        {cells.map((c) => (
+          <div key={c.label} className="min-w-0">
+            <dt className="text-caption text-muted-foreground">{c.label}</dt>
+            {/* The colour sits on its own element: tailwind-merge reads text-title and a text colour as one group. */}
+            <dd className="mt-1 text-title tabular-nums">
+              <span className={c.count > 0 ? c.tone : undefined}>{c.value}</span>
+            </dd>
+            <dd className="text-caption text-muted-foreground">
+              {formatNumber(c.count)} subscription{c.count === 1 ? '' : 's'}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-5 border-t pt-4 text-body">
+        Net <span className="font-semibold tabular-nums">{formatMoney(m.net, cur, { whole: true, signed: true })}</span>
+        {rates.length > 0 ? <span className="text-muted-foreground">. {rates.join(', ')}.</span> : null}
+      </p>
+      {notes.length > 0 ? <p className="mt-2 text-caption text-muted-foreground">{notes.join(' ')}</p> : null}
+    </Card>
+  );
+}
+
 /**
  * Providers that only report a trailing total, said inside the card they're missing from.
  * `where` finishes the sentence: the Revenue card by default, the calendar passes its own.
@@ -777,6 +835,8 @@ export function DashboardPage(props: DashboardPageProps) {
       <SecondaryStats data={data} className="mb-6" />
 
       <div className="grid gap-6">
+        <MovementCard data={data} />
+
         <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
           {data.breakdown.length > 0 ? (
             <BreakdownTable rows={data.breakdown} currency={data.currency} rangeDays={data.rangeDays} />

@@ -179,12 +179,28 @@ export interface MetricsSnapshot {
    */
   mrrByProduct?: ProductMrr[] | null;
   /**
+   * Every subscription counted in `activeSubscriptions`, for providers whose API lists them one by
+   * one. The engine compares it with the list from the sync before to tell why MRR moved: new,
+   * expansion, contraction, churn (SPEC F-26). Leave it out when the provider only reports totals.
+   * All of them or none: a partial list would read as churn.
+   */
+  subscriptions?: SubscriptionMrr[] | null;
+  /**
    * What this sync couldn't count, in a short sentence each, shown on the dashboard and the
    * connection page until a later sync no longer reports it. E.g. "MRR is before discounts: the
    * key can't read Coupons." Only for data the user can act on or should know is incomplete; never
    * customer PII, keys or raw provider bodies. The engine keeps at most 5, each ≤ 200 characters.
    */
   warnings?: string[];
+}
+
+/** One subscription's part of a snapshot's MRR (`MetricsSnapshot.subscriptions`). */
+export interface SubscriptionMrr {
+  /** The provider's id for the subscription: stable from sync to sync, never customer PII. */
+  id: string;
+  currency: string;
+  /** Monthly minor units, >= 0. 0 when it counts as active but its amount is unknown (usage-based). */
+  mrr: number;
 }
 
 export interface SnapshotHistoryRequest {
