@@ -12,6 +12,7 @@ import { registerDashboardRoutes } from './dashboard';
 import { registerDigestRoutes } from './digest';
 import { registerErrorHandlers } from './errors';
 import { registerLegalRoutes } from './legal';
+import { registerMarketingRoutes } from './marketing';
 import { registerMediaRoutes } from './media';
 import { registerPublicRoutes } from './public';
 import { registerSettingsRoutes } from './settings';
@@ -31,5 +32,6 @@ export function registerRoutes(app: Hono<AppEnv>): void {
   registerPublicRoutes(app);
   registerMediaRoutes(app);
   registerLegalRoutes(app);
+  registerMarketingRoutes(app);
   registerErrorHandlers(app);
 }

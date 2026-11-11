@@ -790,11 +790,30 @@ function DetailsForm(props: { product: ShareProduct; failed?: SharePageProps['de
           label="What it does"
           maxLength={DESCRIPTION_MAX}
           value={v.description}
-          help="A few sentences: what it is and what people use it for. The line under its name says it in one."
+          help={`A few sentences: what it is and what people use it for. The line under its name says it in one. Up to ${DESCRIPTION_MAX} characters.`}
           error={errors.description}
         />
-        <TextareaField id="details-problem" name="problem" label="Problem it solves" maxLength={PROBLEM_MAX} value={v.problem} error={errors.problem} />
-        <TextareaField id="details-audience" name="audience" label="Who it’s for" maxLength={AUDIENCE_MAX} value={v.audience} rows={2} error={errors.audience} />
+        {/* The limit is said up front: the box stops taking text at it, and a pasted paragraph would
+            otherwise end mid-sentence on the public page. */}
+        <TextareaField
+          id="details-problem"
+          name="problem"
+          label="Problem it solves"
+          maxLength={PROBLEM_MAX}
+          value={v.problem}
+          help={`Up to ${PROBLEM_MAX} characters.`}
+          error={errors.problem}
+        />
+        <TextareaField
+          id="details-audience"
+          name="audience"
+          label="Who it’s for"
+          maxLength={AUDIENCE_MAX}
+          value={v.audience}
+          rows={2}
+          help={`Up to ${AUDIENCE_MAX} characters.`}
+          error={errors.audience}
+        />
         <SelectField id="details-model" name="model" label="Sells to" options={[NOT_SET, ...MODELS.map((m) => ({ value: m.id, label: m.label }))]} value={v.model} />
         <ChipGroup
           name="markets"

@@ -20,6 +20,7 @@ import {
   mediaKeyType,
   newMediaKey,
   UPLOAD_MAX_BYTES,
+  UPLOAD_SIDE,
   UPLOAD_TYPES,
   type ImageInfo,
 } from '../lib/media';
@@ -175,6 +176,16 @@ async function fetchSiteIcon(
 const ITUNES_LOOKUP = 'https://itunes.apple.com/lookup';
 
 /**
+ * Apple's artwork URLs end in "<w>x<h>bb.<ext>", and its image service makes whatever size and
+ * format is asked for. An app icon is opaque, so it's asked for at the size uploads are scaled to,
+ * as a JPEG: about a tenth of the 512 px PNG the lookup names. Null when the URL isn't that shape.
+ */
+function smallerArtwork(url: string): string | null {
+  const smaller = url.replace(/\/\d+x\d+bb\.(?:png|jpe?g|webp)$/, `/${UPLOAD_SIDE}x${UPLOAD_SIDE}bb.jpg`);
+  return smaller === url ? null : smaller;
+}
+
+/**
  * An App Store listing's icon (512 px) as checked image bytes, from Apple's lookup API; null when
  * the app isn't found (the lookup reads the US store) or its artwork can't be used.
  */
@@ -190,11 +201,16 @@ async function fetchAppStoreIcon(appStoreUrl: string, origin: string, fetcher: t
     const data = body ? (JSON.parse(new TextDecoder().decode(body)) as { results?: Array<Record<string, unknown>> }) : null;
     const art = data?.results?.[0]?.artworkUrl512 ?? data?.results?.[0]?.artworkUrl100;
     if (typeof art !== 'string') return null;
-    const image = await fetchChecked(fetcher, art, { signal, headers: { ...headers, accept: 'image/*' } });
-    if (!image?.res.ok) return null;
-    const bytes = await readCapped(image.res, ICON_MAX_BYTES, true);
-    const icon = bytes ? cleanImage(bytes) : null;
-    return icon && Math.min(icon.info.width, icon.info.height) >= ICON_MIN_SIDE ? icon : null;
+    // The small JPEG first; the artwork as named if Apple won't make it.
+    for (const url of [smallerArtwork(art), art]) {
+      if (!url) continue;
+      const image = await fetchChecked(fetcher, url, { signal, headers: { ...headers, accept: 'image/*' } });
+      if (!image?.res.ok) continue;
+      const bytes = await readCapped(image.res, ICON_MAX_BYTES, true);
+      const icon = bytes ? cleanImage(bytes) : null;
+      if (icon && Math.min(icon.info.width, icon.info.height) >= ICON_MIN_SIDE) return icon;
+    }
+    return null;
   } catch {
     return null;
   }

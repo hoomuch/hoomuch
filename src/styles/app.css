@@ -291,7 +291,9 @@
     animation: fade-in 200ms var(--ease-out) backwards;
   }
   /* Landing hero only (first visit, marketing): lines rise 8px into place one after another.
-     Stagger with [animation-delay:…] in 60ms steps; keep the total under half a second. */
+     Stagger with [animation-delay:…] in 60ms steps; keep the total under half a second. A slide,
+     never a fade: the hero is readable in the first paint, before the scripts that hydrate the page
+     hold the main thread (a line fading in from 0 waited for them, and was the page's LCP). */
   .rise-in {
     animation: rise-in 360ms var(--ease-out) backwards;
   }
@@ -339,7 +341,6 @@
 
 @keyframes rise-in {
   from {
-    opacity: 0;
     translate: 0 8px;
   }
 }
@@ -394,10 +395,10 @@
   ::after {
     scroll-behavior: auto !important;
   }
-  .fade-in,
-  .rise-in {
+  .fade-in {
     animation-name: fade;
   }
+  .rise-in,
   .owl-hop {
     animation: none;
   }

@@ -13,6 +13,7 @@ import { loadFlash } from './lib/flash';
 import { limitRequests } from './lib/rate-limit';
 import { deleteExpiredSessions, deleteStaleLoginAttempts, purgeAbandonedAccounts } from './db/queries';
 import { registerRoutes } from './routes';
+import { MARKETING_PATH } from './routes/marketing';
 import { PUBLIC_PATH } from './routes/public';
 import { queueDueDigests } from './services/digest';
 import { WEBHOOK_PATH_PREFIX } from './services/webhooks';
@@ -115,10 +116,22 @@ app.use('*', async (c, next) => {
 });
 // Floods stop here, before the session lookup or any other D1 work.
 app.use('*', limitRequests);
-// Public pages and badges render the same for everyone, so they can be cached: no session, no
-// flash, no Set-Cookie, nothing of the visitor's in them (routes/public.tsx).
-app.use('*', (c, next) => (PUBLIC_PATH.test(c.req.path) ? next() : loadFlash(c, next)));
-app.use('*', (c, next) => (PUBLIC_PATH.test(c.req.path) ? withoutUser(c, next) : loadUser(c, next)));
+// One address per page: "/explore/" goes to "/explore" (a link pasted with a slash still works, and
+// search engines see one URL). GET and HEAD only, so no form post is ever redirected.
+// Always to this origin, spelled out: a bare "//evil.com" would leave the site.
+app.use('*', async (c, next) => {
+  const { origin, pathname, search } = new URL(c.req.url);
+  if ((c.req.method === 'GET' || c.req.method === 'HEAD') && pathname.length > 1 && pathname.endsWith('/')) {
+    return c.redirect(`${origin}${pathname.replace(/\/+$/, '') || '/'}${search}`, 301);
+  }
+  await next();
+});
+// Public pages, badges and the marketing pages render the same for everyone, so they can be
+// cached: no session, no flash, no Set-Cookie, nothing of the visitor's in them (routes/public.tsx,
+// routes/marketing.tsx).
+const sessionless = (path: string) => PUBLIC_PATH.test(path) || MARKETING_PATH.test(path);
+app.use('*', (c, next) => (sessionless(c.req.path) ? next() : loadFlash(c, next)));
+app.use('*', (c, next) => (sessionless(c.req.path) ? withoutUser(c, next) : loadUser(c, next)));
 
 app.get('/healthz', (c) => c.json({ ok: true }));
 

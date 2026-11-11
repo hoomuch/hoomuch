@@ -27,6 +27,8 @@ function Clock(props: { at: number }) {
 function Html(props: { json: string; html: string }) {
   // ok: raw-html
   const payload = <script id="hm-page" type="application/json" dangerouslySetInnerHTML={{ __html: props.json }} />;
+  // ok: raw-html
+  const ld = <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: props.json }} />;
   // ruleid: raw-html
   const markup = <div className="prose" dangerouslySetInnerHTML={{ __html: props.html }} />;
   // ruleid: raw-html
@@ -35,5 +37,5 @@ function Html(props: { json: string; html: string }) {
   const text = <p>{props.html}</p>;
   // ruleid: raw-html
   document.body.innerHTML = props.html;
-  return [payload, markup, inline, text];
+  return [payload, ld, markup, inline, text];
 }

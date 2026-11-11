@@ -38,6 +38,7 @@ import { ProviderLogo } from '../components/provider-logos';
 import { RelativeTime } from '../components/relative-time';
 import { ShareButtons } from '../components/share-sheet';
 import { Alert, LinkButton, SegmentedLinks, TextLink } from '../components/ui';
+import { productJsonLd } from '../json-ld';
 import { Layout } from '../layout';
 import { useNow } from '../page-root';
 import { useSignedIn } from '../use-signed-in';
@@ -101,7 +102,8 @@ function siteLabel(url: string): string {
 function publicProductSummary(product: { name: string }, stats: PublicFigures): { title: string; description: string } {
   const providers = listNames(stats.providers.map((p) => getProviderMeta(p).name));
   return {
-    title: `${product.name}: ${usd(stats.mrr.value)} MRR, verified`,
+    // "revenue" is the word people search a product's numbers with; the name stays first.
+    title: `${product.name} revenue: ${usd(stats.mrr.value)} MRR, verified`,
     description:
       `${usd(stats.revenue.value)} revenue in the last 30 days and ` +
       `${formatNumber(stats.activeSubscriptions.value)} active subscriptions, read from ${providers} by hoomuch.`,
@@ -135,6 +137,7 @@ export function PublicProductPage(props: PublicProductPageProps) {
       title={summary.title}
       description={summary.description}
       og={{ url: props.url, image: props.image, title: summary.title, markdown: props.markdown }}
+      jsonLd={productJsonLd({ url: props.url, title: summary.title, description: summary.description, product, stats, owner })}
       marketing
     >
       {/* The header to the content: 32 (design/system.md §3.3), then 24 between blocks. Full app

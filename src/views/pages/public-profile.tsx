@@ -17,6 +17,7 @@ import { KpiStat } from '../components/kpi';
 import { ProductCard } from '../components/product-card';
 import { STAT_CELL, StatGrid, VerifiedNote } from '../components/public-stats';
 import { ShareButtons } from '../components/share-sheet';
+import { profileJsonLd } from '../json-ld';
 import { Layout } from '../layout';
 import { useNow } from '../page-root';
 import { ReportLink, ShowYourOwn } from './public-product';
@@ -62,14 +63,16 @@ export function PublicProfilePage(props: PublicProfilePageProps) {
   const since = products.map((p) => p.stats.revenueSince).filter((d): d is string => d !== null).sort()[0] ?? null;
   const count = products.length === 1 ? '1 product' : `${products.length} products`;
   const title = `${profile.displayName}: ${mrrText} MRR across ${count}, verified`;
+  const description = `${usd(revenue.value)} revenue in the last 30 days across ${count}, read from their payment providers by hoomuch.`;
   return (
     <Layout
       {...NO_CHROME}
       legal={props.legal}
       noindex={props.noindex}
       title={title}
-      description={`${usd(revenue.value)} revenue in the last 30 days across ${count}, read from their payment providers by hoomuch.`}
+      description={description}
       og={{ url: props.url, image: props.image, title }}
+      jsonLd={profileJsonLd({ url: props.url, title, description, profile, products })}
       marketing
     >
       {/* The header to the content: 32 (design/system.md §3.3), then 24 between blocks, on the full app column. */}

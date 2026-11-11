@@ -9,8 +9,9 @@
  * Before hydration both are a plain file input (the card with an Upload button), multipart, so they
  * work without JavaScript. Once hydrated the input hides behind a button, the whole card or field
  * takes a dropped image, and either way the image is scaled down in the browser first (a square of
- * UPLOAD_SIDE, cropped to the middle, as WebP where the browser writes it). Nothing is shown from
- * the file as an <img>: the CSP allows no blob: images. The field draws its preview on a canvas.
+ * UPLOAD_SIDE, cropped to the middle, as WebP where the browser writes it, else JPEG unless it has
+ * transparency). Nothing is shown from the file as an <img>: the CSP allows no blob: images. The
+ * field draws its preview on a canvas.
  * The server checks whatever arrives either way.
  */
 
@@ -41,15 +42,28 @@ async function draw(file: File, onto?: HTMLCanvasElement): Promise<HTMLCanvasEle
   return canvas;
 }
 
+const encode = (canvas: HTMLCanvasElement, type: string, quality: number) =>
+  new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
+
+/** No pixel of it is see-through, so it loses nothing as a JPEG. */
+function opaque(canvas: HTMLCanvasElement): boolean {
+  const data = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data;
+  if (!data) return false;
+  for (let i = 3; i < data.length; i += 4) if (data[i] !== 255) return false;
+  return true;
+}
+
 /** The file scaled down for upload; null when the browser can't draw it (the original goes then). */
 async function shrink(file: File): Promise<File | null> {
   const canvas = await draw(file);
   if (!canvas) return null;
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
+  let blob = await encode(canvas, 'image/webp', 0.9);
   if (!blob) return null;
-  // A browser that can't write WebP hands back PNG, which is fine too.
-  const webp = blob.type === 'image/webp';
-  return new File([blob], webp ? 'image.webp' : 'image.png', { type: webp ? 'image/webp' : 'image/png' });
+  // A browser that can't write WebP (Safari) hands back PNG: several times the size for a photo,
+  // so an image without transparency goes as a JPEG instead. A logo with a see-through edge stays PNG.
+  if (blob.type !== 'image/webp' && opaque(canvas)) blob = (await encode(canvas, 'image/jpeg', 0.88)) ?? blob;
+  const type = blob.type === 'image/webp' || blob.type === 'image/jpeg' ? blob.type : 'image/png';
+  return new File([blob], `image.${type === 'image/jpeg' ? 'jpg' : type.slice(6)}`, { type });
 }
 
 /** Puts `file` (scaled down where the browser can) in the file input, as if it had been picked. */

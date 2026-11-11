@@ -68,6 +68,9 @@ import {
 import { getProviderMeta, PROVIDERS } from '../../src/providers/registry';
 import { HOUR, MINUTE } from '../../src/lib/time';
 
+/** The landing page's own address and link preview, as the route passes them. */
+const HOME = { url: 'https://hoomuch.test/', image: 'https://hoomuch.test/og/home.png' };
+
 /** A React element for a component and its props (no JSX in .ts tests). */
 function h<P extends object>(component: ComponentType<P>, props: P): ReactElement {
   return createElement(component, props);
@@ -144,7 +147,7 @@ describe('Layout', () => {
     expect(footer).toContain('src="/mascot/asleep.png"');
     expect(footer).toContain('Syncs every hour, so you can check less often.');
     expect(footer).toContain('aria-label="Footer"');
-    for (const href of ['/#demo', '/#store', '/login', 'https://github.com/hoomuch/hoomuch#deploy-to-cloudflare']) {
+    for (const href of ['/#demo', '/#store', '/integrations', '/self-host', '/login']) {
       expect(footer).toContain(`href="${href}"`);
     }
     expect(footer).toContain('href="https://github.com/hoomuch/hoomuch/blob/main/LICENSE"');
@@ -165,7 +168,7 @@ describe('Layout', () => {
     const chrome = { user: null, flash: null };
     const demo = fixtureDashboard(30, 'full', FIXTURE_NOW);
     const heads = [
-      await html(h(LandingPage, { chrome, signupOpen: true, demo, cadence: 'every hour' })),
+      await html(h(LandingPage, { chrome, ...HOME, signupOpen: true, demo, cadence: 'every hour' })),
       await html(h(AuthPage, { chrome, mode: 'login', signupOpen: true })),
       await html(h(AuthPage, { chrome, mode: 'signup', signupOpen: true })),
     ].map((out) => ({
@@ -770,7 +773,7 @@ describe('personality: owl, landing, first sync, 404', () => {
 
   it('shows the real dashboard, the one action and literal storage facts on the landing page', async () => {
     const demo = fixtureDashboard(30, 'full', FIXTURE_NOW);
-    const out = await render('landing', h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo, cadence: 'every hour' }));
+    const out = await render('landing', h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: true, demo, cadence: 'every hour' }));
     expect(out).toContain('Every store you sell in. One\u00a0MRR.');
     expect(out).toContain('aria-label="Supported providers"'); // the provider strip, from the registry
     expect(out).toContain('>Google Play<');
@@ -783,13 +786,13 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('href="/?range=90#demo"');
     expect(out).toContain('href="/?range=30&amp;revenue=line#revenue"');
     // The landing page doesn't remember choices, so its range tabs carry the line along.
-    const line = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo, cadence: 'every hour', revenueVariant: 'line' }));
+    const line = await html(h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: true, demo, cadence: 'every hour', revenueVariant: 'line' }));
     expect(line).toContain('href="/?range=90&amp;revenue=line#demo"');
     expect(tags(line, 'a', 'href="/?range=30&amp;revenue=line#revenue"', 'aria-current="page"')).toHaveLength(1);
     expect(out).toContain('Create a Stripe key');
     expect(out).not.toContain('dashboard.stripe.com'); // preview drops the outbound link
     expect(out).toContain('Setup is one key per store.');
-    expect(out).toContain('Any of the 12 above.'); // counted from the registry
+    expect(out).toMatch(/Any of the <a href="\/integrations"[^>]*>12(<!-- -->)? above<\/a>/); // counted from the registry
     expect(out).toContain('so they have full access'); // the full-access keys stay named plainly
     expect(out).toContain('AES-256-GCM');
     expect(out).toContain('Syncs run every hour, and about a minute after a new subscription or refund where you turn on webhooks.');
@@ -806,7 +809,7 @@ describe('personality: owl, landing, first sync, 404', () => {
 
     expect(out).toContain('<title>MRR dashboard for Stripe, RevenueCat and app stores · hoomuch</title>');
 
-    const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: false, demo, cadence: 'every hour' }));
+    const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: false, demo, cadence: 'every hour' }));
     expect(closed).not.toContain('href="/signup"');
     expect(closed).not.toContain('No key handy?');
     expect(closed).not.toContain('id="pricing-title"'); // a private instance doesn't advertise hoomuch.com
@@ -1024,7 +1027,7 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(tags(page, 'img', `src="/mascot/${pose}.png"`)).toHaveLength(1);
     // The landing demo reuses the MRR card; its owl sits on the frame, so the card brings none.
     const landing = await html(
-      h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo: data, cadence: 'every hour' }),
+      h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: true, demo: data, cadence: 'every hour' }),
     );
     for (const p of ['proud', 'flag', 'counting']) expect(landing).not.toContain(`/mascot/${p}.png`);
     expect(tags(landing, 'img', 'src="/mascot/perched.png"')).toHaveLength(1);
@@ -1119,7 +1122,11 @@ describe('connection page', () => {
 
 /** Inline styles are allowed (style-src 'unsafe-inline': Base UI, Recharts and Motion set them). Scripts are not: the only one is the same-origin module bundle. */
 function expectCspSafe(out: string, name: string): void {
-  expect(out.replace('<script type="module" src="/client/entry.js"></script>', ''), name).not.toMatch(/<script/i);
+  // The two allowed: the same-origin bundle, and JSON-LD, a data block that is never executed.
+  const scripts = out
+    .replace('<script type="module" src="/client/entry.js"></script>', '')
+    .replace(/<script type="application\/ld\+json">[^<]*<\/script>/g, '');
+  expect(scripts, name).not.toMatch(/<script/i);
   expect(out, name).not.toMatch(/\son[a-z]+=/i);
 }
 
@@ -1194,7 +1201,7 @@ describe('CSP', () => {
     const data = fixtureDashboard(30, 'full', FIXTURE_NOW);
     const samples: Record<string, ReactElement> = {
       layout: h(Layout, { title: 'Dashboard', user, flash: { type: 'error', message: 'x' }, nav: 'dashboard', refresh: { seconds: 3, url: '/dashboard?poll=1', stopUrl: '/dashboard?poll=21' } }),
-      landing: h(LandingPage, { chrome: { user: null, flash: null }, signupOpen: true, demo: data, cadence: 'every hour' }),
+      landing: h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: true, demo: data, cadence: 'every hour' }),
       dashboard: h(DashboardPage, { chrome, data, connections: FIXTURE_CONNECTIONS, sync: null, now: FIXTURE_NOW, celebrate: { dismissHref: '/dashboard' } }),
       connection: h(ConnectionDetailPage, { chrome, detail: fixtureConnectionDetail(2), sync: null, now: FIXTURE_NOW }),
       transactions: h(TransactionsPage, { chrome, page: fixtureTransactions(1, null), hasConnections: true, filterProviders: ['stripe'] }),

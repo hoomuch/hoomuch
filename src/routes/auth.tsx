@@ -75,21 +75,47 @@ function carryNext(v: string | undefined | null): string | null {
   return safeNext(v) === v ? v : null;
 }
 
+/**
+ * How long the edge keeps the signed-out landing page. It's the same for every visitor without a
+ * cookie (demo numbers, the Explore gallery), the heaviest page to render, and the one search
+ * engines and new visitors open first.
+ */
+const LANDING_EDGE_SECONDS = 300;
+
+/** Cloudflare's cache for this zone; none in tests or `wrangler dev` without one. */
+function edgeCache(): Cache | null {
+  return typeof caches === 'undefined' ? null : ((caches as unknown as { default?: Cache }).default ?? null);
+}
+
 export function registerAuthRoutes(app: Hono<AppEnv>): void {
   app.get('/', async (c) => {
     if (c.get('user')) return c.redirect('/dashboard', 303);
+    // Any cookie (a session, a flash, a choice) skips the edge cache, so a signed-in browser still
+    // goes to its dashboard and a flash still shows. Browsers revalidate (max-age=0).
+    const cache = c.req.header('Cookie') ? null : edgeCache();
+    const hit = cache ? await cache.match(c.req.url) : undefined;
+    // A copy: middleware still sets its headers on the way out.
+    if (hit) return new Response(hit.body, hit);
+    const origin = new URL(c.req.url).origin;
     // The live preview: deterministic demo numbers dated to today, rendered by the real components.
     const demo = fixtureDashboard(parseRange(c.req.query('range')), 'full', Date.now());
     // Real products from Explore (SPEC F-23), where public pages are on: one indexed read.
     const gallery = publicPagesEnabled(c.env) ? await getLandingGallery(c.env.DB, Date.now(), mediaEnabled(c.env)) : null;
-    return renderPage(c, 'landing', {
+    const res = renderPage(c, 'landing', {
         chrome: chrome(c),
+        url: `${origin}/`,
+        image: `${origin}/og/home.png`,
         signupOpen: signupAllowed(c.env),
         demo,
         revenueVariant: parseRevenueVariant(c.req.query('revenue')),
         cadence: syncCadence(c.env.SYNC_INTERVAL_MINUTES),
         gallery,
       });
+    if (cache && !res.headers.has('Set-Cookie')) {
+      res.headers.set('Cache-Control', `public, max-age=0, s-maxage=${LANDING_EDGE_SECONDS}`);
+      c.executionCtx.waitUntil(cache.put(c.req.url, res.clone()));
+    }
+    return res;
   });
 
   // ----- sign up -----
@@ -100,6 +126,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     return renderPage(c, 'auth', {
         chrome: chrome(c),
         mode: 'signup',
+        canonical: `${new URL(c.req.url).origin}/signup`,
         next,
         signupOpen: signupAllowed(c.env),
         turnstileSiteKey: turnstileSiteKey(c.env),
@@ -149,6 +176,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     return renderPage(c, 'auth', {
         chrome: chrome(c),
         mode: 'login',
+        canonical: `${new URL(c.req.url).origin}/login`,
         next,
         signupOpen: signupAllowed(c.env),
         turnstileSiteKey: turnstileSiteKey(c.env),

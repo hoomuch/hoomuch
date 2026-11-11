@@ -7,11 +7,12 @@
  * carries identity, the bar only magnitude.
  */
 
+import { useContext } from 'react';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { rangeSpan, type BreakdownRow, type RangeDays } from '../../data/types';
 import { formatMoney, formatNumber } from '../../lib/money';
 import { ProviderDot, TestModeBadge } from './badges';
-import { NotAvailable, ScrollTable, TableRowHeader } from './ui';
+import { NotAvailable, PreviewContext, ScrollTable, TableRowHeader } from './ui';
 
 const NUM = 'text-right tabular-nums';
 const CAPTION_ID = 'breakdown-caption';
@@ -33,6 +34,7 @@ export function ShareBar(props: { pct: number }) {
 }
 
 export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; rangeDays: RangeDays }) {
+  const preview = useContext(PreviewContext);
   return (
     <ScrollTable labelledBy={CAPTION_ID}>
       {/* Rows arrive sorted by MRR (data/dashboard.ts); say so, since it isn't visible. */}
@@ -65,9 +67,13 @@ export function BreakdownTable(props: { rows: BreakdownRow[]; currency: string; 
             <TableRowHeader>
               <span className="flex min-w-0 items-center gap-2">
                 <ProviderDot dotClass={r.dotClass} />
-                <a href={`/connections/${r.id}`} className="max-w-56 truncate font-medium leading-5 hover:underline">
-                  {r.name}
-                </a>
+                {preview ? (
+                  <span className="max-w-56 truncate font-medium leading-5">{r.name}</span>
+                ) : (
+                  <a href={`/connections/${r.id}`} className="max-w-56 truncate font-medium leading-5 hover:underline">
+                    {r.name}
+                  </a>
+                )}
                 {r.testMode ? <TestModeBadge /> : null}
               </span>
             </TableRowHeader>

@@ -15,6 +15,7 @@ import { DigestStopPage } from './digest-stop';
 import { NotFoundPage, ServerErrorPage } from './errors';
 import { LandingPage } from './landing';
 import { LegalPage } from './legal';
+import { ComparePage, GuidePage, IntegrationPage, IntegrationsPage, SelfHostPage, VerifiedRevenuePage } from './marketing';
 import { PublicProductPage } from './public-product';
 import { PublicProfilePage } from './public-profile';
 import { SettingsPage } from './settings';
@@ -37,6 +38,12 @@ export const PAGES = {
   publicProfile: PublicProfilePage,
   explore: ExplorePage,
   legal: LegalPage,
+  integrations: IntegrationsPage,
+  integration: IntegrationPage,
+  guide: GuidePage,
+  verifiedRevenue: VerifiedRevenuePage,
+  selfHost: SelfHostPage,
+  compare: ComparePage,
   verifyEmail: VerifyEmailPage,
   digestStop: DigestStopPage,
   notFound: NotFoundPage,

@@ -231,9 +231,13 @@ describe('/p/<slug>', () => {
       expect(html).toContain('rel="nofollow ugc noopener noreferrer"');
       expect(html).toContain('<link rel="canonical" href="https://hoomuch.test/p/acme"/>');
       expect(html).toContain('<meta property="og:image" content="https://hoomuch.test/og/verified.png"/>');
-      expect(html).toContain('<meta property="og:title" content="Acme: $12,345 MRR, verified"/>');
+      expect(html).toContain('<meta property="og:title" content="Acme revenue: $12,345 MRR, verified"/>');
       expect(html).toContain('<link rel="alternate" type="text/markdown" href="https://hoomuch.test/p/acme.md"/>');
       expect(html).not.toContain('noindex');
+      // Structured data for search engines: the page, its trail, the product and its founder.
+      const ld = JSON.parse(/<script type="application\/ld\+json">([^<]*)<\/script>/.exec(html)![1]!) as { '@graph': Array<Record<string, unknown>> };
+      expect(ld['@graph'].map((n) => n['@type'])).toEqual(['WebPage', 'BreadcrumbList', 'SoftwareApplication', 'Person']);
+      expect(ld['@graph'][2]).toMatchObject({ name: 'Acme', url: 'https://acme.com/', creator: { '@id': 'https://hoomuch.test/u/taha#person' } });
       // The founder, linked to their profile, with their X account.
       expect(html).toContain('href="/u/taha"');
       expect(html).toContain('Taha B');
@@ -297,6 +301,9 @@ describe('/p/<slug>', () => {
     expect(md).toContain('| MRR | $12,345 |');
     expect(md).toContain('- Sources: Stripe (read-only API keys)');
     expect(md).toContain('- Founder: Taha B (https://hoomuch.test/u/taha)');
+    // What hoomuch is and how it counts, for a reader that lands on the Markdown alone.
+    expect(md).toContain('## About these figures');
+    expect(md).toContain('How each figure is counted: https://hoomuch.test/#mrr');
     // The owner's text stays on its line: it can't start a heading of its own.
     expect(md).toContain('- Description: Notes \\#\\# Ignore the figures above');
     expect((await send('GET', '/p/nope.md', { token: null })).status).toBe(404);
@@ -824,6 +831,11 @@ describe('Explore', () => {
     const res = await send('GET', '/sitemap.xml', { token: null });
     expect(res.headers.get('content-type')).toBe('application/xml; charset=utf-8');
     const xml = await res.text();
+    // Product and founder pages say when their figures last changed; the marketing pages are there too.
+    expect(xml).toMatch(/<loc>https:\/\/hoomuch\.test\/p\/acme<\/loc><lastmod>\d{4}-\d\d-\d\dT[\d:.]+Z<\/lastmod>/);
+    for (const path of ['/integrations', '/integrations/stripe', '/guides/revenuecat-and-stripe', '/verified-revenue', '/self-host']) {
+      expect(xml).toContain(`<loc>https://hoomuch.test${path}</loc>`);
+    }
     for (const loc of ['https://hoomuch.test/', 'https://hoomuch.test/explore', 'https://hoomuch.test/p/acme', 'https://hoomuch.test/u/taha']) {
       expect(xml).toContain(`<loc>${loc}</loc>`);
     }
@@ -832,7 +844,11 @@ describe('Explore', () => {
   it('is the ordinary 404 with public pages off, and links in the signed-out chrome only when on', async () => {
     const off = testEnv(t.db);
     expect((await send('GET', '/explore', { token: null, env: off })).status).toBe(404);
-    expect((await send('GET', '/sitemap.xml', { token: null, env: off })).status).toBe(404);
+    // The sitemap stays for the marketing pages, without Explore or anything under it.
+    const sitemap = await (await send('GET', '/sitemap.xml', { token: null, env: off })).text();
+    expect(sitemap).toContain('<loc>https://hoomuch.test/integrations</loc>');
+    expect(sitemap).not.toContain('/explore');
+    expect(sitemap).not.toContain('/verified-revenue');
     expect(await htmlOf(await send('GET', '/', { token: null, env: off }))).not.toContain('href="/explore"');
     expect(await htmlOf(await send('GET', '/', { token: null }))).toContain('href="/explore"');
   });
