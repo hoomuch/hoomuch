@@ -81,6 +81,8 @@ function carryNext(v: string | undefined | null): string | null {
  * engines and new visitors open first.
  */
 const LANDING_EDGE_SECONDS = 300;
+/** The edge keeps it; browsers always ask again, so a sign-in takes effect at once. */
+const LANDING_CACHE_CONTROL = `public, max-age=0, s-maxage=${LANDING_EDGE_SECONDS}`;
 
 /** Cloudflare's cache for this zone; none in tests or `wrangler dev` without one. */
 function edgeCache(): Cache | null {
@@ -94,8 +96,14 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
     // goes to its dashboard and a flash still shows. Browsers revalidate (max-age=0).
     const cache = c.req.header('Cookie') ? null : edgeCache();
     const hit = cache ? await cache.match(c.req.url) : undefined;
-    // A copy: middleware still sets its headers on the way out.
-    if (hit) return new Response(hit.body, hit);
+    if (hit) {
+      // A copy: middleware still sets its headers on the way out. Cloudflare hands a cached
+      // response back with the zone's Browser Cache TTL (4 hours by default) in place of max-age=0,
+      // which would keep a signed-in browser on the landing page: set it again.
+      const copy = new Response(hit.body, hit);
+      copy.headers.set('Cache-Control', LANDING_CACHE_CONTROL);
+      return copy;
+    }
     const origin = new URL(c.req.url).origin;
     // The live preview: deterministic demo numbers dated to today, rendered by the real components.
     const demo = fixtureDashboard(parseRange(c.req.query('range')), 'full', Date.now());
@@ -112,7 +120,7 @@ export function registerAuthRoutes(app: Hono<AppEnv>): void {
         gallery,
       });
     if (cache && !res.headers.has('Set-Cookie')) {
-      res.headers.set('Cache-Control', `public, max-age=0, s-maxage=${LANDING_EDGE_SECONDS}`);
+      res.headers.set('Cache-Control', LANDING_CACHE_CONTROL);
       c.executionCtx.waitUntil(cache.put(c.req.url, res.clone()));
     }
     return res;
