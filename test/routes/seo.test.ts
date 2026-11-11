@@ -156,9 +156,11 @@ describe('the signed-out landing page at the edge', () => {
     expect(first.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=300');
     expect([...stored.keys()]).toEqual(['https://hoomuch.test/']);
     // The next visitor gets the stored page, with the security headers set again on the way out.
-    stored.set('https://hoomuch.test/', new Response('cached', { headers: { 'cache-control': 'public, max-age=0, s-maxage=300' } }));
+    // Cloudflare hands it back with the zone's Browser Cache TTL as max-age: browsers mustn't keep it.
+    stored.set('https://hoomuch.test/', new Response('cached', { headers: { 'cache-control': 'public, max-age=14400, s-maxage=300' } }));
     const second = await send('/');
     expect(await second.text()).toBe('cached');
+    expect(second.headers.get('cache-control')).toBe('public, max-age=0, s-maxage=300');
     expect(second.headers.get('content-security-policy')).toContain("script-src 'self'");
     // Any cookie skips it: a flash, a choice or a session renders as usual.
     const withCookie = await send('/', { headers: { cookie: 'hm_flash=x' } });
