@@ -87,6 +87,13 @@ export interface LayoutProps extends PageChrome {
    */
   quiet?: boolean;
   /**
+   * With `marketing` and `explore`: link Explore from the header too, not the footer alone. The
+   * public pages set it (Explore, a product, a founder), and the landing page once Explore has
+   * enough products for its strip. The pages that sell the dashboard leave it out: a visitor sent
+   * to a near-empty Explore reads it as nobody being here.
+   */
+  exploreInHeader?: boolean;
+  /**
    * A still ray light with grain behind the page header (views/components/backdrop.tsx). The
    * top-level app pages (dashboard, connections list, transactions, settings). The connect form, a
    * connection's page (keys, deletes) and errors stay plain. Marketing pages get the moving hero
@@ -257,7 +264,7 @@ export function Layout(props: LayoutProps) {
             ) : props.marketing ? (
               // Secondary, not primary: the page's own action ("See your MRR") is the one ink button.
               <div className="ml-auto flex items-center gap-2">
-                {props.explore ? (
+                {props.explore && props.exploreInHeader ? (
                   <a href="/explore" aria-current={props.nav === 'explore' ? 'page' : undefined} className="rounded-md px-2 py-1 text-body text-muted-foreground transition-colors hover:text-foreground aria-[current=page]:text-foreground">
                     Explore
                   </a>

@@ -112,7 +112,10 @@ function llmsTxt(c: Context<AppEnv>): string {
     ...COUNTING.map((x) => `- ${x.term}: ${x.rule}`),
     '',
     ...(signupAllowed(c.env)
-      ? [`Pricing on ${host}: free under $1,000 MRR, and free for everyone during the beta. After the beta, $9 a month or $90 a year at $1,000 MRR and up. Self-hosting is free.`, '']
+      ? [
+          `Pricing on ${host}: free under $1,000 MRR, and free for everyone during the beta. After the beta, $9 a month or $90 a year for the private dashboard at $1,000 MRR and up.${publicPages ? ' Verified pages, the badge and Explore are free at any MRR.' : ''} Self-hosting is free.`,
+          '',
+        ]
       : []),
     '## Pages',
     '',

@@ -41,6 +41,7 @@ import { Layout } from '../../src/views/layout';
 import { SyncNotice, syncCadence } from '../../src/views/pages/shared';
 import { Owl, OWL_SIZE } from '../../src/views/components/mascot';
 import { LandingPage } from '../../src/views/pages/landing';
+import { MAX_CONNECTIONS_PER_USER } from '../../src/services/connections';
 import {
   completenessNotes,
   DashboardPage,
@@ -778,7 +779,9 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).toContain('aria-label="Supported providers"'); // the provider strip, from the registry
     expect(out).toContain('>Google Play<');
     expect(out).not.toContain('>Demo data<'); // the demo isn't a provider you can buy from
-    expect(out.match(/href="\/signup"/g)).toHaveLength(2); // hero + last call, same action
+    expect(out.match(/href="\/signup"/g)).toHaveLength(3); // hero, after the demo and last call: same action
+    expect(out).toContain('Free to start, no card needed.'); // what it costs to try, beside the button
+    expect(out).toContain('These are demo numbers. Yours take one key per store.');
     expect(out).toContain('aria-label="MRR"'); // the real MRR card
     expect(out).toContain('aria-label="Subscriptions, trials and revenue"');
     expect(out).toContain('>By product<'); // the demo has every card the dashboard has, up to the calendar
@@ -804,14 +807,24 @@ describe('personality: owl, landing, first sync, 404', () => {
     expect(out).not.toContain('NEEDS REAL DATA');
     expect(out).not.toContain('Why this exists'); // no founder note until it's real
     expect(out).toContain('Free until your MRR reaches $1,000.'); // the free tier leads the pricing
-    expect(out).toContain('$9 per month'); // exact price, with its tax treatment
+    expect(out).toContain('Free in the beta, then $9 per month'); // today's price first, then the exact one
+    expect(out).toContain('And free for everyone while the beta lasts, with no card needed.');
     expect(out).toContain('plus VAT or sales tax where it applies');
+    expect(out).toContain('For the private dashboard'); // what the $9 pays for
+    expect(out).toContain(`up to ${MAX_CONNECTIONS_PER_USER} connections`); // the real cap, not "no limit"
+    expect(out).not.toContain('no limit on connections');
+    expect(out).not.toContain('free at any MRR'); // no public pages on this instance, so no promise about them
+    // Where the instance has public pages, publishing them is free at any MRR; only the dashboard is paid.
+    const pub = await html(h(LandingPage, { chrome: { user: null, flash: null, explore: true }, ...HOME, signupOpen: true, demo, cadence: 'every hour' }));
+    expect(pub).toContain('Verified pages, the badge and Explore are free at any MRR.');
+    expect(pub).toContain('Free at any MRR.');
 
     expect(out).toContain('<title>MRR dashboard for Stripe, RevenueCat and app stores · hoomuch</title>');
 
     const closed = await html(h(LandingPage, { chrome: { user: null, flash: null }, ...HOME, signupOpen: false, demo, cadence: 'every hour' }));
     expect(closed).not.toContain('href="/signup"');
     expect(closed).not.toContain('No key handy?');
+    expect(closed).not.toContain('These are demo numbers.'); // no second action either
     expect(closed).not.toContain('id="pricing-title"'); // a private instance doesn't advertise hoomuch.com
   });
 

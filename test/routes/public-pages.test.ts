@@ -853,8 +853,15 @@ describe('Explore', () => {
     expect(await htmlOf(await send('GET', '/', { token: null }))).toContain('href="/explore"');
   });
 
-  it('shows the landing page strip only once six products qualify', async () => {
-    expect(await htmlOf(await send('GET', '/', { token: null }))).not.toContain('gallery-title');
+  it('shows the landing page strip, and Explore in its header, only once six products qualify', async () => {
+    // The page's own header: everything up to its first </header>.
+    const top = (html: string) => html.split('</header>')[0];
+    const before = await htmlOf(await send('GET', '/', { token: null }));
+    expect(before).not.toContain('gallery-title');
+    expect(top(before)).not.toContain('href="/explore"'); // a near-empty Explore isn't offered up top
+    expect(before).toContain('href="/explore"'); // the footer and the verified section still link it
+    expect(top(await htmlOf(await send('GET', '/integrations', { token: null })))).not.toContain('href="/explore"');
+    expect(top(await htmlOf(await send('GET', '/explore', { token: null })))).toContain('href="/explore"'); // the public side keeps it
     await send('POST', '/share/profile', { form: PROFILE });
     const s = JSON.stringify({
       v: 1, currency: 'USD', mrr: { value: 50_000, previous: 40_000, deltaPct: 25 }, activeSubscriptions: { value: 1, previous: null, deltaPct: null },
@@ -869,6 +876,7 @@ describe('Explore', () => {
     }
     const html = await htmlOf(await send('GET', '/', { token: null }));
     expect(html).toContain('Growing this month');
+    expect(top(html)).toContain('href="/explore"');
     expect(html).toContain('href="/p/app-0"');
     expect(html).toContain('by Taha B');
   });

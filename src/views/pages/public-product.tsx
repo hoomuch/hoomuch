@@ -84,7 +84,7 @@ export interface PublicProductPageProps {
 }
 
 /** Rendered without the visitor's session; only served where public pages, Explore included, are on. */
-const NO_CHROME = { user: null, flash: null, explore: true };
+const NO_CHROME = { user: null, flash: null, explore: true, exploreInHeader: true };
 const usd = (minor: number) => formatMoney(minor, 'USD', { whole: true });
 
 /** "acme.com/pricing" from "https://acme.com/pricing": what the link shows. */

@@ -60,20 +60,26 @@ const FOUNDER_NOTE: { paragraphs: string[]; name: string; role: string } | null 
 
 /**
  * hoomuch.com's plans. Exact prices with currency and tax treatment; no "starting at",
- * strikethroughs or countdowns (design/brief.md §3.1.5).
+ * strikethroughs or countdowns (design/brief.md §3.1.5). What it costs today comes first, in the
+ * lead and in each row; the later price follows it. The connection count is
+ * MAX_CONNECTIONS_PER_USER (services/connections.ts, which a page can't import); a test checks it.
+ *
+ * Billing, when it's built, has to keep what this says: at $1,000 MRR and up, an account that
+ * doesn't pay keeps syncing, and its verified pages, badge and Explore listing stay up. Only the
+ * private dashboard is paid.
  */
 const PRICING: { plan: string; price: string; includes: string; link?: { href: string; label: string } }[] = [
   {
     plan: 'Under $1,000 MRR',
     price: 'Free',
     includes:
-      'Every provider and every feature on hoomuch.com, with no limit on connections. Free during the beta and after it.',
+      'Every provider and every feature on hoomuch.com, with up to 25 connections. Free during the beta and after it.',
   },
   {
     plan: '$1,000 MRR and up',
-    price: '$9 per month',
+    price: 'Free in the beta, then $9 per month',
     includes:
-      'Free while the beta lasts, with no card needed. After it, $9 per month or $90 per year, plus VAT or sales tax where it applies. We email you 30 days before the beta ends.',
+      'For the private dashboard, with every provider and up to 25 connections. After the beta, $9 per month or $90 per year, plus VAT or sales tax where it applies. We email you 30 days before the beta ends.',
   },
   {
     plan: 'Self-host',
@@ -114,6 +120,8 @@ export function LandingPage(props: LandingPageProps) {
       og={{ url: props.url, image: props.image }}
       jsonLd={homeJsonLd({ url: props.url, description: DESCRIPTION, freeOffer: props.signupOpen })}
       marketing
+      // Explore joins the header with the strip below, once enough products are on it.
+      exploreInHeader={Boolean(props.gallery)}
       footerNote={`Syncs ${props.cadence}, so you can check less often.`}
     >
       {/* 1. Hero. Seen once, on a first visit, so its lines rise in one after another (60ms
@@ -130,7 +138,9 @@ export function LandingPage(props: LandingPageProps) {
           </LinkButton>
         </div>
         {props.signupOpen ? (
-          <p className="rise-in mt-3 text-body text-muted-foreground [animation-delay:180ms]">No key handy? Start with demo data after you sign up.</p>
+          <p className="rise-in mt-3 text-body text-muted-foreground [animation-delay:180ms]">
+            Free to start, no card needed. No key handy? Try it with demo data.
+          </p>
         ) : null}
       </section>
 
@@ -177,6 +187,15 @@ export function LandingPage(props: LandingPageProps) {
             If a figure is incomplete, say a key is missing an optional permission, the dashboard tells you which and why.
           </AlsoItem>
         </ul>
+        {/* The action again, where the demo has just made its case: nobody scrolls back up for it. */}
+        {props.signupOpen ? (
+          <div className="mt-12 text-center">
+            <p className="text-lead text-muted-foreground">These are demo numbers. Yours take one key per store.</p>
+            <div className="mt-5">
+              <LinkButton href={cta.href}>{cta.label}</LinkButton>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {/* 1c. Real products, real numbers: founders who publish theirs (Explore). Only with enough of them. */}
@@ -270,6 +289,8 @@ export function LandingPage(props: LandingPageProps) {
           <p className={LEAD}>
             Publish a page with a product’s MRR, revenue and subscriptions, read from its stores and never typed in.
             Put the badge on your site or README, and get listed on Explore.
+            {/* hoomuch.com's plan, so only where anyone can sign up (like the pricing below). */}
+            {props.signupOpen ? ' Free at any MRR.' : null}
           </p>
           <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-lead">
             <TextLink href="/verified-revenue">How verified pages work</TextLink>
@@ -301,6 +322,12 @@ export function LandingPage(props: LandingPageProps) {
           <h2 id="pricing-title" className={H2}>
             Free until your MRR reaches $1,000.
           </h2>
+          <p className={LEAD}>
+            And free for everyone while the beta lasts, with no card needed.
+            {props.chrome.explore
+              ? ' Verified pages, the badge and Explore are free at any MRR. From $1,000 MRR, only the private dashboard is paid.'
+              : null}
+          </p>
           <dl className="mt-8 divide-y border-y text-lead">
             {PRICING.map((p) => (
               <div key={p.plan} className="grid gap-1 py-5 sm:grid-cols-[12rem_1fr] sm:gap-6">
@@ -329,6 +356,7 @@ export function LandingPage(props: LandingPageProps) {
           <h2 id="last-title" className={H2}>
             One number. Every store.
           </h2>
+          <p className={LEAD}>Read-only, open source, and free until your MRR reaches $1,000.</p>
           <div className="mt-6">
             <LinkButton href={cta.href} large>
               {cta.label}
