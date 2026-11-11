@@ -49,6 +49,10 @@ describe('robots.txt and llms.txt', () => {
     expect(txt).toContain('[Stripe](https://hoomuch.test/integrations/stripe)');
     expect(txt).toContain('(https://hoomuch.test/explore)');
     expect(txt).toContain('Pricing on hoomuch.test: free under $1,000 MRR');
+    expect(txt).toContain('Verified pages, the badge and Explore are free at any MRR.');
+    const noPages = await (await send('/llms.txt')).text();
+    expect(noPages).toContain('Pricing on hoomuch.test');
+    expect(noPages).not.toContain('free at any MRR'); // no public pages, so no promise about them
     // A private instance doesn't advertise hoomuch.com's plans or pages it doesn't have.
     const closed = await (await send('/llms.txt', { vars: { ALLOW_SIGNUP: 'false' } })).text();
     expect(closed).not.toContain('Pricing on');
@@ -129,6 +133,16 @@ describe('the marketing pages', () => {
   it('explain verified pages only where the instance has them', async () => {
     expect((await send('/verified-revenue')).status).toBe(404);
     expect((await send('/verified-revenue', { vars: PUBLIC })).status).toBe(200);
+  });
+
+  it('say publishing is free at any MRR only where sign-up is open', async () => {
+    const open = await htmlOf(await send('/verified-revenue', { vars: PUBLIC }));
+    expect(open).toContain('id="cost-title"');
+    expect(open).toContain('free to publish at any MRR');
+    expect(open).not.toContain('free until your MRR reaches $1,000'); // the page's own plan line replaces it
+    const closed = await htmlOf(await send('/verified-revenue', { vars: { ...PUBLIC, ALLOW_SIGNUP: 'false' } }));
+    expect(closed).not.toContain('id="cost-title"');
+    expect(closed).not.toContain('$1,000');
   });
 
   it('keep hoomuch.com’s price out where sign-up is closed', async () => {

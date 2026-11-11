@@ -35,7 +35,7 @@ const CHECKED = '11 November 2026';
 /** hoomuch's side of the rows every comparison shares. */
 const HOOMUCH = {
   price:
-    'Free under $1,000 MRR, and free for everyone during the beta. After it, $9 a month at $1,000 MRR and up. Self-hosting is free.',
+    'Free under $1,000 MRR, and free for everyone during the beta. After it, $9 a month for the private dashboard at $1,000 MRR and up. Verified pages and the badge are free at any MRR. Self-hosting is free.',
   stores:
     '12: Stripe, Paddle, Lemon Squeezy, Polar, RevenueCat, Chargebee, Dodo Payments, Gumroad, Adapty, Superwall, App Store Connect and Google Play.',
   access:

@@ -139,6 +139,7 @@ export function ExplorePage(props: ExplorePageProps) {
       user={null}
       flash={null}
       explore
+      exploreInHeader
       legal={props.legal}
       nav="explore"
       title={title}

@@ -40,7 +40,7 @@ export interface PublicProfilePageProps {
 }
 
 /** Rendered without the visitor's session; only served where public pages, Explore included, are on. */
-const NO_CHROME = { user: null, flash: null, explore: true };
+const NO_CHROME = { user: null, flash: null, explore: true, exploreInHeader: true };
 const usd = (minor: number) => formatMoney(minor, 'USD', { whole: true });
 /** The owner's links: quiet, with an icon, like a social profile's. */
 const OWNER_LINK = 'inline-flex min-w-0 items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground';

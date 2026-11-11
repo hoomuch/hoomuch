@@ -79,7 +79,7 @@ function Breadcrumbs(props: { trail: Crumb[] }) {
 }
 
 /** The one action, at the end of every page: sign up, or log in where sign-up is closed. */
-function CallToAction(props: { signupOpen: boolean; label?: string; next?: string }) {
+function CallToAction(props: { signupOpen: boolean; label?: string; next?: string; note?: string }) {
   const signedIn = useSignedIn();
   const next = props.next ? `?next=${encodeURIComponent(props.next)}` : '';
   const action = signedIn
@@ -94,7 +94,7 @@ function CallToAction(props: { signupOpen: boolean; label?: string; next?: strin
       </h2>
       <p className="mt-3 text-lead text-muted-foreground">
         {/* hoomuch.com's plan, so only where anyone can sign up (like the landing page's pricing). */}
-        {props.signupOpen ? 'Read-only, open source, and free until your MRR reaches $1,000.' : 'Read-only and open source.'}
+        {props.signupOpen ? (props.note ?? 'Read-only, open source, and free until your MRR reaches $1,000.') : 'Read-only and open source.'}
       </p>
       <div className="mt-6">
         <LinkButton href={action.href} large>
@@ -113,7 +113,8 @@ function Article(props: {
   h1: ReactNode;
   lead: ReactNode;
   children?: ReactNode;
-  cta?: { label?: string; next?: string };
+  /** `note` replaces the plan line under the heading, where sign-up is open. */
+  cta?: { label?: string; next?: string; note?: string };
 }) {
   const { page } = props;
   return (
@@ -132,7 +133,7 @@ function Article(props: {
           <div className={LEAD}>{props.lead}</div>
         </header>
         {props.children}
-        <CallToAction signupOpen={page.signupOpen} label={props.cta?.label} next={props.cta?.next} />
+        <CallToAction signupOpen={page.signupOpen} label={props.cta?.label} next={props.cta?.next} note={props.cta?.note} />
       </article>
     </Layout>
   );
@@ -366,7 +367,7 @@ export function VerifiedRevenuePage(props: VerifiedRevenuePageProps) {
           and worked out again after every sync. Nobody types the figures in, its founder included.
         </p>
       }
-      cta={{ label: 'Publish your page', next: '/share' }}
+      cta={{ label: 'Publish your page', next: '/share', note: 'Read-only, open source, and free to publish at any MRR.' }}
     >
       <Section id="shows-title" title="What a page shows">
         <Bullets
@@ -404,6 +405,15 @@ export function VerifiedRevenuePage(props: VerifiedRevenuePageProps) {
           from search.
         </p>
       </Section>
+      {/* hoomuch.com's plan, so only where anyone can sign up (like the landing page's pricing). */}
+      {props.signupOpen ? (
+        <Section id="cost-title" title="Free at any MRR">
+          <p>
+            The page, the badge and a place on Explore cost nothing, whatever the product makes. Only the private dashboard
+            is paid: free under $1,000 MRR, and $9 a month from there once the beta ends.
+          </p>
+        </Section>
+      ) : null}
       <Section id="private-title" title="Nothing is public until you publish">
         <p>
           You pick which connections make up a product, tick a confirmation and publish. Unpublishing takes the page and the
