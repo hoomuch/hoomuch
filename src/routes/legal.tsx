@@ -14,7 +14,8 @@ import { chrome, type AppContext } from './util';
 function renderLegal(c: AppContext, doc: 'privacy' | 'terms'): Response | Promise<Response> {
   const operator = legalOperator(c.env);
   if (!operator) return c.notFound();
-  return renderPage(c, 'legal', { chrome: chrome(c), doc, operator, host: new URL(c.req.url).host });
+  const url = new URL(c.req.url);
+  return renderPage(c, 'legal', { chrome: chrome(c), doc, operator, host: url.host, canonical: `${url.origin}/${doc}` });
 }
 
 export function registerLegalRoutes(app: Hono<AppEnv>): void {

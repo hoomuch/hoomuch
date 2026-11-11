@@ -12,7 +12,7 @@
  */
 
 import { ChevronDown, ChevronLeft, CircleAlert, CircleCheck, Info, TriangleAlert } from 'lucide-react';
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { Alert as CossAlert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button as CossButton } from '@/components/ui/button';
 import { Card as CossCard, CardAction, CardDescription, CardHeader, CardPanel, CardTitle } from '@/components/ui/card';
@@ -58,7 +58,14 @@ export function PageHeader(props: {
 }
 
 /**
- * coss Card as a <section>. `title` renders an <h2> in the card header.
+ * True inside the landing page's demo dashboard: the real components, shown as a preview under the
+ * demo's own <h2>. Card titles step down to <h3>, and rows don't link to app pages a visitor can't
+ * open (components/breakdown-table.tsx).
+ */
+export const PreviewContext = createContext(false);
+
+/**
+ * coss Card as a <section>. `title` renders an <h2> in the card header (<h3> in a preview).
  * Padding is set per side so coss's own rules still apply: the body drops its top padding under a
  * header, and the header tightens its bottom padding above a body.
  */
@@ -73,11 +80,12 @@ export function Card(props: {
   /** Extra classes for the card body. */
   bodyClassName?: string;
 }) {
+  const preview = useContext(PreviewContext);
   return (
     <CossCard render={<section id={props.id} />} className={cn('min-w-0', props.className)}>
       {props.title ? (
         <CardHeader className="px-5 pt-5 sm:px-6 sm:pt-6">
-          <CardTitle render={<h2 />} className="text-base">
+          <CardTitle render={preview ? <h3 /> : <h2 />} className="text-base">
             {props.title}
           </CardTitle>
           {props.description ? <CardDescription>{props.description}</CardDescription> : null}

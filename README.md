@@ -278,15 +278,16 @@ say) and publishes it:
   your own domain at `/media/<key>` (so the pages' `img-src 'self'` still holds), checked by their
   bytes (PNG, JPEG, WebP or GIF; ICO from a website; never SVG), at most 2 MB and 4096 pixels a side,
   and stored without their metadata (a phone photo's location and camera details are taken out). A
-  browser with JavaScript crops and scales an upload to 400 pixels before sending it. An account can
+  browser with JavaScript crops and scales an upload to 400 pixels before sending it, as WebP (or as
+  JPEG, where the browser can't write WebP and the image has no transparency). An account can
   make 20 changes in 15 minutes. They're deleted with the product or the account.
 
 - **`/explore`** lists the published products whose founders list them (a box on the publish form,
   ticked by default), by MRR, growth or newest, with a search that runs as you type, a provider
   filter, a Founders tab, and an "Add your product" button for visitors. A product
   shows there once it has MRR, a sync in the last 72 hours and 30 days of revenue history. Once six
-  products qualify, the landing page shows the six growing fastest. `/sitemap.xml` lists them all
-  for search engines: submit it in Google Search Console and Bing Webmaster Tools.
+  products qualify, the landing page shows the six growing fastest. `/sitemap.xml` lists them all,
+  each with its last sync as `<lastmod>` (see [Search engines and AI assistants](#search-engines-and-ai-assistants)).
 
 To take a product off Explore (spam, a name that breaks your rules), set `hidden_at`; its page and
 badge stay public, and its owner sees that it was taken off:
@@ -326,6 +327,21 @@ the business's lifetime revenue. Demo data and test-mode keys never count. Nothi
 owner ticks a confirmation and publishes, and unpublishing takes the page and badge down; a browser that loaded one in the last few
 minutes may still show its copy. Public pages and badges are rendered without the visitor's session,
 so the same response can be cached for everyone.
+
+### Search engines and AI assistants
+
+Every instance writes its own `/robots.txt`, `/llms.txt` and `/sitemap.xml`, with its own address:
+robots.txt keeps crawlers out of the app pages and points at the sitemap, llms.txt tells AI
+assistants what hoomuch is and how it counts, and the sitemap lists the landing page, the pages
+below and, with `PUBLIC_PAGES`, Explore and every product and founder on it. Submit the sitemap in
+Google Search Console and Bing Webmaster Tools.
+
+Alongside the landing page, every instance serves an integration page for each provider
+(`/integrations/<provider>`, what hoomuch reads from it and how it counts it), a guide to using
+RevenueCat with Stripe without counting a sale twice, `/self-host`, comparisons with Baremetrics,
+ChartMogul and TrustMRR (`/compare/…`), and with `PUBLIC_PAGES`, `/verified-revenue`. They render
+without the session, like the public pages, so they can be cached. Every page search engines index
+has one canonical address and JSON-LD structured data, built only from what the page shows.
 
 ## Updating
 

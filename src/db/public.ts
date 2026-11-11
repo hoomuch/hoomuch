@@ -571,6 +571,43 @@ export function exploreFacetsStatement(db: D1Database, now: number): D1PreparedS
     .bind(...exploreBinds(now));
 }
 
+/** Most URLs of each kind in /sitemap.xml: two kinds stay under a sitemap file's 50,000. */
+const SITEMAP_MAX = 24_000;
+
+export interface SitemapEntries {
+  /** Products on Explore, oldest first, with their last sync (epoch ms): the page's lastmod. */
+  products: { slug: string; synced_at: number }[];
+  /** Founders with a product on Explore, with their latest product sync. */
+  founders: { handle: string; synced_at: number }[];
+}
+
+/**
+ * Every product page and founder page a search engine should know about: the ones on Explore, which
+ * are exactly the indexable ones that are listed (lib/public-pages.ts searchIndexable). Unlike
+ * Explore's list, not capped at a screenful.
+ */
+export async function listSitemapEntries(db: D1Database, now: number): Promise<SitemapEntries> {
+  const binds = [...exploreBinds(now), SITEMAP_MAX];
+  const [products, founders] = await db.batch([
+    db
+      .prepare(
+        `SELECT p.slug, p.synced_at FROM public_products p JOIN public_profiles f ON f.user_id = p.user_id
+          WHERE ${ON_EXPLORE} ORDER BY p.published_at ASC, p.slug ASC LIMIT ?3`,
+      )
+      .bind(...binds),
+    db
+      .prepare(
+        `SELECT f.handle, MAX(p.synced_at) AS synced_at FROM public_products p JOIN public_profiles f ON f.user_id = p.user_id
+          WHERE ${ON_EXPLORE} GROUP BY f.user_id ORDER BY f.handle ASC LIMIT ?3`,
+      )
+      .bind(...binds),
+  ]);
+  return {
+    products: (products?.results ?? []) as unknown as SitemapEntries['products'],
+    founders: (founders?.results ?? []) as unknown as SitemapEntries['founders'],
+  };
+}
+
 /** How many products are on Explore (the landing page shows its strip from EXPLORE_LANDING_MIN). */
 export function exploreCountStatement(db: D1Database, now: number): D1PreparedStatement {
   return db

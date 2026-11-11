@@ -26,21 +26,25 @@ rules:
       - pattern-not-inside: useLayoutEffect(...)
       - pattern-not-inside: useCallback(...)
 
-  # The page payload, a JSON data block, is the one raw HTML hoomuch writes into a page.
+  # The page payload and the search engines' JSON-LD, both data blocks, are the only raw HTML
+  # hoomuch writes into a page.
   - id: raw-html
     languages: [typescript]
     severity: ERROR
     message: >-
       Pages don't write raw HTML: React escapes what it renders, and the CSP (script-src 'self')
       blocks inline scripts anyway. Render it as React elements instead. The page payload in
-      src/views/page-root.tsx, a <script type="application/json"> block, is the one exception
-      (CONTRIBUTING.md, "Forms work before hydration, scripts stay same-origin").
+      src/views/page-root.tsx, a <script type="application/json"> block, and the structured data in
+      src/views/layout.tsx, a <script type="application/ld+json"> block, are the exceptions: data
+      blocks, never executed, written with serializePayload (CONTRIBUTING.md, "Forms work before
+      hydration, scripts stay same-origin").
     paths:
       include: ['/src/views/', '/src/client/']
     pattern-either:
       - patterns:
           - pattern: <$EL dangerouslySetInnerHTML={...} />
           - pattern-not: <script type="application/json" dangerouslySetInnerHTML={...} />
+          - pattern-not: <script type="application/ld+json" dangerouslySetInnerHTML={...} />
       - pattern: $NODE.innerHTML = $V
       - pattern: $NODE.outerHTML = $V
       - pattern: $NODE.insertAdjacentHTML(...)

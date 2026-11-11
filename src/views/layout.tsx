@@ -21,7 +21,7 @@ import { Flash } from './components/flash';
 import { GitHubMark, Wordmark } from './components/icons';
 import { Owl } from './components/mascot';
 import { IconLinkButton, LinkButton } from './components/ui';
-import { PagePayloadScript } from './page-root';
+import { PagePayloadScript, serializePayload } from './page-root';
 import { useSignedIn } from './use-signed-in';
 
 type NavKey = 'dashboard' | 'connections' | 'transactions' | 'share' | 'settings' | 'explore';
@@ -66,6 +66,16 @@ export interface LayoutProps extends PageChrome {
    */
   og?: { url: string; image: string; title?: string; markdown?: string };
   /**
+   * The canonical URL of an indexable page without link previews (log in, sign up, the legal
+   * pages), so `?next=` and tracking variants fold into one. `og.url` wins when both are set.
+   */
+  canonical?: string;
+  /**
+   * Structured data for search engines (views/json-ld.ts), as a JSON-LD data block in <head>.
+   * Never on a noindex page: there's nothing for it to describe.
+   */
+  jsonLd?: object | null;
+  /**
    * Public, personality-allowed pages (landing, 404): a "Log in" link in the signed-out header,
    * the soft brand glow behind the top of the page and the footer with the sleeping owl. Never
    * set it on settings, forms, errors or pricing.
@@ -94,8 +104,6 @@ const APP_NAME = 'hoomuch';
  * If you run a modified version, point this at your fork.
  */
 const SOURCE_URL = 'https://github.com/hoomuch/hoomuch';
-/** Where a self-hoster starts: the README's deploy section. */
-const SELF_HOST_URL = `${SOURCE_URL}#deploy-to-cloudflare`;
 const ISSUES_URL = `${SOURCE_URL}/issues`;
 const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
 const DEFAULT_DESCRIPTION =
@@ -131,8 +139,11 @@ const NAV_LINK =
 export function Layout(props: LayoutProps) {
   const fullTitle = props.title ? `${props.title} · ${APP_NAME}` : APP_NAME;
   const hinted = useSignedIn();
-  // A page meant to be shared (it has a canonical URL) is where Log in comes back to.
-  const loginHref = props.og ? `/login?next=${encodeURIComponent(new URL(props.og.url).pathname)}` : '/login';
+  // A page meant to be shared (it has a canonical URL) is where Log in comes back to; the home page
+  // needn't be, as it sends a signed-in browser to its dashboard anyway.
+  const sharedPath = props.og ? new URL(props.og.url).pathname : '/';
+  const loginHref = sharedPath === '/' ? '/login' : `/login?next=${encodeURIComponent(sharedPath)}`;
+  const canonical = props.og?.url ?? props.canonical;
   const narrow = props.width === 'narrow';
   const user = props.user;
   return (
@@ -143,9 +154,9 @@ export function Layout(props: LayoutProps) {
         <title>{fullTitle}</title>
         <meta name="description" content={props.description ?? DEFAULT_DESCRIPTION} />
         {props.noindex ? <meta name="robots" content="noindex" /> : null}
+        {canonical ? <link rel="canonical" href={canonical} /> : null}
         {props.og ? (
           <>
-            <link rel="canonical" href={props.og.url} />
             {props.og.markdown ? <link rel="alternate" type="text/markdown" href={props.og.markdown} /> : null}
             <meta property="og:type" content="website" />
             <meta property="og:site_name" content={APP_NAME} />
@@ -157,6 +168,12 @@ export function Layout(props: LayoutProps) {
             <meta property="og:image:height" content="630" />
             <meta name="twitter:card" content="summary_large_image" />
           </>
+        ) : null}
+        {props.jsonLd && !props.noindex ? (
+          // A data block, never executed (CSP script-src doesn't apply), escaped like the page
+          // payload so owner-typed text can't close the element.
+          // nosemgrep: react-dangerouslysetinnerhtml -- JSON, not HTML: serializePayload escapes every <
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializePayload(props.jsonLd) }} />
         ) : null}
         {props.refresh ? (
           <meta
@@ -362,15 +379,16 @@ function MarketingFooter(props: { note?: string; signedIn: boolean; loginHref: s
               <li>
                 <FooterLink href="/#store">What we store</FooterLink>
               </li>
+              <li>
+                <FooterLink href="/integrations">Integrations</FooterLink>
+              </li>
               {props.explore ? (
                 <li>
                   <FooterLink href="/explore">Explore</FooterLink>
                 </li>
               ) : null}
               <li>
-                <FooterLink href={SELF_HOST_URL} external>
-                  Self-host
-                </FooterLink>
+                <FooterLink href="/self-host">Self-host</FooterLink>
               </li>
               <li>
                 {props.signedIn ? (

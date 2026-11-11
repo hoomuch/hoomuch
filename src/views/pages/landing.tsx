@@ -25,12 +25,18 @@ import { Owl } from '../components/mascot';
 import { ProductCard as PublicProductCard } from '../components/product-card';
 import { ProviderStrip } from '../components/provider-strip';
 import { RangeTabs } from '../components/range-tabs';
-import { Card, LinkButton } from '../components/ui';
+import { Card, LinkButton, PreviewContext, TextLink } from '../components/ui';
+import { COUNTING } from '../content/counting';
+import { homeJsonLd } from '../json-ld';
 import { Layout, type PageChrome } from '../layout';
 import { MovementCard, MrrCard, ProductCard, RevenueCard, SecondaryStats } from './dashboard';
 
 export interface LandingPageProps {
   chrome: PageChrome;
+  /** The home page's absolute URL (canonical, link previews, structured data). */
+  url: string;
+  /** Its link preview image, absolute (public/og/home.png). */
+  image: string;
   /** False when ALLOW_SIGNUP=false: the one action becomes "Log in". */
   signupOpen: boolean;
   /** Demo numbers for the live dashboard preview (view fixtures, dated to today). */
@@ -56,7 +62,7 @@ const FOUNDER_NOTE: { paragraphs: string[]; name: string; role: string } | null 
  * hoomuch.com's plans. Exact prices with currency and tax treatment; no "starting at",
  * strikethroughs or countdowns (design/brief.md §3.1.5).
  */
-const PRICING: { plan: string; price: string; includes: string }[] = [
+const PRICING: { plan: string; price: string; includes: string; link?: { href: string; label: string } }[] = [
   {
     plan: 'Under $1,000 MRR',
     price: 'Free',
@@ -74,12 +80,16 @@ const PRICING: { plan: string; price: string; includes: string }[] = [
     price: 'Free',
     includes:
       'Every feature, on your own Cloudflare account. Open source under AGPL-3.0. Cloudflare’s Workers Paid plan ($5 per month) is recommended for production.',
+    link: { href: '/self-host', label: 'How to self-host' },
   },
 ];
 
 const SECTION = 'mx-auto mt-28 max-w-[40rem] sm:mt-32';
 const H2 = 'font-heading text-section-sm sm:text-section';
 const LEAD = 'mt-3 text-pretty text-lead text-muted-foreground';
+
+const DESCRIPTION =
+  'Total MRR, ARR, subscriptions and trials from Stripe, Paddle, Lemon Squeezy, RevenueCat, the App Store, Google Play and more. Read-only and open source.';
 
 /** Every provider a visitor can connect (the demo isn't one). */
 const PROVIDER_COUNT = PROVIDERS.filter((p) => p.id !== 'demo').length;
@@ -100,7 +110,9 @@ export function LandingPage(props: LandingPageProps) {
       // What people search first, the brand last (the layout appends it): 61 characters in all,
       // so the result shows it whole. The description names the rest of the stack (design/brief.md §3.1).
       title="MRR dashboard for Stripe, RevenueCat and app stores"
-      description="Total MRR, ARR, subscriptions and trials from Stripe, Paddle, Lemon Squeezy, RevenueCat, the App Store, Google Play and more. Read-only and open source."
+      description={DESCRIPTION}
+      og={{ url: props.url, image: props.image }}
+      jsonLd={homeJsonLd({ url: props.url, description: DESCRIPTION, freeOffer: props.signupOpen })}
       marketing
       footerNote={`Syncs ${props.cadence}, so you can check less often.`}
     >
@@ -138,17 +150,20 @@ export function LandingPage(props: LandingPageProps) {
             <RangeTabs current={demo.rangeDays} basePath="/" anchor="demo" keep={revenueVariant === 'line' ? 'revenue=line' : undefined} />
           </div>
           {/* Same pieces, same order as /dashboard, up to the calendar (it has no demo month):
-              the list under the frame names it instead. */}
-          <MrrCard data={demo} />
-          <SecondaryStats data={demo} className="mt-3 sm:mt-4" />
-          <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-4">
-            <MovementCard data={demo} />
-            <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
-              <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
-            </Card>
-            <ProductCard data={demo} />
-            <RevenueCard data={demo} variant={props.revenueVariant} basePath="/" onVariantChange={setRevenueVariant} />
-          </div>
+              the list under the frame names it instead. As a preview: card titles sit under the
+              demo's heading, and rows don't link to app pages. */}
+          <PreviewContext.Provider value>
+            <MrrCard data={demo} />
+            <SecondaryStats data={demo} className="mt-3 sm:mt-4" />
+            <div className="mt-3 grid gap-3 sm:mt-4 sm:gap-4">
+              <MovementCard data={demo} />
+              <Card title="By connection" bodyClassName="px-2 pb-3 sm:px-3 sm:pb-4">
+                <BreakdownTable rows={demo.breakdown} currency={demo.currency} rangeDays={demo.rangeDays} />
+              </Card>
+              <ProductCard data={demo} />
+              <RevenueCard data={demo} variant={props.revenueVariant} basePath="/" onVariantChange={setRevenueVariant} />
+            </div>
+          </PreviewContext.Provider>
         </Frame>
         {/* What the demo can't show. Literal: each line is a screen or a behaviour that exists. */}
         <ul className="mx-auto mt-10 grid max-w-[48rem] gap-6 text-body sm:grid-cols-3 sm:gap-8" aria-label="Also in hoomuch">
@@ -178,7 +193,7 @@ export function LandingPage(props: LandingPageProps) {
         </p>
         <ol className="mt-8 space-y-5 text-lead">
           <SetupStep n={1} title="Pick a store.">
-            Any of the {PROVIDER_COUNT} above. Add one for each place you sell.
+            Any of the <TextLink href="/integrations">{PROVIDER_COUNT} above</TextLink>. Add one for each place you sell.
           </SetupStep>
           <SetupStep n={2} title="Make the narrowest key it offers.">
             The connect form shows where to make it and exactly which read permissions to grant. Lemon{NB}Squeezy,
@@ -222,10 +237,46 @@ export function LandingPage(props: LandingPageProps) {
         </div>
         <p className="mt-8 text-lead text-muted-foreground">
           Syncs run {props.cadence}, and about a minute after a new subscription or refund where you turn on webhooks.
-          Currencies convert at the European Central Bank’s daily rates. Deleting your account
-          deletes your keys and every synced number, immediately.
+          Currencies convert at daily rates: the European Central Bank’s where it publishes one, other central banks’
+          otherwise. Deleting your account deletes your keys and every synced number, immediately.
         </p>
       </section>
+
+      {/* 3a. How the numbers are counted (literal): the definitions, in one place. */}
+      <section id="mrr" aria-labelledby="mrr-title" className={`${SECTION} scroll-mt-6`}>
+        <h2 id="mrr-title" className={H2}>
+          How hoomuch counts MRR.
+        </h2>
+        <p className={LEAD}>
+          The same rules for every store, so the total adds up. Each store’s details are on its{' '}
+          <TextLink href="/integrations">integration page</TextLink>.
+        </p>
+        <dl className="mt-8 divide-y border-y text-lead">
+          {COUNTING.map((c) => (
+            <div key={c.term} className="grid gap-1 py-5 sm:grid-cols-[12rem_1fr] sm:gap-6">
+              <dt className="font-semibold">{c.term}</dt>
+              <dd className="text-pretty text-muted-foreground">{c.rule}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {/* 3b. Public pages, where the instance has them: the numbers, shown to anyone. */}
+      {props.chrome.explore ? (
+        <section aria-labelledby="verified-title" className={SECTION}>
+          <h2 id="verified-title" className={H2}>
+            Show your MRR, verified.
+          </h2>
+          <p className={LEAD}>
+            Publish a page with a product’s MRR, revenue and subscriptions, read from its stores and never typed in.
+            Put the badge on your site or README, and get listed on Explore.
+          </p>
+          <p className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-lead">
+            <TextLink href="/verified-revenue">How verified pages work</TextLink>
+            <TextLink href="/explore">See Explore</TextLink>
+          </p>
+        </section>
+      ) : null}
 
       {/* 4. Founder note: only with real content */}
       {FOUNDER_NOTE ? (
@@ -257,7 +308,15 @@ export function LandingPage(props: LandingPageProps) {
                   {p.plan}
                   <span className="block font-normal tabular-nums">{p.price}</span>
                 </dt>
-                <dd className="text-pretty text-muted-foreground">{p.includes}</dd>
+                <dd className="text-pretty text-muted-foreground">
+                  {p.includes}
+                  {p.link ? (
+                    <>
+                      {' '}
+                      <TextLink href={p.link.href}>{p.link.label}</TextLink>
+                    </>
+                  ) : null}
+                </dd>
               </div>
             ))}
           </dl>

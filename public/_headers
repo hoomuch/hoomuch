@@ -6,3 +6,16 @@
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Cross-Origin-Resource-Policy: same-origin
+
+# Long caching where a file can't change under its name. Chunk names carry a content hash
+# (scripts/build-client.mjs), so a chunk is never edited, only replaced. Fonts, the mascot and the
+# link previews change rarely and keep their names, so they get a day and are revalidated after.
+# entry.js and app.css keep the default (revalidate every time): their names never change.
+/client/chunks/*
+  Cache-Control: public, max-age=31536000, immutable
+/fonts/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/mascot/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+/og/*
+  Cache-Control: public, max-age=86400

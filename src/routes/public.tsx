@@ -19,6 +19,7 @@ import {
   getPublishedProfileByHandle,
   insertProduct,
   listProducts,
+  listSitemapEntries,
   saveProfile,
   setListed,
   setPublished,
@@ -95,6 +96,7 @@ import { uploadLimit } from './media';
 import { refreshProductStats } from '../services/public-pages';
 import { isProviderId } from '../providers/types';
 import { badgeSvg } from '../views/badge';
+import { marketingPaths } from './marketing';
 import { productMarkdown } from '../views/markdown';
 import type {
   DetailsFormErrors,
@@ -331,18 +333,31 @@ export function registerPublicRoutes(app: Hono<AppEnv>): void {
     return c.json(data);
   });
 
-  // Every page on Explore and its founder's, for search engines (submit it in their webmaster tools).
-  app.get('/sitemap.xml', enabled, async (c) => {
+  // Every page a search engine should index, for their webmaster tools and robots.txt: the
+  // marketing pages on every instance, and where public pages are on, Explore and each product and
+  // founder on it, dated by their last sync (the figures change with every one).
+  app.get('/sitemap.xml', async (c) => {
     const origin = new URL(c.req.url).origin;
-    const [products, founders] = await Promise.all([
-      getExplore(c.env.DB, { tab: 'products', sort: 'new', provider: null }),
-      getExplore(c.env.DB, { tab: 'founders', sort: 'mrr', provider: null }),
-    ]);
-    const paths = ['/', '/explore', ...products.items.map((i) => `/p/${i.slug}`), ...founders.founders.map((f) => `/u/${f.handle}`)];
-    // Slugs and handles are [a-z0-9_-] (lib/public-pages.ts): nothing in a path needs escaping.
+    const on = publicPagesEnabled(c.env);
+    const entries = on ? await listSitemapEntries(c.env.DB, Date.now()) : { products: [], founders: [] };
+    const urls: Array<{ path: string; synced?: number }> = [
+      { path: '/' },
+      ...(on ? [{ path: '/explore' }] : []),
+      ...marketingPaths(c).map((path) => ({ path })),
+      ...(legalOperator(c.env) ? [{ path: '/privacy' }, { path: '/terms' }] : []),
+      ...entries.products.map((p) => ({ path: `/p/${p.slug}`, synced: p.synced_at })),
+      ...entries.founders.map((f) => ({ path: `/u/${f.handle}`, synced: f.synced_at })),
+    ];
+    // Slugs, handles and the marketing paths are [a-z0-9_-] (lib/public-pages.ts): nothing needs escaping.
     const xml =
       '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
-      paths.map((p) => `  <url><loc>${origin}${p}</loc></url>\n`).join('') +
+      urls
+        .map((u) =>
+          u.synced
+            ? `  <url><loc>${origin}${u.path}</loc><lastmod>${new Date(u.synced).toISOString()}</lastmod></url>\n`
+            : `  <url><loc>${origin}${u.path}</loc></url>\n`,
+        )
+        .join('') +
       '</urlset>\n';
     return c.body(xml, 200, { 'Content-Type': 'application/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
   });

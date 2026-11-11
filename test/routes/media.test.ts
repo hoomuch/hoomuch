@@ -198,9 +198,11 @@ describe('/media/<key>', () => {
   });
 
   it('is a 404 for an unknown key, anything that isn’t one of ours, or without the bucket', async () => {
-    for (const path of [`/media/${'a'.repeat(32)}.png`, '/media/..%2Fx.png', '/media/x.svg', '/media/']) {
+    for (const path of [`/media/${'a'.repeat(32)}.png`, '/media/..%2Fx.png', '/media/x.svg', '/media']) {
       expect((await send('GET', path, { token: null })).status).toBe(404);
     }
+    // A trailing slash goes to the address without one (src/index.tsx), which is the 404 above.
+    expect((await send('GET', '/media/', { token: null })).headers.get('location')).toBe('https://hoomuch.test/media');
     await withProfile();
     await send('POST', '/share/profile/photo', { file: { field: 'photo', bytes: pngBytes() } });
     const off = testEnv(t.db, { PUBLIC_PAGES: 'true' });
@@ -322,16 +324,30 @@ describe('a product’s logo', () => {
   });
 
   it('comes from the App Store listing when there’s no website', async () => {
-    // Apple's lookup API, then the artwork it names (the fake matches on the path).
+    // Apple's lookup API, then the artwork it names, asked for at upload size (the fake matches on the path).
     useWeb([
       route('/lookup', { json: { resultCount: 1, results: [{ artworkUrl512: 'https://is1-ssl.mzstatic.com/image/thumb/icon/512x512bb.png' }] } }, { query: { id: '1234567890' } }),
-      route('/image/thumb/icon/512x512bb.png', { bytes: pngBytes(512, 512), headers: { 'content-type': 'image/png' } }),
+      route('/image/thumb/icon/400x400bb.jpg', { bytes: pngBytes(400, 400), headers: { 'content-type': 'image/png' } }),
     ]);
     await withProduct({ app_store: 'https://apps.apple.com/app/id1234567890' });
     expect(product().logo_source).toBe('site');
-    expect(r2.objects.get(product().logo_key!)?.bytes).toEqual(pngBytes(512, 512));
+    expect(r2.objects.get(product().logo_key!)?.bytes).toEqual(pngBytes(400, 400));
     expect(calls.map((c) => c.url)).toEqual([
       'https://itunes.apple.com/lookup?id=1234567890',
+      'https://is1-ssl.mzstatic.com/image/thumb/icon/400x400bb.jpg',
+    ]);
+  });
+
+  it('falls back to the App Store artwork as named when the smaller one isn’t there', async () => {
+    useWeb([
+      route('/lookup', { json: { resultCount: 1, results: [{ artworkUrl512: 'https://is1-ssl.mzstatic.com/image/thumb/icon/512x512bb.png' }] } }, { query: { id: '1234567890' } }),
+      route('/image/thumb/icon/400x400bb.jpg', { status: 404 }),
+      route('/image/thumb/icon/512x512bb.png', { bytes: pngBytes(512, 512), headers: { 'content-type': 'image/png' } }),
+    ]);
+    await withProduct({ app_store: 'https://apps.apple.com/app/id1234567890' });
+    expect(r2.objects.get(product().logo_key!)?.bytes).toEqual(pngBytes(512, 512));
+    expect(calls.map((c) => c.url).slice(1)).toEqual([
+      'https://is1-ssl.mzstatic.com/image/thumb/icon/400x400bb.jpg',
       'https://is1-ssl.mzstatic.com/image/thumb/icon/512x512bb.png',
     ]);
   });

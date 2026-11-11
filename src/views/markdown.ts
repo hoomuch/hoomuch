@@ -78,7 +78,8 @@ export function productMarkdown(p: {
     `| Active subscriptions | ${formatNumber(stats.activeSubscriptions.value)} |`,
     '',
     `- Sources: ${sources} (read-only API keys)`,
-    `- Data since: ${stats.since ?? 'unknown'}`,
+    // The first daily snapshot: how far back MRR and subscriptions are verified (revenue has its own line above).
+    `- MRR history since: ${stats.since ?? 'unknown'}`,
     `- Last checked: ${stats.syncedAt === null ? 'not yet' : new Date(stats.syncedAt).toISOString()}`,
     ...(stats.estimated ? ["- Some figures are estimates: a key doesn't have every read permission."] : []),
     ...(stats.revenuePartial ? ['- Revenue leaves out a source that reports no daily history.'] : []),
@@ -99,6 +100,12 @@ export function productMarkdown(p: {
     ...(product.founded ? [`- Founded: ${formatFounded(product.founded)}`] : []),
     ...(countryName(product.country) ? [`- Country: ${countryName(product.country)}`] : []),
     ...(product.details ? detailLines(product.details) : []),
+    '',
+    '## About these figures',
+    '',
+    'They come from hoomuch, an open-source, read-only revenue dashboard, and are worked out again after every sync.',
+    'MRR is every active, paid subscription brought to a month, without trials; a subscription set to cancel counts',
+    `until it ends. Revenue is what was charged, minus refunds. How each figure is counted: ${origin}/#mrr`,
     '',
   ];
   return lines.join('\n');

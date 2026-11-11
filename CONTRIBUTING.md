@@ -148,7 +148,8 @@ src/
   data/              read models for the dashboard, transactions and connection detail
   services/          connection use-cases: create, rotate key, sync now, delete; provider webhooks; the email digest
   routes/            HTTP handlers (Post/Redirect/Get), and /webhooks for providers; pages render with views/render.tsx
-  views/             layout, pages, hoomuch components, charts (React)
+  views/             layout, pages, hoomuch components, charts (React), structured data (json-ld.ts),
+                     and the marketing pages' copy (content/)
   components/ui/     coss ui components (copied in with the shadcn CLI; components.json)
   client/entry.tsx   browser entry: hydrates the page the server rendered
   styles/app.css     Tailwind theme: coss tokens with hoomuch's palette, Geist
@@ -321,7 +322,9 @@ references.
    with any personal data removed) and write `test/providers/<id>.test.ts`. Cover MRR maths, paging and
    cursors, error mapping (401, 403, 404, 429, 5xx), and use `expectNoSecretsInLogs`.
 6. **Docs.** Add the provider to the table in [README.md](README.md), its MRR and revenue rules to
-   SPEC §6, and any edge cases to *Known limitations*.
+   SPEC §6, and any edge cases to *Known limitations*. Give it an integration guide in
+   `src/views/content/integrations.ts`, which becomes its `/integrations/<slug>` page: the same
+   rules in plain words, true to the adapter.
 
 [SPEC.md](SPEC.md) is written in Turkish. It's the source of truth for metric definitions; a
 translator or an LLM handles it fine, and questions in issues are welcome.

@@ -22,7 +22,8 @@ import type { ProviderId } from '../../providers/types';
 import { Avatar, ProductTile } from '../components/avatar';
 import { DeltaBadge } from '../components/kpi';
 import { ProviderLogo } from '../components/provider-logos';
-import { LinkButton, ScrollTable, SegmentedLinks, TableRowHeader } from '../components/ui';
+import { LinkButton, ScrollTable, SegmentedLinks, TableRowHeader, TextLink } from '../components/ui';
+import { exploreJsonLd as exploreLd } from '../json-ld';
 import { Layout } from '../layout';
 import { useSignedIn } from '../use-signed-in';
 import { ShowYourOwn } from './public-product';
@@ -110,6 +111,19 @@ function useLiveSearch(initial: ExploreData) {
   return { data, query, setQuery, busy, submit };
 }
 
+const EXPLORE_DESCRIPTION =
+  'MRR and revenue of indie products, read from Stripe, Paddle, RevenueCat, the app stores and more by hoomuch. Nothing here is typed in.';
+
+/**
+ * Structured data for the view a search engine crawls: products by MRR, unfiltered. Built from the
+ * server's props, not the live search, so it stays put while a visitor types.
+ */
+function exploreJsonLd(props: ExplorePageProps) {
+  const d = props.data;
+  if (d.tab !== 'products' || d.q || d.provider || d.sort !== 'mrr') return null;
+  return exploreLd({ url: props.url, title: 'Products with verified revenue', description: EXPLORE_DESCRIPTION, items: d.items });
+}
+
 export function ExplorePage(props: ExplorePageProps) {
   const search = useLiveSearch(props.data);
   const { data } = search;
@@ -128,14 +142,16 @@ export function ExplorePage(props: ExplorePageProps) {
       legal={props.legal}
       nav="explore"
       title={title}
-      description="MRR and revenue of indie products, read from Stripe, Paddle, RevenueCat, the app stores and more by hoomuch. Nothing here is typed in."
+      description={EXPLORE_DESCRIPTION}
       og={{ url: props.url, image: props.image, title }}
+      jsonLd={exploreJsonLd(props)}
       marketing
     >
       <header className="mb-8">
-        <h1 className="font-heading text-hero-sm">Explore</h1>
+        <h1 className="font-heading text-hero-sm">{title}</h1>
         <p className="mt-2 max-w-[34rem] text-lead text-pretty text-muted-foreground">
-          Products and their founders, with revenue hoomuch reads from their payment providers. Nothing here is typed in.
+          Products and their founders, with revenue hoomuch reads from their payment providers through read-only keys.
+          Nothing here is typed in. <TextLink href="/verified-revenue">How verification works</TextLink>
         </p>
       </header>
 

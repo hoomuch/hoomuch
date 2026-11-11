@@ -21,6 +21,8 @@ export interface LegalPageProps {
   operator: LegalOperator;
   /** This instance's host, e.g. "hoomuch.com". */
   host: string;
+  /** The page's absolute URL, for search engines. */
+  canonical?: string;
 }
 
 /** When either text last changed. */
@@ -39,6 +41,7 @@ export function LegalPage(props: LegalPageProps) {
           ? `How ${props.host} handles personal data: what is collected, why, who processes it, how long it is kept and your rights.`
           : `The terms for using ${props.host}: accounts, read-only connections, public pages, acceptable use and liability.`
       }
+      canonical={props.canonical}
       marketing
       quiet
     >

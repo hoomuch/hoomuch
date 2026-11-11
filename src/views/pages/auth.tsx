@@ -20,6 +20,8 @@ export interface AuthPageProps {
   signupOpen: boolean;
   /** Turnstile's public site key when the instance turns it on; the form then shows the widget. */
   turnstileSiteKey?: string | null;
+  /** The page's own URL without `?next=`, for search engines (only on the GET). */
+  canonical?: string;
 }
 
 function withNext(path: string, next: string | null | undefined): string {
@@ -61,7 +63,7 @@ export function AuthPage(props: AuthPageProps) {
     : 'Log in to see your MRR, ARR, subscriptions and revenue from every store you sell in, on one dashboard.';
 
   return (
-    <Layout {...props.chrome} title={pageTitle} description={description} width="narrow">
+    <Layout {...props.chrome} title={pageTitle} description={description} canonical={props.canonical} width="narrow">
       <Card>
         <h1 className={isSignup ? 'font-heading text-title' : 'mb-6 font-heading text-title'}>{title}</h1>
         {isSignup ? <p className="mt-1.5 mb-6 text-body text-muted-foreground">Two fields, then your MRR.</p> : null}
