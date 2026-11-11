@@ -124,10 +124,69 @@ describe('the marketing pages', () => {
   it('say where another product’s details come from, and when they were read', async () => {
     for (const slug of ['baremetrics-alternative', 'chartmogul-alternative', 'trustmrr-alternative']) {
       const html = await htmlOf(await send(`/compare/${slug}`));
+      // Open source is said on every comparison: by the action, in its own section and in the table.
+      expect(html).toContain('Open source, so you can check it.');
+      expect(html).toContain('src="/mascot/weighing.png"'); // the owl with the scale, beside the heading
+      expect(html).toContain('src="/mascot/inspecting.png"'); // and with the magnifying glass, behind the open-source card
+      expect(html.match(/href="https:\/\/github\.com\/hoomuch\/hoomuch"/g)?.length).toBeGreaterThanOrEqual(3);
+      expect(html).toMatch(/Is (<!-- -->)?\w+(<!-- -->)? open source\?/);
       expect(html).toContain('checked 11 November 2026');
       expect(html).toContain('fits better');
     }
     expect((await send('/compare/nope')).status).toBe(404);
+  });
+
+  it('answer a comparison in the order it’s asked: who each fits, the table, the same job, the questions', async () => {
+    const html = await htmlOf(await send('/compare/trustmrr-alternative'));
+    const at = (text: string) => {
+      const i = html.indexOf(text);
+      expect(i, text).toBeGreaterThan(-1);
+      return i;
+    };
+    expect(at('When hoomuch fits better')).toBeLessThan(at('id="open-source"'));
+    expect(at('id="open-source"')).toBeLessThan(at('id="side-by-side"'));
+    expect(at('id="side-by-side"')).toBeLessThan(at('id="in-practice"'));
+    expect(at('id="in-practice"')).toBeLessThan(at('id="switching"'));
+    expect(at('id="switching"')).toBeLessThan(at('id="questions"'));
+    for (const id of ['open-source', 'side-by-side', 'in-practice', 'switching', 'questions']) expect(html).toContain(`href="#${id}"`);
+    expect(html).toContain('href="/#demo"'); // the product, a click away, before any sign-up
+    // The stores as logos: every one for hoomuch, and the ones the other product doesn't list said so.
+    expect(html).toMatch(/12(<!-- -->)? of (<!-- -->)?12/);
+    expect(html).toMatch(/8(<!-- -->)? of (<!-- -->)?12/);
+    expect(html).toContain('Google Play, not listed');
+    expect(html).not.toContain('Stripe, not listed');
+    expect(html).toContain('In TrustMRR');
+    expect(html).toContain('Do I have to make my revenue public to use hoomuch?');
+    // The other comparisons, and never the page's own.
+    expect(html).toContain('href="/compare/baremetrics-alternative"');
+    expect(html).toContain('href="/compare/chartmogul-alternative"');
+    expect(html).not.toContain('href="/compare/trustmrr-alternative"');
+    // A page the instance doesn't have isn't linked: verified pages need PUBLIC_PAGES.
+    expect(html).not.toContain('href="/verified-revenue"');
+    expect(await htmlOf(await send('/compare/trustmrr-alternative', { vars: PUBLIC }))).toContain('href="/verified-revenue"');
+    // Sign-up closed: no promise about hoomuch.com's plan beside the action.
+    expect(html).toContain('Free to start, no card needed.');
+    expect(await htmlOf(await send('/compare/trustmrr-alternative', { vars: { ALLOW_SIGNUP: 'false' } }))).not.toContain('Free to start');
+  });
+
+  it('open with the action a searcher came for, and keep the ways off the page after it', async () => {
+    // An integration page names its store in the action, twice: under the lead and at the end.
+    const stripe = await htmlOf(await send('/integrations/stripe'));
+    expect(stripe.match(/See your (<!-- -->)?Stripe(<!-- -->)? MRR/g)).toHaveLength(2);
+    expect(stripe).toContain('href="/#demo"');
+    expect(stripe).toContain('Free to start, no card needed.');
+    // Connecting comes before the counting rules, and the other stores after the last action.
+    expect(stripe.indexOf('id="connect-title"')).toBeLessThan(stripe.indexOf('id="mrr-title"'));
+    expect(stripe.indexOf('id="cta-title"')).toBeLessThan(stripe.indexOf('id="others-title"'));
+    expect(await htmlOf(await send('/integrations/stripe', { vars: { ALLOW_SIGNUP: 'false' } }))).not.toContain('Free to start');
+    // Someone on the self-host page came to run it: deploying is a button there.
+    const selfHost = await htmlOf(await send('/self-host'));
+    expect(selfHost.indexOf('Deploy to Cloudflare')).toBeLessThan(selfHost.indexOf('id="oneclick-title"'));
+    // The verified revenue page shows an example, said to be one, before describing a page.
+    const verified = await htmlOf(await send('/verified-revenue', { vars: PUBLIC }));
+    expect(verified).toContain('href="#example"');
+    expect(verified).toContain('An example with demo figures.');
+    expect(verified.indexOf('id="example"')).toBeLessThan(verified.indexOf('id="shows-title"'));
   });
 
   it('explain verified pages only where the instance has them', async () => {

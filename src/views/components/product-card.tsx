@@ -21,7 +21,8 @@ export interface CardFigure {
 }
 
 export function ProductCard(props: {
-  href: string;
+  /** The product's page. Without one the card is a plain box: an example, not a link. */
+  href?: string;
   name: string;
   tagline: string | null;
   /** The logo's URL (lib/media.ts); initials without one. */
@@ -34,45 +35,50 @@ export function ProductCard(props: {
   /** A short note at the bottom right, e.g. "Not updated recently". */
   note?: ReactNode;
 }) {
-  return (
-    <a href={props.href} className="block h-full rounded-2xl transition-colors hover:bg-accent/40">
-      <CossCard className="h-full min-w-0 bg-transparent">
-        <CardPanel className="flex h-full flex-col gap-4 p-5 sm:p-6">
-          <div className="flex min-w-0 items-start gap-3">
-            <ProductTile name={props.name} src={props.logo} className="size-10" />
-            <div className="min-w-0">
-              <p className="font-semibold wrap-break-word">{props.name}</p>
-              {props.tagline ? <p className="text-body text-muted-foreground wrap-break-word">{props.tagline}</p> : null}
-            </div>
+  const card = (
+    <CossCard className="h-full min-w-0 bg-transparent">
+      <CardPanel className="flex h-full flex-col gap-4 p-5 sm:p-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <ProductTile name={props.name} src={props.logo} className="size-10" />
+          <div className="min-w-0">
+            <p className="font-semibold wrap-break-word">{props.name}</p>
+            {props.tagline ? <p className="text-body text-muted-foreground wrap-break-word">{props.tagline}</p> : null}
           </div>
-          <dl className={`mt-auto grid gap-3 border-t pt-4 ${props.figures.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-            {props.figures.map((f) => (
-              <div key={f.label} className="min-w-0">
-                <dt className="text-caption text-muted-foreground">{f.label}</dt>
-                <dd className="flex flex-wrap items-baseline gap-x-1.5 font-semibold tabular-nums">
-                  <span className="wrap-anywhere">{f.value}</span>
-                  {/* The size on a wrapper: tailwind-merge would read a text-caption class on the badge as
-                      a colour and drop the badge's own (green, red). */}
-                  {f.deltaPct !== undefined ? (
-                    <span className="text-caption">
-                      <DeltaBadge pct={f.deltaPct} label="vs. 30 days ago" />
-                    </span>
-                  ) : null}
-                </dd>
-              </div>
+        </div>
+        <dl className={`mt-auto grid gap-3 border-t pt-4 ${props.figures.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          {props.figures.map((f) => (
+            <div key={f.label} className="min-w-0">
+              <dt className="text-caption text-muted-foreground">{f.label}</dt>
+              <dd className="flex flex-wrap items-baseline gap-x-1.5 font-semibold tabular-nums">
+                <span className="wrap-anywhere">{f.value}</span>
+                {/* The size on a wrapper: tailwind-merge would read a text-caption class on the badge as
+                    a colour and drop the badge's own (green, red). */}
+                {f.deltaPct !== undefined ? (
+                  <span className="text-caption">
+                    <DeltaBadge pct={f.deltaPct} label="vs. 30 days ago" />
+                  </span>
+                ) : null}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
+          <span className="flex gap-1.5" aria-hidden="true">
+            {props.providers.map((p) => (
+              <ProviderLogo key={p} provider={p} />
             ))}
-          </dl>
-          <p className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
-            <span className="flex gap-1.5" aria-hidden="true">
-              {props.providers.map((p) => (
-                <ProviderLogo key={p} provider={p} />
-              ))}
-            </span>
-            {/* Who makes it, or a note: quieter than the name and tagline above. */}
-            <span className="min-w-0 truncate">{props.note ?? props.byline ?? null}</span>
-          </p>
-        </CardPanel>
-      </CossCard>
+          </span>
+          {/* Who makes it, or a note: quieter than the name and tagline above. */}
+          <span className="min-w-0 truncate">{props.note ?? props.byline ?? null}</span>
+        </p>
+      </CardPanel>
+    </CossCard>
+  );
+  return props.href ? (
+    <a href={props.href} className="block h-full rounded-2xl transition-colors hover:bg-accent/40">
+      {card}
     </a>
+  ) : (
+    card
   );
 }

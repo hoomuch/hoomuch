@@ -2,9 +2,11 @@
  * Owl: the mascot, a small owl whose eyes are the logo's two rings. Owner: Experience (design).
  *
  * Rules (design/brief.md §4 Mascot):
- * - Eight fixed poses, no others. It never speaks: no bubbles, no captions in its voice.
+ * - Ten fixed poses, no others. It never speaks: no bubbles, no captions in its voice.
  * - Personality zones only: landing hero + footer, empty states, the first sync (running and
- *   done), the dashboard's MRR card while nothing in it is a warning, 404.
+ *   done), the dashboard's MRR card while nothing in it is a warning, 404, and beside a
+ *   comparison page's heading (`weighing`: it holds a balance scale) and, faint, behind its
+ *   open-source card (`inspecting`: it holds a magnifying glass).
  *   Never in pricing, settings, connect forms, alerts, errors, 500 or destructive confirmations.
  * - Always decorative: alt="" and nothing depends on it. It never moves on a screen seen daily.
  *
@@ -16,7 +18,7 @@
 
 import { cn } from '../../lib/utils';
 
-export type OwlPose = 'perched' | 'dozing' | 'cheer' | 'lost' | 'asleep' | 'proud' | 'flag' | 'counting';
+export type OwlPose = 'perched' | 'dozing' | 'cheer' | 'lost' | 'asleep' | 'proud' | 'flag' | 'counting' | 'weighing' | 'inspecting';
 
 /** Display size in CSS px per pose; the PNGs are exported at exactly 2× this. */
 export const OWL_SIZE: Record<OwlPose, number> = {
@@ -28,6 +30,8 @@ export const OWL_SIZE: Record<OwlPose, number> = {
   proud: 80,
   flag: 80,
   counting: 80,
+  weighing: 200,
+  inspecting: 320,
 };
 
 export function Owl(props: {
